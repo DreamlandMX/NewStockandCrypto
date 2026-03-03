@@ -4,6 +4,16 @@
 
 const API_BASE_URL = `${window.location.origin}/api`;
 
+function buildQueryString(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === '') return;
+        query.set(key, String(value));
+    });
+    const encoded = query.toString();
+    return encoded ? `?${encoded}` : '';
+}
+
 // API Client
 const api = {
     // Base request method
@@ -89,13 +99,33 @@ const api = {
     },
 
     // Get CN equity prices
-    async getCNEquityPrices() {
-        return this.get('/cn-equity/prices');
+    async getCNEquityPrices(params = {}) {
+        return this.get(`/cn-equity/prices${buildQueryString(params)}`);
     },
 
-    // Get CN equity predictions
+    // Get CN equity legacy predictions alias
     async getCNEquityPredictions(code) {
-        return this.get(`/cn-equity/predictions?code=${code}`);
+        return this.get(`/cn-equity/predictions${buildQueryString({ code })}`);
+    },
+
+    // Get CN index prediction
+    async getCNEquityIndexPrediction(indexCode = '000001.SH') {
+        return this.get(`/cn-equity/prediction/${encodeURIComponent(indexCode)}`);
+    },
+
+    // Get single CN stock prediction
+    async getCNEquityStockPrediction(stockCode) {
+        return this.get(`/cn-equity/stock/${encodeURIComponent(stockCode)}`);
+    },
+
+    // Get CSI300 ranking
+    async getCNEquityRanking(top = 20) {
+        return this.get(`/cn-equity/csi300/ranking${buildQueryString({ top })}`);
+    },
+
+    // Get paginated CSI300 quotes
+    async getCNEquityQuotes(params = {}) {
+        return this.get(`/cn-equity/csi300/quotes${buildQueryString(params)}`);
     },
 
     // Get US equity prices
