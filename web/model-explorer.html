@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Model Explorer - StockandCrypto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">◈</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav">
+                <ul class="nav-menu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li><a href="crypto.html" class="nav-link">Crypto</a></li>
+                    <li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
+                    <li><a href="us-equity.html" class="nav-link">US Equity</a></li>
+                    <li><a href="model-explorer.html" class="nav-link active">AI Models</a></li>
+                    <li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
+                    <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
+                </ul>
+            </nav>
+            <div class="nav-actions">
+                <a href="login.html" class="btn btn-secondary btn-sm">Login</a>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh; position: relative; z-index: 1;">
+        <div class="container">
+            <div style="margin-bottom: 3rem;">
+                <div style="margin-bottom: 1rem;">
+                    <span class="status-badge model-tag">Interactive • Real-time • Explainable</span>
+                </div>
+                <h1 style="font-size: 3rem; margin-bottom: 1rem;">AI Model Explorer</h1>
+                <p style="color: var(--text-muted); font-size: 1.1rem;">Drag and drop models to explore predictions, feature importance, and explainability</p>
+            </div>
+
+            <!-- Model Selector -->
+            <div style="display: grid; grid-template-columns: 300px 1fr; gap: 2rem; margin-bottom: 2rem;">
+                <div>
+                    <h3 style="font-size: 1.25rem; margin-bottom: 1rem;">Select Model</h3>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <button class="btn btn-primary" style="justify-content: flex-start;" onclick="selectModel('lstm')">
+                            <div style="text-align: left;">
+                                <div style="font-weight: 700;">LSTM+Attention</div>
+                                <div style="font-size: 0.75rem; opacity: 0.8;">Direction + Intervals</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content: flex-start;" onclick="selectModel('transformer')">
+                            <div style="text-align: left;">
+                                <div style="font-weight: 700;">Transformer</div>
+                                <div style="font-size: 0.75rem; opacity: 0.8;">Multi-head attention</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content: flex-start;" onclick="selectModel('ensemble')">
+                            <div style="text-align: left;">
+                                <div style="font-weight: 700;">LightGBM Ensemble</div>
+                                <div style="font-size: 0.75rem; opacity: 0.8;">Quantile regression</div>
+                            </div>
+                        </button>
+                        <button class="btn btn-secondary" style="justify-content: flex-start;" onclick="selectModel('tcn')">
+                            <div style="text-align: left;">
+                                <div style="font-weight: 700;">TCN</div>
+                                <div style="font-size: 0.75rem; opacity: 0.8;">Temporal CNN</div>
+                            </div>
+                        </button>
+                    </div>
+
+                    <div style="margin-top: 2rem;">
+                        <h4 style="font-size: 1rem; margin-bottom: 0.75rem;">Select Asset</h4>
+                        <select class="form-select" id="assetSelect">
+                            <option value="btc">BTC/USDT</option>
+                            <option value="eth">ETH/USDT</option>
+                            <option value="sol">SOL/USDT</option>
+                            <option value="sse">SSE Composite</option>
+                            <option value="sp500">S&P 500</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-top: 2rem;">
+                        <h4 style="font-size: 1rem; margin-bottom: 0.75rem;">Horizon</h4>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn btn-primary btn-sm">1H</button>
+                            <button class="btn btn-secondary btn-sm">4H</button>
+                            <button class="btn btn-secondary btn-sm">1D</button>
+                            <button class="btn btn-secondary btn-sm">3D</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prediction Display -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Prediction Output</h3>
+                            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                BTC/USDT • 1-Hour Horizon • Model v3.2
+                            </div>
+                        </div>
+                        <span class="status-badge success">High Confidence</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; margin-bottom: 2rem;">
+                            <div style="text-align: center;">
+                                <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--success); line-height: 1;">
+                                    0.67
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                    P(UP) Direction
+                                </div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--primary-accent); line-height: 1;">
+                                    +1.2%
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                    q50 Expected Return
+                                </div>
+                            </div>
+                            <div style="text-align: center;">
+                                <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-primary); line-height: 1;">
+                                    3.8%
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                                    Interval Width (q10-q90)
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(0, 229, 255, 0.05); padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--border-glow);">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;">Model Explanation</div>
+                            <p style="font-size: 0.95rem; color: var(--text-primary); line-height: 1.6; margin: 0;">
+                                "Strong bullish signal (P=0.67) driven by <span style="color: var(--success); font-weight: 600;">momentum surge (+0.342)</span> and 
+                                <span style="color: var(--primary-accent); font-weight: 600;">low volatility environment (+0.287)</span>. 
+                                US market correlation adds <span style="color: var(--warning); font-weight: 600;">+0.231</span> confidence. 
+                                Expected return +1.2% with 95% confidence interval."
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feature Importance Heatmap -->
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Feature Importance Heatmap</h3>
+                        <span class="status-badge model-tag">SHAP Values</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="height: 400px; position: relative;">
+                            <canvas id="heatmapChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Top Features</h3>
+                        <span class="status-badge info">Sorted by Impact</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">momentum_20d</span>
+                                <span class="mono" style="color: var(--success); font-weight: 600;">+0.342</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 85%; background: var(--success);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">volatility_score</span>
+                                <span class="mono" style="color: var(--primary-accent); font-weight: 600;">+0.287</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 72%;"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">us_correlation</span>
+                                <span class="mono" style="color: var(--warning); font-weight: 600;">+0.231</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 58%; background: var(--warning);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">size_factor</span>
+                                <span class="mono" style="color: var(--info); font-weight: 600;">+0.198</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 50%; background: var(--info);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">volume_change</span>
+                                <span class="mono" style="color: var(--secondary-purple); font-weight: 600;">+0.156</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 39%; background: var(--secondary-purple);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">news_sentiment</span>
+                                <span class="mono" style="color: var(--danger); font-weight: 600;">-0.089</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 22%; background: var(--danger);"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Performance -->
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-header">
+                    <h3 class="card-title">Model Performance Metrics</h3>
+                    <span class="status-badge model-tag">Cross-Validation Results</span>
+                </div>
+                <div class="card-body">
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem;">
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Direction Accuracy</div>
+                            <div style="font-size: 2.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--success);">67.2%</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">±1.2% CI</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Brier Score</div>
+                            <div style="font-size: 2.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--primary-accent);">0.234</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">Lower is better</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">ECE</div>
+                            <div style="font-size: 2.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--warning);">0.045</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">Calibration error</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Interval Coverage</div>
+                            <div style="font-size: 2.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--success);">81.3%</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">Target: 80%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function selectModel(model) {
+            console.log('Selected model:', model);
+            // Update UI based on model selection
+        }
+
+        // Initialize heatmap chart
+        const ctx = document.getElementById('heatmapChart');
+        if (ctx) {
+            // Add chart initialization code here
+        }
+    </script>
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+</body>
+</html>

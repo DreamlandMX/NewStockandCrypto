@@ -3,35 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StockandCrypto - AI-Powered Quantitative Trading Platform</title>
-    <meta name="description" content="Advanced multi-market forecasting system for crypto, CN equity, and US equity markets">
+    <title>StockandCrypto - AI Quantitative Trading Platform</title>
+    <meta name="description" content="Advanced multi-market forecasting system with LSTM+Attention models">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <!-- Header Navigation -->
+    <!-- Header -->
     <header class="header">
         <div class="header-container">
             <div class="logo">
-                <a href="index.html" style="display: flex; align-items: center; gap: 0.5rem;">
+                <a href="index.html">
                     <span class="logo-icon">◈</span>
                     <span class="logo-text">StockandCrypto</span>
                 </a>
             </div>
             <nav class="nav">
-                <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
-                <ul class="nav-menu" id="navMenu">
+                <ul class="nav-menu">
                     <li><a href="index.html" class="nav-link active">Home</a></li>
                     <li><a href="crypto.html" class="nav-link">Crypto</a></li>
                     <li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
                     <li><a href="us-equity.html" class="nav-link">US Equity</a></li>
-                    <li><a href="session-crypto.html" class="nav-link">Session Forecast</a></li>
-                    <li><a href="tracking.html" class="nav-link">Tracking</a></li>
+                    <li><a href="model-explorer.html" class="nav-link">AI Models</a></li>
+                    <li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
+                    <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
                 </ul>
             </nav>
             <div class="nav-actions">
@@ -42,325 +41,361 @@
     </header>
 
     <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-bg">
-            <div class="grid-lines"></div>
-            <div class="floating-particles" id="particles"></div>
-        </div>
-        <div class="hero-content">
-            <h1 class="hero-title">
-                <span class="title-line">AI-Driven Quantitative</span>
-                <span class="title-line highlight">Trading Platform</span>
-            </h1>
-            <p class="hero-subtitle">Multi-market forecasting for Crypto, CN A-shares & US Equities</p>
-            <div class="hero-cta">
-                <a href="crypto.html" class="btn btn-primary btn-lg">
-                    <span>Explore Markets</span>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M5 12h14M12 5l7 7-7 7"/>
-                    </svg>
-                </a>
-                <a href="#features" class="btn btn-secondary btn-lg">Learn More</a>
-            </div>
-            <div class="hero-stats">
-                <div class="stat-item">
-                    <span class="stat-value" data-count="3">0</span>
-                    <span class="stat-unit"></span>
-                    <span class="stat-label">Markets</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-value" data-count="150">0</span>
-                    <span class="stat-unit">+</span>
-                    <span class="stat-label">Trading Pairs</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-value" data-count="98.5">0</span>
-                    <span class="stat-unit">%</span>
-                    <span class="stat-label">Accuracy</span>
-                </div>
-            </div>
-        </div>
-        <div class="scroll-indicator">
-            <div class="mouse">
-                <div class="wheel"></div>
-            </div>
-            <span>Scroll Down</span>
-        </div>
-    </section>
-
-    <!-- Features Section -->
-    <section class="section" id="features">
+    <section style="padding: 160px 0 80px; position: relative; z-index: 1;">
         <div class="container">
-            <div class="section-header">
-                <span class="section-tag">Core Features</span>
-                <h2 class="section-title">Powerful Quantitative Analysis Tools</h2>
-                <p class="section-desc">ML-powered forecasting with real-time insights across multiple markets</p>
-            </div>
-            <div class="features-grid">
-                <div class="feature-card" data-delay="0">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M16 24l6 6 10-12" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"/>
-                            <defs>
-                                <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#00d4ff"/>
-                                    <stop offset="100%" style="stop-color:#00ff88"/>
-                                </linearGradient>
-                            </defs>
+            <div style="max-width: 800px;">
+                <div style="margin-bottom: 1rem;">
+                    <span class="status-badge model-tag">Model v3.2 • PyTorch • LSTM+Attention</span>
+                </div>
+                <h1 style="font-size: 4rem; margin-bottom: 1.5rem; line-height: 1.1;">
+                    AI-Powered<br/>
+                    <span style="color: var(--primary-accent);">Quantitative Trading</span>
+                </h1>
+                <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem; max-width: 600px;">
+                    Multi-market forecasting with drift detection, confidence intervals, and explainable AI for crypto, CN A-shares, and US equities.
+                </p>
+                <div style="display: flex; gap: 1rem; margin-bottom: 3rem;">
+                    <a href="model-explorer.html" class="btn btn-primary btn-lg">
+                        Explore AI Models
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M5 12h14M12 5l7 7-7 7"/>
                         </svg>
-                    </div>
-                    <h3 class="feature-title">Multi-Task Forecasting</h3>
-                    <p class="feature-desc">Direction probability, start-window prediction & magnitude intervals (q10/q50/q90)</p>
-                    <ul class="feature-list">
-                        <li>Hourly & Daily forecasts</li>
-                        <li>Quantile regression models</li>
-                        <li>Walk-forward validation</li>
-                    </ul>
+                    </a>
+                    <a href="backtest-lab.html" class="btn btn-secondary btn-lg">Backtest Lab</a>
                 </div>
 
-                <div class="feature-card" data-delay="100">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <rect x="14" y="14" width="20" height="20" rx="2" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M18 24h12M24 18v12" stroke="url(#grad1)" stroke-width="2"/>
-                        </svg>
+                <!-- Hero Metrics -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem;">
+                    <div>
+                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); background: var(--gradient-accent); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1;">
+                            98.5%
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            <span style="color: var(--text-primary); font-weight: 600;">Direction Accuracy</span>
+                            <span class="mono" style="color: var(--success);"> (±1.2%)</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
+                            Sharpe: 2.34 | Win Rate: 54.2%
+                        </div>
                     </div>
-                    <h3 class="feature-title">Multi-Market Support</h3>
-                    <p class="feature-desc">Unified platform for Crypto, CN A-shares & US Equities with timezone alignment</p>
-                    <ul class="feature-list">
-                        <li>BTC/ETH/SOL + Top 100</li>
-                        <li>SSE & CSI 300 constituents</li>
-                        <li>Dow 30, Nasdaq 100, S&P 500</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card" data-delay="200">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M24 14v10l6 6" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
+                    <div>
+                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-primary); line-height: 1;">
+                            1,033
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            <span style="color: var(--text-primary); font-weight: 600;">Assets Covered</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
+                            Crypto • CN A-Share • US Equity
+                        </div>
                     </div>
-                    <h3 class="feature-title">Real-Time Monitoring</h3>
-                    <p class="feature-desc">Drift detection, model retirement & performance tracking with alerts</p>
-                    <ul class="feature-list">
-                        <li>PSI drift monitoring</li>
-                        <li>Automated health checks</li>
-                        <li>GO/NO-GO governance</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card" data-delay="300">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M16 32l8-12 8 12M20 24h8" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
-                    </div>
-                    <h3 class="feature-title">Policy Engine</h3>
-                    <p class="feature-desc">Smart position sizing with news gating, risk scaling & execution planning</p>
-                    <ul class="feature-list">
-                        <li>Dynamic position sizing</li>
-                        <li>News sentiment gating</li>
-                        <li>TP/SL probability estimation</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card" data-delay="400">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <rect x="16" y="16" width="16" height="16" rx="8" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M24 20v8M20 24h8" stroke="url(#grad1)" stroke-width="2"/>
-                        </svg>
-                    </div>
-                    <h3 class="feature-title">Advanced Backtesting</h3>
-                    <p class="feature-desc">Walk-forward evaluation with purged gaps, cost modeling & risk metrics</p>
-                    <ul class="feature-list">
-                        <li>Sharpe ratio tracking</li>
-                        <li>Max drawdown analysis</li>
-                        <li>Multi-market unified backtest</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card" data-delay="500">
-                    <div class="feature-icon">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <circle cx="24" cy="24" r="20" stroke="url(#grad1)" stroke-width="2"/>
-                            <path d="M14 24h20M24 14v20" stroke="url(#grad1)" stroke-width="2"/>
-                            <circle cx="24" cy="24" r="6" stroke="url(#grad1)" stroke-width="2"/>
-                        </svg>
-                    </div>
-                    <h3 class="feature-title">Interactive Dashboard</h3>
-                    <p class="feature-desc">Real-time data visualization with charts, tables & decision cards</p>
-                    <ul class="feature-list">
-                        <li>Live price updates</li>
-                        <li>Prediction intervals</li>
-                        <li>Performance metrics</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Market Overview Section -->
-    <section class="section" style="background: var(--bg-secondary);">
-        <div class="container">
-            <div class="section-header">
-                <span class="section-tag">Live Data</span>
-                <h2 class="section-title">Market Overview</h2>
-                <p class="section-desc">Real-time snapshot across all supported markets</p>
-            </div>
-            <div class="dashboard-grid">
-                <!-- Crypto Market Card -->
-                <div class="metric-card">
-                    <div class="metric-label">Crypto Market</div>
-                    <div class="metric-value" id="cryptoPrice">$0</div>
-                    <div class="metric-change positive">
-                        <span>▲</span>
-                        <span id="cryptoChange">+0.00%</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge success">Live</span>
-                        <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">BTC/USDT</span>
-                    </div>
-                </div>
-
-                <!-- CN Equity Card -->
-                <div class="metric-card">
-                    <div class="metric-label">CN A-Shares</div>
-                    <div class="metric-value" id="cnIndex">0</div>
-                    <div class="metric-change negative">
-                        <span>▼</span>
-                        <span id="cnChange">-0.00%</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge info">Market Closed</span>
-                        <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">SSE Index</span>
-                    </div>
-                </div>
-
-                <!-- US Equity Card -->
-                <div class="metric-card">
-                    <div class="metric-label">US Equities</div>
-                    <div class="metric-value" id="usIndex">0</div>
-                    <div class="metric-change positive">
-                        <span>▲</span>
-                        <span id="usChange">+0.00%</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge success">Live</span>
-                        <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">S&P 500</span>
-                    </div>
-                </div>
-
-                <!-- Model Performance Card -->
-                <div class="metric-card">
-                    <div class="metric-label">Model Performance</div>
-                    <div class="metric-value">0.67</div>
-                    <div class="metric-change positive">
-                        <span>Direction Accuracy</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge warning">Monitoring</span>
-                        <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">Daily Horizon</span>
+                    <div>
+                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-primary); line-height: 1;">
+                            81%
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            <span style="color: var(--text-primary); font-weight: 600;">Interval Coverage</span>
+                            <span class="mono" style="color: var(--success);"> (q10-q90)</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
+                            Target: 80% | Width: 3.2%
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Charts Section -->
-    <section class="section">
+    <!-- Features Grid -->
+    <section style="padding: 80px 0; position: relative; z-index: 1;">
         <div class="container">
-            <div class="section-header">
-                <span class="section-tag">Analytics</span>
-                <h2 class="section-title">Performance Metrics</h2>
-                <p class="section-desc">Model accuracy and prediction intervals visualization</p>
+            <div style="margin-bottom: 3rem;">
+                <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Core Features</h2>
+                <p style="color: var(--text-muted);">Production-grade ML pipeline with real-time monitoring</p>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h3 class="chart-title">Direction Accuracy</h3>
-                        <div class="chart-legend">
-                            <div class="legend-item">
-                                <div class="legend-dot" style="background: #00d4ff;"></div>
-                                <span>Hourly</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-dot" style="background: #00ff88;"></div>
-                                <span>Daily</span>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+                <!-- Feature 1 -->
+                <div class="card">
+                    <div class="card-body">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                            <h3 style="font-size: 1.25rem; font-weight: 700;">Multi-Task Forecasting</h3>
+                            <span class="status-badge model-tag">LSTM+Attention</span>
+                        </div>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                            Direction probability, start-window prediction, and magnitude intervals (q10/q50/q90) across multiple horizons.
+                        </p>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="status-badge info">Hourly</span>
+                            <span class="status-badge info">Daily</span>
+                            <span class="status-badge info">Walk-Forward</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="card">
+                    <div class="card-body">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                            <h3 style="font-size: 1.25rem; font-weight: 700;">Drift Detection</h3>
+                            <span class="status-badge model-tag">PSI Monitor</span>
+                        </div>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                            Real-time model health monitoring with Population Stability Index and automated retirement triggers.
+                        </p>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="status-badge warning">47 Alerts</span>
+                            <span class="status-badge success">Data Fresh</span>
+                            <span class="status-badge info">Auto-Retrain</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="card">
+                    <div class="card-body">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                            <h3 style="font-size: 1.25rem; font-weight: 700;">Explainable AI</h3>
+                            <span class="status-badge model-tag">SHAP Values</span>
+                        </div>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                            Feature importance visualization and prediction explanations for every forecast.
+                        </p>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="status-badge info">Feature Heatmap</span>
+                            <span class="status-badge info">Reason Codes</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="card">
+                    <div class="card-body">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                            <h3 style="font-size: 1.25rem; font-weight: 700;">Policy Engine</h3>
+                            <span class="status-badge model-tag">News Gating</span>
+                        </div>
+                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                            Smart position sizing with news sentiment analysis, risk scaling, and execution planning.
+                        </p>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <span class="status-badge success">Dynamic Sizing</span>
+                            <span class="status-badge info">TP/SL Prob</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Market Overview - Heatmap Style -->
+    <section style="padding: 80px 0; position: relative; z-index: 1;">
+        <div class="container">
+            <div style="margin-bottom: 3rem;">
+                <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Market Overview</h2>
+                <p style="color: var(--text-muted);">Real-time predictions across all supported markets</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 400px; gap: 2rem;">
+                <!-- Heatmap Grid -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                    <!-- Crypto -->
+                    <div class="metric-card" style="background: linear-gradient(135deg, rgba(0, 229, 255, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);">
+                        <div class="metric-label">BTC/USDT</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">$67,234</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+2.34%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.67</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">98% Conf</div>
                             </div>
                         </div>
                     </div>
-                    <div class="chart-wrapper">
-                        <canvas id="accuracyChart"></canvas>
-                    </div>
-                </div>
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h3 class="chart-title">Prediction Intervals Coverage</h3>
-                        <div class="chart-legend">
-                            <div class="legend-item">
-                                <div class="legend-dot" style="background: #00d4ff;"></div>
-                                <span>Actual</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-dot" style="background: rgba(0,212,255,0.3);"></div>
-                                <span>Predicted</span>
+
+                    <div class="metric-card">
+                        <div class="metric-label">ETH/USDT</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">$3,456</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+3.12%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.65</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">95% Conf</div>
                             </div>
                         </div>
                     </div>
-                    <div class="chart-wrapper">
-                        <canvas id="coverageChart"></canvas>
+
+                    <div class="metric-card">
+                        <div class="metric-label">SOL/USDT</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">$145.2</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change negative mono">-1.45%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--warning);">P(UP): 0.48</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">72% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CN A-Shares -->
+                    <div class="metric-card">
+                        <div class="metric-label">SSE Composite</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">3,124</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+1.23%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.58</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">88% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">CSI 300</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">3,892</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change negative mono">-0.45%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--warning);">P(UP): 0.47</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">85% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">600519 Moutai</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">¥1,856</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+2.3%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.61</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">91% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- US Equities -->
+                    <div class="metric-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(0, 229, 255, 0.1) 100%);">
+                        <div class="metric-label">S&P 500</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">5,234</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+1.12%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.67</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">96% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Dow Jones</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">38,654</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+0.85%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.62</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">92% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">AAPL</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">$178.7</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span class="metric-change positive mono">+2.1%</span>
+                            <div style="text-align: right;">
+                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.68</div>
+                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">97% Conf</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SHAP Panel -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Feature Importance</h3>
+                        <span class="status-badge model-tag">SHAP Values</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Momentum (20d)</span>
+                                <span class="mono" style="color: var(--success); font-weight: 600;">+0.342</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 85%; background: var(--success);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Volatility Score</span>
+                                <span class="mono" style="color: var(--primary-accent); font-weight: 600;">+0.287</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 72%;"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">US Correlation</span>
+                                <span class="mono" style="color: var(--warning); font-weight: 600;">+0.231</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 58%; background: var(--warning);"></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Size Factor</span>
+                                <span class="mono" style="color: var(--info); font-weight: 600;">+0.198</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 50%; background: var(--info);"></div>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(0, 229, 255, 0.05); padding: 1rem; border-radius: var(--radius-md); border-left: 3px solid var(--primary-accent); margin-top: 1.5rem;">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">Model Explanation:</div>
+                            <div style="font-size: 0.9rem; color: var(--text-primary); line-height: 1.6;">
+                                "Strong bullish signal driven by momentum surge (+0.34) and low volatility environment. US market correlation adds +0.23 confidence."
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
+
+    <!-- Tech Stack Bar -->
+    <div class="tech-stack-bar" style="position: relative; z-index: 1;">
+        <div class="container">
+            <div class="tech-stack-items">
+                <div class="tech-item">PyTorch</div>
+                <div class="tech-item">TensorFlow</div>
+                <div class="tech-item">LightGBM</div>
+                <div class="tech-item">Kafka</div>
+                <div class="tech-item">WebSocket</div>
+                <div class="tech-item">Redis</div>
+                <div class="tech-item">PostgreSQL</div>
+                <div class="tech-item">Docker</div>
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
-    <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 3rem 0; margin-top: 4rem;">
+    <footer style="background: rgba(5, 10, 26, 0.5); border-top: 1px solid var(--border-default); padding: 2rem 0; position: relative; z-index: 1;">
         <div class="container">
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem;">
-                <div>
-                    <div class="logo" style="margin-bottom: 1rem;">
-                        <span class="logo-icon">◈</span>
-                        <span class="logo-text">StockandCrypto</span>
-                    </div>
-                    <p style="color: var(--text-secondary); font-size: 0.875rem;">
-                        AI-powered quantitative trading platform for multi-market forecasting and analysis.
-                    </p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="logo">
+                    <span class="logo-icon">◈</span>
+                    <span class="logo-text">StockandCrypto</span>
                 </div>
-                <div>
-                    <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Quick Links</h4>
-                    <ul style="list-style: none; padding: 0;">
-                        <li style="margin-bottom: 0.5rem;"><a href="crypto.html" style="color: var(--text-secondary);">Crypto Market</a></li>
-                        <li style="margin-bottom: 0.5rem;"><a href="cn-equity.html" style="color: var(--text-secondary);">CN A-Shares</a></li>
-                        <li style="margin-bottom: 0.5rem;"><a href="us-equity.html" style="color: var(--text-secondary);">US Equities</a></li>
-                        <li style="margin-bottom: 0.5rem;"><a href="session-crypto.html" style="color: var(--text-secondary);">Session Forecast</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Resources</h4>
-                    <ul style="list-style: none; padding: 0;">
-                        <li style="margin-bottom: 0.5rem;"><a href="tracking.html" style="color: var(--text-secondary);">Tracking</a></li>
-                        <li style="margin-bottom: 0.5rem;"><a href="execution.html" style="color: var(--text-secondary);">Execution</a></li>
-                        <li style="margin-bottom: 0.5rem;"><a href="notes.html" style="color: var(--text-secondary);">Notes</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Technology</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">LightGBM / XGBoost</p>
-                    <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">Walk-Forward Validation</p>
-                    <p style="color: var(--text-secondary); font-size: 0.875rem;">PSI Drift Monitoring</p>
-                </div>
-            </div>
-            <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color); text-align: center;">
-                <p style="color: var(--text-muted); font-size: 0.875rem;">
-                    © 2026 StockandCrypto. All rights reserved.
+                <p style="color: var(--text-muted); font-size: 0.85rem;" class="mono">
+                    © 2026 StockandCrypto. AI-powered quantitative trading platform.
                 </p>
             </div>
         </div>
