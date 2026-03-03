@@ -7,6 +7,230 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .crypto-layout {
+            display: grid;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .crypto-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .control-label {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+        }
+
+        .control-select {
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            padding: 0.45rem 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }
+
+        .prediction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+
+        .kv-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 0.6rem 0.75rem;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .kv-key {
+            color: var(--text-secondary);
+        }
+
+        .kv-value {
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+
+        .direction-split {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+
+        .direction-block {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            padding: 0.8rem;
+            text-align: center;
+        }
+
+        .direction-label {
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+        }
+
+        .direction-value {
+            font-size: 1.5rem;
+            font-family: var(--font-mono);
+            font-weight: 700;
+        }
+
+        .window-list {
+            display: grid;
+            gap: 0.7rem;
+        }
+
+        .window-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 56px;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .window-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+        }
+
+        .window-bar {
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+        }
+
+        .window-fill {
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, var(--primary-accent), var(--success));
+            transition: width 0.3s ease;
+        }
+
+        .window-prob {
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            text-align: right;
+        }
+
+        .signal-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 84px;
+            border-radius: 999px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            border: 1px solid transparent;
+        }
+
+        .signal-pill.long {
+            color: var(--success);
+            border-color: rgba(16, 185, 129, 0.4);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .signal-pill.short {
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.4);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .signal-pill.flat {
+            color: var(--warning);
+            border-color: rgba(245, 158, 11, 0.4);
+            background: rgba(245, 158, 11, 0.1);
+        }
+
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 1rem;
+        }
+
+        .feature-list,
+        .reason-list {
+            list-style: none;
+            display: grid;
+            gap: 0.6rem;
+            margin-top: 0.75rem;
+        }
+
+        .feature-item,
+        .reason-item {
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+            font-size: 0.85rem;
+        }
+
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }
+
+        .performance-value {
+            font-family: var(--font-mono);
+            font-size: 1.8rem;
+            line-height: 1;
+            margin-bottom: 0.4rem;
+        }
+
+        .search-input {
+            min-width: 240px;
+        }
+
+        @media (max-width: 768px) {
+            .control-group {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .window-row {
+                grid-template-columns: 68px 1fr 52px;
+            }
+        }
+    </style>
 </head>
 <body>
     <header class="header">
@@ -38,14 +262,31 @@
 
     <main style="padding-top: 100px; min-height: 100vh;">
         <div class="container">
-            <div class="section-header" style="text-align: left; margin-bottom: 2rem;">
+            <div class="section-header" style="text-align: left; margin-bottom: 1.5rem;">
                 <span class="section-tag">Live Data</span>
                 <h1 class="section-title">Crypto Market Analysis</h1>
-                <p style="color: var(--text-secondary);">Real-time forecasts for BTC, ETH, SOL and top 100 cryptocurrencies</p>
+                <p style="color: var(--text-secondary);">Real-time multi-task forecasts for BTC, ETH, SOL and top crypto pairs.</p>
             </div>
 
-            <!-- Market Stats -->
-            <div class="dashboard-grid" style="margin-bottom: 2rem;">
+            <div class="crypto-layout">
+                <div class="crypto-controls">
+                    <div class="control-group">
+                        <span class="control-label">Focus Symbol</span>
+                        <select class="control-select" id="symbolSelect">
+                            <option value="BTCUSDT">BTC/USDT</option>
+                            <option value="ETHUSDT">ETH/USDT</option>
+                            <option value="SOLUSDT">SOL/USDT</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <span class="status-badge info" id="dataModeBadge">Live Feed</span>
+                        <span class="status-badge info" id="transportBadge">Polling</span>
+                        <span class="control-label" id="lastUpdated">Updated --</span>
+                    </div>
+                </div>
+
+                <!-- Market Stats -->
+                <div class="metric-grid">
                 <div class="metric-card">
                     <div class="metric-label">BTC/USDT</div>
                     <div class="metric-value" id="btcPrice">$0</div>
@@ -75,24 +316,24 @@
 
                 <div class="metric-card">
                     <div class="metric-label">Model Accuracy</div>
-                    <div class="metric-value">0.67</div>
+                    <div class="metric-value" id="modelAccuracy">0.67</div>
                     <div class="metric-change positive">
                         <span>Direction (Daily)</span>
                     </div>
                     <div style="margin-top: 1rem;">
-                        <span class="status-badge warning">Paper Trading</span>
+                        <span class="status-badge info">IN REVIEW</span>
                     </div>
                 </div>
             </div>
 
             <!-- Price Chart -->
-            <div class="chart-container" style="margin-bottom: 2rem;">
+            <div class="chart-container">
                 <div class="chart-header">
-                    <h3 class="chart-title">BTC/USDT Price Movement</h3>
+                    <h3 class="chart-title" id="priceChartTitle">BTC/USDT Price Movement</h3>
                     <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-secondary btn-sm" id="btn1h">1H</button>
-                        <button class="btn btn-secondary btn-sm" id="btn24h">24H</button>
-                        <button class="btn btn-primary btn-sm" id="btn7d">7D</button>
+                        <button class="btn btn-secondary btn-sm timeframe-btn" id="btn1h" data-timeframe="1h">1H</button>
+                        <button class="btn btn-secondary btn-sm timeframe-btn" id="btn24h" data-timeframe="24h">24H</button>
+                        <button class="btn btn-primary btn-sm timeframe-btn" id="btn7d" data-timeframe="7d">7D</button>
                     </div>
                 </div>
                 <div class="chart-wrapper">
@@ -101,7 +342,7 @@
             </div>
 
             <!-- Prediction Cards -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-bottom: 2rem;">
+            <div class="prediction-grid">
                 <!-- Direction Prediction -->
                 <div class="card">
                     <div class="card-header">
@@ -109,25 +350,61 @@
                         <span class="status-badge info">H1 Horizon</span>
                     </div>
                     <div class="card-body">
-                        <div style="display: flex; justify-content: space-around; margin: 2rem 0;">
-                            <div style="text-align: center;">
-                                <div style="font-size: 3rem; font-weight: 700; color: var(--success);">0.62</div>
-                                <div style="color: var(--text-secondary); margin-top: 0.5rem;">P(UP)</div>
+                        <div class="direction-split">
+                            <div class="direction-block">
+                                <div class="direction-label">P(UP)</div>
+                                <div class="direction-value" id="pUpValue" style="color: var(--success);">0.62</div>
                             </div>
-                            <div style="text-align: center;">
-                                <div style="font-size: 3rem; font-weight: 700; color: var(--danger);">0.38</div>
-                                <div style="color: var(--text-secondary); margin-top: 0.5rem;">P(DOWN)</div>
+                            <div class="direction-block">
+                                <div class="direction-label">P(DOWN)</div>
+                                <div class="direction-value" id="pDownValue" style="color: var(--danger);">0.38</div>
                             </div>
                         </div>
-                        <div style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary);">Signal:</span>
-                                <span style="color: var(--success); font-weight: 600;">LONG</span>
+                        <div class="kv-grid">
+                            <div class="kv-key">Signal</div>
+                            <div><span class="signal-pill long" id="signalPill">LONG</span></div>
+                            <div class="kv-key">Confidence</div>
+                            <div class="kv-value" id="directionConfidence">0.95</div>
+                            <div class="kv-key">Threshold Rule</div>
+                            <div class="kv-value">LONG ≥ 0.55, SHORT ≤ 0.45</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Start Window -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Start Window Forecast</h3>
+                        <span class="status-badge info">W0-W3</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="window-list">
+                            <div class="window-row">
+                                <div class="window-label">W0</div>
+                                <div class="window-bar"><div class="window-fill" id="w0Fill" style="width: 25%;"></div></div>
+                                <div class="window-prob" id="w0Prob">0.25</div>
                             </div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-secondary);">Confidence:</span>
-                                <span style="color: var(--text-primary); font-weight: 600;">High (0.62 > 0.55)</span>
+                            <div class="window-row">
+                                <div class="window-label">W1</div>
+                                <div class="window-bar"><div class="window-fill" id="w1Fill" style="width: 35%;"></div></div>
+                                <div class="window-prob" id="w1Prob">0.35</div>
                             </div>
+                            <div class="window-row">
+                                <div class="window-label">W2</div>
+                                <div class="window-bar"><div class="window-fill" id="w2Fill" style="width: 28%;"></div></div>
+                                <div class="window-prob" id="w2Prob">0.28</div>
+                            </div>
+                            <div class="window-row">
+                                <div class="window-label">W3</div>
+                                <div class="window-bar"><div class="window-fill" id="w3Fill" style="width: 12%;"></div></div>
+                                <div class="window-prob" id="w3Prob">0.12</div>
+                            </div>
+                        </div>
+                        <div class="kv-grid" style="margin-top: 1rem;">
+                            <div class="kv-key">Most Likely</div>
+                            <div class="kv-value" id="mostLikelyWindow">W1</div>
+                            <div class="kv-key">Expected Start</div>
+                            <div class="kv-value" id="expectedStart">Within 1 hour</div>
                         </div>
                     </div>
                 </div>
@@ -139,31 +416,116 @@
                         <span class="status-badge info">1-Hour</span>
                     </div>
                     <div class="card-body">
-                        <div style="margin: 1.5rem 0;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
-                                <span style="color: var(--text-secondary);">q10:</span>
-                                <span style="color: var(--danger); font-weight: 600;">-1.2%</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
-                                <span style="color: var(--text-secondary);">q50:</span>
-                                <span style="color: var(--success); font-weight: 600;">+0.8%</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 1rem;">
-                                <span style="color: var(--text-secondary);">q90:</span>
-                                <span style="color: var(--success); font-weight: 600;">+2.1%</span>
-                            </div>
-                        </div>
-                        <div style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary);">Interval Width:</span>
-                                <span style="color: var(--warning); font-weight: 600;">3.3%</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-secondary);">Coverage Target:</span>
-                                <span style="color: var(--success); font-weight: 600;">80%</span>
-                            </div>
+                        <div class="kv-grid">
+                            <div class="kv-key">q10</div>
+                            <div class="kv-value" id="q10Value" style="color: var(--danger);">-1.2%</div>
+                            <div class="kv-key">q50</div>
+                            <div class="kv-value" id="q50Value" style="color: var(--success);">+0.8%</div>
+                            <div class="kv-key">q90</div>
+                            <div class="kv-value" id="q90Value" style="color: var(--success);">+2.1%</div>
+                            <div class="kv-key">Interval Width</div>
+                            <div class="kv-value" id="intervalWidth">3.3%</div>
+                            <div class="kv-key">Expected Return</div>
+                            <div class="kv-value" id="expectedReturn">+0.8%</div>
+                            <div class="kv-key">Coverage Target</div>
+                            <div class="kv-value">80%</div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Signal & Risk -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Signal & Risk Packet</h3>
+                        <span class="status-badge info">Policy Engine</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="kv-grid">
+                            <div class="kv-key">Action</div>
+                            <div><span class="signal-pill long" id="actionPill">LONG</span></div>
+                            <div class="kv-key">Position Size</div>
+                            <div class="kv-value" id="positionSize">1.20x</div>
+                            <div class="kv-key">Entry</div>
+                            <div class="kv-value" id="entryPrice">$67,234.50</div>
+                            <div class="kv-key">Stop Loss</div>
+                            <div class="kv-value" id="stopLoss">$65,500.00</div>
+                            <div class="kv-key">Take Profit 1</div>
+                            <div class="kv-value" id="takeProfit1">$68,500.00</div>
+                            <div class="kv-key">Take Profit 2</div>
+                            <div class="kv-value" id="takeProfit2">$70,000.00</div>
+                            <div class="kv-key">R:R (TP1)</div>
+                            <div class="kv-value" id="rrRatio1">1.60</div>
+                            <div class="kv-key">R:R (TP2)</div>
+                            <div class="kv-value" id="rrRatio2">2.35</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="insights-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Explainable AI</h3>
+                        <span class="status-badge info">SHAP Signals</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="kv-grid">
+                            <div class="kv-key">Summary</div>
+                            <div class="kv-value" id="explanationSummary">Loading explanation...</div>
+                        </div>
+                        <h4 style="font-size: 0.9rem; margin-top: 1rem; color: var(--text-secondary);">Top Features</h4>
+                        <ul class="feature-list" id="topFeaturesList">
+                            <li class="feature-item">Waiting for model explanation...</li>
+                        </ul>
+                        <h4 style="font-size: 0.9rem; margin-top: 1rem; color: var(--text-secondary);">Reason Codes</h4>
+                        <ul class="reason-list" id="reasonCodesList">
+                            <li class="reason-item">Waiting for reason codes...</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Model Health Snapshot</h3>
+                        <span class="status-badge info" id="healthStatusBadge">IN REVIEW</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="kv-grid">
+                            <div class="kv-key">Drift Alerts</div>
+                            <div class="kv-value" id="driftAlerts">47</div>
+                            <div class="kv-key">Sharpe Ratio</div>
+                            <div class="kv-value" id="healthSharpe">-0.36</div>
+                            <div class="kv-key">Sharpe Stability (Std)</div>
+                            <div class="kv-value" id="sharpeStability">2.30</div>
+                            <div class="kv-key">Data Freshness</div>
+                            <div class="kv-value" id="dataFreshness">2 hours ago</div>
+                            <div class="kv-key">Last Training</div>
+                            <div class="kv-value" id="lastTraining">2026-02-06</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="performance-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Direction Accuracy</div>
+                    <div class="performance-value" id="directionAccuracy">67.2%</div>
+                    <div class="metric-change positive">30-day paper trading</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Interval Coverage</div>
+                    <div class="performance-value" id="intervalCoverage">81.3%</div>
+                    <div class="metric-change positive">Target: 80%</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Brier Score</div>
+                    <div class="performance-value" id="brierScore">0.234</div>
+                    <div class="metric-change positive">Lower is better</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Win Rate</div>
+                    <div class="performance-value" id="winRate">54.2%</div>
+                    <div class="metric-change positive">Last 30 days</div>
                 </div>
             </div>
 
@@ -173,7 +535,7 @@
                     <h3 style="font-size: 1.25rem; font-weight: 600;">Top Cryptocurrencies</h3>
                     <div class="table-controls">
                         <input type="text" class="search-input" placeholder="Search symbol..." id="searchInput">
-                        <button class="filter-btn" id="filterBtn">Filter</button>
+                        <button class="filter-btn" id="filterBtn">Signal: ALL</button>
                     </div>
                 </div>
                 <table class="data-table">
@@ -184,52 +546,14 @@
                             <th>24h Change</th>
                             <th>P(UP)</th>
                             <th>Signal</th>
+                            <th>24h Volume</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="cryptoTableBody">
-                        <tr>
-                            <td><strong>BTC</strong></td>
-                            <td id="btcTablePrice">$0</td>
-                            <td style="color: var(--success);">+2.4%</td>
-                            <td>0.62</td>
-                            <td><span class="status-badge success">LONG</span></td>
-                            <td><span class="status-badge info">Live</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>ETH</strong></td>
-                            <td id="ethTablePrice">$0</td>
-                            <td style="color: var(--success);">+3.1%</td>
-                            <td>0.65</td>
-                            <td><span class="status-badge success">LONG</span></td>
-                            <td><span class="status-badge info">Live</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>SOL</strong></td>
-                            <td id="solTablePrice">$0</td>
-                            <td style="color: var(--danger);">-1.2%</td>
-                            <td>0.48</td>
-                            <td><span class="status-badge warning">FLAT</span></td>
-                            <td><span class="status-badge info">Live</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>BNB</strong></td>
-                            <td>$312.45</td>
-                            <td style="color: var(--success);">+1.8%</td>
-                            <td>0.58</td>
-                            <td><span class="status-badge success">LONG</span></td>
-                            <td><span class="status-badge success">Live</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>XRP</strong></td>
-                            <td>$0.5234</td>
-                            <td style="color: var(--danger);">-0.5%</td>
-                            <td>0.51</td>
-                            <td><span class="status-badge warning">FLAT</span></td>
-                            <td><span class="status-badge info">Live</span></td>
-                        </tr>
                     </tbody>
                 </table>
+            </div>
             </div>
         </div>
     </main>

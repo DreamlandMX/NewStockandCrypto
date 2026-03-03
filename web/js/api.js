@@ -2,9 +2,7 @@
 // StockandCrypto - API Client
 // ========================================
 
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://127.0.0.1:5001/api'
-    : `${window.location.origin}/api`;
+const API_BASE_URL = `${window.location.origin}/api`;
 
 // API Client
 const api = {
@@ -78,6 +76,16 @@ const api = {
     // Get crypto predictions
     async getCryptoPredictions(symbol = 'BTC') {
         return this.get(`/crypto/predictions?symbol=${symbol}`);
+    },
+
+    // Get current crypto prediction packet
+    async getCryptoPrediction(symbol = 'BTCUSDT') {
+        return this.get(`/crypto/prediction/${symbol}`);
+    },
+
+    // Get historical crypto performance
+    async getCryptoPerformance(symbol = 'BTCUSDT', days = 30) {
+        return this.get(`/crypto/performance/${symbol}?days=${days}`);
     },
 
     // Get CN equity prices
