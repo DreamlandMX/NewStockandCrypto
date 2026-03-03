@@ -16,7 +16,7 @@ const CRYPTO_CACHE_TTL_MS = Number(process.env.CRYPTO_CACHE_TTL_MS || 9000);
 const CN_CACHE_TTL_MS = Number(process.env.CN_CACHE_TTL_MS || 9000);
 const CN_POLL_INTERVAL_SEC = Number(process.env.CN_POLL_INTERVAL_SEC || 10);
 const BINANCE_US_URL = 'https://api.binance.us/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22%5D';
-const EASTMONEY_ULIST_FIELDS = 'f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f47,f48';
+const EASTMONEY_ULIST_FIELDS = 'f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f20,f21,f47,f48,f100,f103,f115';
 const EASTMONEY_ULIST_BASE = 'https://push2.eastmoney.com/api/qt/ulist.np/get';
 const CSI300_SNAPSHOT_PATH = path.join(WEB_ROOT, 'assets', 'csi300-constituents.json');
 const INDEX_SECIDS = {
@@ -26,6 +26,16 @@ const INDEX_SECIDS = {
 const INDEX_NAME_BY_CODE = {
     '000001.SH': 'SSE Composite',
     '000300.SH': 'CSI 300'
+};
+const MARKET_SESSION_TIMEZONE = 'Asia/Shanghai';
+const MARKET_SESSION_TIMEZONE_LABEL = 'Beijing Time (CST, UTC+8)';
+const CN_DELAY_NOTE = 'Data Source: EastMoney API | Delay: ~3-10s (Level-1)';
+const CN_DISCLAIMER = 'Not for actual trading - Simulation only';
+const CN_POLICY_SHORT_REASON = 'CN policy mode: strict no-short';
+const LIMIT_STATUS_ORDER = {
+    LIMIT_UP: 3,
+    LIMIT_DOWN: 2,
+    NORMAL: 1
 };
 
 let cryptoPriceCache = null;
@@ -78,6 +88,178 @@ function deepCopy(value) {
 function parseInteger(value, fallback) {
     const parsed = Number.parseInt(String(value), 10);
     return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toShanghaiNow(now = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: MARKET_SESSION_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        weekday: 'short',
+        hour12: false
+    });
+    const parts = Object.fromEntries(formatter.formatToParts(now).map((part) => [part.type, part.value]));
+    const year = Number(parts.year);
+    const month = Number(parts.month);
+    const day = Number(parts.day);
+    const hour = Number(parts.hour);
+    const minute = Number(parts.minute);
+    const second = Number(parts.second);
+    const weekday = parts.weekday;
+    const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
+    const date = new Date(`${dateKey}T${parts.hour}:${parts.minute}:${parts.second}+08:00`);
+    return { year, month, day, hour, minute, second, weekday, dateKey, date };
+}
+
+function makeShanghaiDate(dateKey, hour, minute, second = 0) {
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    const ss = String(second).padStart(2, '0');
+    return new Date(`${dateKey}T${hh}:${mm}:${ss}+08:00`);
+}
+
+function nextTradingDateKey(currentDate) {
+    const date = new Date(currentDate.getTime());
+    while (true) {
+        date.setUTCDate(date.getUTCDate() + 1);
+        const shanghai = toShanghaiNow(date);
+        if (shanghai.weekday !== 'Sat' && shanghai.weekday !== 'Sun') {
+            return shanghai.dateKey;
+        }
+    }
+}
+
+function computeMarketSession(now = new Date()) {
+    const shanghai = toShanghaiNow(now);
+    const isWeekend = shanghai.weekday === 'Sat' || shanghai.weekday === 'Sun';
+
+    const preOpenStart = makeShanghaiDate(shanghai.dateKey, 9, 15);
+    const preOpenEnd = makeShanghaiDate(shanghai.dateKey, 9, 25);
+    const amStart = makeShanghaiDate(shanghai.dateKey, 9, 30);
+    const amEnd = makeShanghaiDate(shanghai.dateKey, 11, 30);
+    const pmStart = makeShanghaiDate(shanghai.dateKey, 13, 0);
+    const closeAuctionStart = makeShanghaiDate(shanghai.dateKey, 14, 57);
+    const marketClose = makeShanghaiDate(shanghai.dateKey, 15, 0);
+
+    const phases = [
+        { code: 'PRE_OPEN_AUCTION', label: 'Pre-Open Auction', tone: 'warning', start: preOpenStart, end: preOpenEnd },
+        { code: 'CONTINUOUS_AM', label: 'Continuous Trading', tone: 'success', start: amStart, end: amEnd },
+        { code: 'LUNCH_BREAK', label: 'Lunch Break', tone: 'muted', start: amEnd, end: pmStart },
+        { code: 'CONTINUOUS_PM', label: 'Continuous Trading', tone: 'success', start: pmStart, end: closeAuctionStart },
+        { code: 'CLOSE_AUCTION', label: 'Close Auction', tone: 'warning', start: closeAuctionStart, end: marketClose }
+    ];
+
+    const nowMs = shanghai.date.getTime();
+    let current = null;
+    for (const phase of phases) {
+        if (nowMs >= phase.start.getTime() && nowMs < phase.end.getTime()) {
+            current = phase;
+            break;
+        }
+    }
+
+    let nextPhase = null;
+    if (isWeekend) {
+        const nextTrading = nextTradingDateKey(shanghai.date);
+        nextPhase = {
+            code: 'PRE_OPEN_AUCTION',
+            label: 'Pre-Open Auction',
+            at: makeShanghaiDate(nextTrading, 9, 15)
+        };
+    } else if (current) {
+        const currentIndex = phases.findIndex((phase) => phase.code === current.code);
+        if (currentIndex > -1 && currentIndex < phases.length - 1) {
+            const candidate = phases[currentIndex + 1];
+            nextPhase = { code: candidate.code, label: candidate.label, at: candidate.start };
+        } else {
+            const nextTrading = nextTradingDateKey(shanghai.date);
+            nextPhase = {
+                code: 'PRE_OPEN_AUCTION',
+                label: 'Pre-Open Auction',
+                at: makeShanghaiDate(nextTrading, 9, 15)
+            };
+        }
+    } else {
+        const upcomingToday = phases.find((phase) => nowMs < phase.start.getTime());
+        if (upcomingToday) {
+            nextPhase = { code: upcomingToday.code, label: upcomingToday.label, at: upcomingToday.start };
+        } else {
+            const nextTrading = nextTradingDateKey(shanghai.date);
+            nextPhase = {
+                code: 'PRE_OPEN_AUCTION',
+                label: 'Pre-Open Auction',
+                at: makeShanghaiDate(nextTrading, 9, 15)
+            };
+        }
+    }
+
+    const fallbackPhase = {
+        code: 'CLOSED',
+        label: 'Post-Market Closed',
+        tone: 'danger'
+    };
+    const activePhase = current || fallbackPhase;
+    const countdownSec = nextPhase ? Math.max(0, Math.floor((nextPhase.at.getTime() - nowMs) / 1000)) : 0;
+
+    return {
+        timezone: MARKET_SESSION_TIMEZONE,
+        timezoneLabel: MARKET_SESSION_TIMEZONE_LABEL,
+        phaseCode: activePhase.code,
+        phaseLabel: activePhase.label,
+        phaseTone: activePhase.tone,
+        nextPhaseCode: nextPhase ? nextPhase.code : null,
+        nextPhaseLabel: nextPhase ? nextPhase.label : null,
+        nextPhaseAt: nextPhase ? nextPhase.at.toISOString() : null,
+        countdownSec
+    };
+}
+
+function translateSectorToEnglish(rawSector) {
+    const text = String(rawSector || '').trim();
+    if (!text) return 'Other';
+    if (/(\u94f6\u884c|bank)/i.test(text)) return 'Banking';
+    if (/(\u4fdd\u9669|insurance)/i.test(text)) return 'Insurance';
+    if (/(\u767d\u9152|\u98df\u54c1|\u996e\u6599|\u6d88\u8d39|consumer)/i.test(text)) return 'Consumer Staples';
+    if (/(\u534a\u5bfc\u4f53|\u7535\u5b50|\u8f6f\u4ef6|\u901a\u4fe1|tech)/i.test(text)) return 'Technology';
+    if (/(\u7535\u529b|\u80fd\u6e90|\u7164\u70ad|\u77f3\u6cb9|\u5929\u7136\u6c14|energy)/i.test(text)) return 'Energy';
+    if (/(\u533b\u836f|\u533b\u7597|\u751f\u7269|health)/i.test(text)) return 'Healthcare';
+    if (/(\u8bc1\u5238|\u91d1\u878d|financial)/i.test(text)) return 'Financials';
+    if (/(\u5730\u4ea7|\u623f\u5730\u4ea7|real estate)/i.test(text)) return 'Real Estate';
+    if (/(\u6709\u8272|\u94a2\u94c1|\u6750\u6599|\u5316\u5de5|material)/i.test(text)) return 'Materials';
+    if (/(\u6c7d\u8f66|\u673a\u68b0|\u5236\u9020|\u519b\u5de5|industrial)/i.test(text)) return 'Industrials';
+    if (/(\u5bb6\u7535|\u7eba\u7ec7|\u96f6\u552e|retail|discretionary)/i.test(text)) return 'Consumer Discretionary';
+    if (/(\u516c\u7528|utility)/i.test(text)) return 'Utilities';
+    return 'Other';
+}
+
+function detectBoardType(code) {
+    if (String(code).startsWith('688')) return 'STAR';
+    if (String(code).startsWith('300')) return 'CHINEXT';
+    return 'MAIN';
+}
+
+function detectStFlag(name) {
+    const upper = String(name || '').toUpperCase();
+    return upper.includes('ST');
+}
+
+function resolveLimitPct(boardType, isSt) {
+    if (isSt) return 0.05;
+    if (boardType === 'STAR' || boardType === 'CHINEXT') return 0.20;
+    return 0.10;
+}
+
+function computeLimitStatus(changePct, limitPct) {
+    if (!Number.isFinite(changePct)) return 'NORMAL';
+    const limitUpTrigger = limitPct * 100 - 0.1;
+    const limitDownTrigger = -limitPct * 100 + 0.1;
+    if (changePct >= limitUpTrigger) return 'LIMIT_UP';
+    if (changePct <= limitDownTrigger) return 'LIMIT_DOWN';
+    return 'NORMAL';
 }
 
 function normalizeTickerRows(rows) {
@@ -293,8 +475,13 @@ async function fetchEastMoneyQuotes(secids) {
             low: parseNumber(item.f16),
             open: parseNumber(item.f17),
             prevClose: parseNumber(item.f18),
+            marketCap: parseNumber(item.f20),
+            floatMarketCap: parseNumber(item.f21),
             volume: parseNumber(item.f47),
-            turnover: parseNumber(item.f48)
+            turnover: parseNumber(item.f48),
+            sectorRaw: String(item.f100 || ''),
+            conceptTagsRaw: String(item.f103 || ''),
+            peTtm: parseNumber(item.f115)
         });
     }
     return bySecid;
@@ -452,11 +639,22 @@ function asUniverseRow(constituent, quote) {
         low: null,
         open: null,
         prevClose: null,
+        marketCap: null,
+        floatMarketCap: null,
         volume: null,
-        turnover: null
+        turnover: null,
+        sectorRaw: '',
+        conceptTagsRaw: '',
+        peTtm: null
     };
     const prediction = calculatePrediction(merged);
     const policy = calculatePolicy(prediction);
+    const boardType = detectBoardType(constituent.code);
+    const isSt = detectStFlag(merged.name || constituent.name);
+    const limitPct = resolveLimitPct(boardType, isSt);
+    const limitStatus = computeLimitStatus(merged.changePct, limitPct);
+    const marginEligible = /\u878d\u8d44\u878d\u5238/.test(merged.conceptTagsRaw || '');
+    const sector = translateSectorToEnglish(merged.sectorRaw);
     const totalScore = clamp(
         prediction.pUp * 0.5 + prediction.confidence * 0.3 + clamp(((merged.changePct ?? 0) + 5) / 10, 0, 1) * 0.2,
         0,
@@ -475,6 +673,23 @@ function asUniverseRow(constituent, quote) {
         high: merged.high,
         low: merged.low,
         prevClose: merged.prevClose,
+        sector,
+        sectorRaw: merged.sectorRaw || '',
+        conceptTagsRaw: merged.conceptTagsRaw || '',
+        isSt,
+        boardType,
+        limitPct,
+        limitUpThresholdPct: Number((limitPct * 100 - 0.1).toFixed(2)),
+        limitDownThresholdPct: Number((-limitPct * 100 + 0.1).toFixed(2)),
+        limitStatus,
+        marginEligible,
+        shortEligible: false,
+        shortReason: CN_POLICY_SHORT_REASON,
+        valuation: {
+            peTtm: merged.peTtm,
+            marketCap: merged.marketCap,
+            floatMarketCap: merged.floatMarketCap
+        },
         volume: merged.volume,
         turnover: merged.turnover,
         prediction: {
@@ -490,7 +705,11 @@ function asUniverseRow(constituent, quote) {
             action: policy.action,
             positionSize: policy.positionSize,
             shortAllowed: false,
-            leverage: 1.0
+            leverage: 1.0,
+            shortEligible: false,
+            marginEligible,
+            shortReason: CN_POLICY_SHORT_REASON,
+            tPlusOneApplied: true
         },
         totalScore: Number(totalScore.toFixed(4)),
         status: Number.isFinite(merged.price) ? 'LIVE' : 'ERROR'
@@ -522,14 +741,18 @@ async function fetchCnLivePayload() {
     }
 
     const rows = csi300Snapshot.map((constituent) => asUniverseRow(constituent, quoteMap.get(constituent.secid)));
+    const marketSession = computeMarketSession();
 
     return {
         meta: {
             source: 'eastmoney',
             timestamp: new Date().toISOString(),
             stale: false,
-            pollIntervalSec: CN_POLL_INTERVAL_SEC
+            pollIntervalSec: CN_POLL_INTERVAL_SEC,
+            delayNote: CN_DELAY_NOTE,
+            disclaimer: CN_DISCLAIMER
         },
+        marketSession,
         indices: {
             sse: normalizeIndex('000001.SH', sseQuote),
             csi300: normalizeIndex('000300.SH', csiQuote)
@@ -568,6 +791,8 @@ function getSortValue(row, sortKey) {
     switch (sortKey) {
     case 'code': return row.code;
     case 'name': return row.name;
+    case 'sector': return row.sector;
+    case 'limitStatus': return LIMIT_STATUS_ORDER[row.limitStatus] || 0;
     case 'price': return row.price ?? Number.NEGATIVE_INFINITY;
     case 'changePct': return row.changePct ?? Number.NEGATIVE_INFINITY;
     case 'volume': return row.volume ?? Number.NEGATIVE_INFINITY;
@@ -577,11 +802,19 @@ function getSortValue(row, sortKey) {
     }
 }
 
-function applyUniverseQuery(rows, search, sort, direction, page, pageSize) {
+function applyUniverseQuery(rows, search, sort, direction, page, pageSize, limitFilter) {
     const keyword = (search || '').trim().toLowerCase();
-    const filtered = keyword
-        ? rows.filter((row) => row.code.includes(keyword) || row.name.toLowerCase().includes(keyword))
+    const filteredBySearch = keyword
+        ? rows.filter((row) => row.code.includes(keyword) || row.name.toLowerCase().includes(keyword) || row.sector.toLowerCase().includes(keyword))
         : [...rows];
+
+    const normalizedFilter = String(limitFilter || 'all').toLowerCase();
+    const filtered = filteredBySearch.filter((row) => {
+        if (normalizedFilter === 'limit_up') return row.limitStatus === 'LIMIT_UP';
+        if (normalizedFilter === 'limit_down') return row.limitStatus === 'LIMIT_DOWN';
+        if (normalizedFilter === 'st') return row.isSt;
+        return true;
+    });
 
     const directionFactor = direction === 'asc' ? 1 : -1;
     filtered.sort((a, b) => {
@@ -615,7 +848,8 @@ function parseCnListQuery(parsedUrl) {
     const sort = parsedUrl.searchParams.get('sort') || 'pUp';
     const direction = (parsedUrl.searchParams.get('direction') || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
     const search = parsedUrl.searchParams.get('search') || '';
-    return { page, pageSize, sort, direction, search };
+    const limitFilter = parsedUrl.searchParams.get('limitFilter') || 'all';
+    return { page, pageSize, sort, direction, search, limitFilter };
 }
 
 function normalizeIndexCode(rawCode) {
@@ -638,12 +872,21 @@ async function handleCnPrices(req, res, parsedUrl) {
     const query = parseCnListQuery(parsedUrl);
     try {
         const payload = await getCnPayloadWithCache();
-        const universe = applyUniverseQuery(payload.universe.rows, query.search, query.sort, query.direction, query.page, query.pageSize);
+        const universe = applyUniverseQuery(
+            payload.universe.rows,
+            query.search,
+            query.sort,
+            query.direction,
+            query.page,
+            query.pageSize,
+            query.limitFilter
+        );
         const status = payload.meta.stale ? 'STALE' : 'LIVE';
         universe.rows = universe.rows.map((row) => ({ ...row, status }));
 
         sendJson(res, 200, {
             meta: payload.meta,
+            marketSession: payload.marketSession,
             indices: payload.indices,
             universe
         });
@@ -668,12 +911,21 @@ async function handleCnQuotes(req, res, parsedUrl) {
     const query = parseCnListQuery(parsedUrl);
     try {
         const payload = await getCnPayloadWithCache();
-        const universe = applyUniverseQuery(payload.universe.rows, query.search, query.sort, query.direction, query.page, query.pageSize);
+        const universe = applyUniverseQuery(
+            payload.universe.rows,
+            query.search,
+            query.sort,
+            query.direction,
+            query.page,
+            query.pageSize,
+            query.limitFilter
+        );
         const status = payload.meta.stale ? 'STALE' : 'LIVE';
         universe.rows = universe.rows.map((row) => ({ ...row, status }));
 
         sendJson(res, 200, {
             meta: payload.meta,
+            marketSession: payload.marketSession,
             universe
         });
     } catch (error) {
@@ -717,6 +969,7 @@ async function handleCnIndexPrediction(req, res, rawIndexCode) {
 
         sendJson(res, 200, {
             meta: payload.meta,
+            marketSession: payload.marketSession,
             indexCode,
             indexName: INDEX_NAME_BY_CODE[indexCode],
             currentValue: indexData.price,
@@ -740,7 +993,11 @@ async function handleCnIndexPrediction(req, res, rawIndexCode) {
                 signal: policy.signal,
                 positionSize: policy.positionSize,
                 shortAllowed: false,
-                leverage: 1.0
+                leverage: 1.0,
+                shortEligible: false,
+                marginEligible: false,
+                shortReason: CN_POLICY_SHORT_REASON,
+                tPlusOneApplied: true
             },
             tpSl
         });
@@ -786,6 +1043,7 @@ async function handleCnStock(req, res, rawStockCode) {
 
         sendJson(res, 200, {
             meta: payload.meta,
+            marketSession: payload.marketSession,
             code: row.code,
             name: row.name,
             market: row.market,
@@ -794,6 +1052,15 @@ async function handleCnStock(req, res, rawStockCode) {
             changePct: row.changePct,
             volume: row.volume,
             turnover: row.turnover,
+            sector: row.sector,
+            isSt: row.isSt,
+            boardType: row.boardType,
+            limitPct: row.limitPct,
+            limitStatus: row.limitStatus,
+            marginEligible: row.marginEligible,
+            shortEligible: false,
+            shortReason: CN_POLICY_SHORT_REASON,
+            valuation: row.valuation,
             prediction: row.prediction,
             policy: row.policy,
             tpSl
@@ -849,6 +1116,7 @@ async function handleCnRanking(req, res, parsedUrl) {
 
         sendJson(res, 200, {
             meta: payload.meta,
+            marketSession: payload.marketSession,
             date: payload.meta.timestamp.slice(0, 10),
             rankings
         });
