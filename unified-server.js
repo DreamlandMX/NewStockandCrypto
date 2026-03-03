@@ -17,10 +17,16 @@ const CN_CACHE_TTL_MS = Number(process.env.CN_CACHE_TTL_MS || 9000);
 const CN_POLL_INTERVAL_SEC = Number(process.env.CN_POLL_INTERVAL_SEC || 10);
 const US_CACHE_TTL_MS = Number(process.env.US_CACHE_TTL_MS || 9000);
 const US_POLL_INTERVAL_SEC = Number(process.env.US_POLL_INTERVAL_SEC || 10);
+const US_INDEX_FAST_CACHE_TTL_MS = Number(process.env.US_INDEX_FAST_CACHE_TTL_MS || 5000);
+const US_INDEX_FAST_POLL_INTERVAL_SEC = Number(process.env.US_INDEX_FAST_POLL_INTERVAL_SEC || 5);
+const US_INDEX_HISTORY_CACHE_TTL_MS = Number(process.env.US_INDEX_HISTORY_CACHE_TTL_MS || 60000);
+const US_INDEX_HISTORY_DEFAULT_RANGE = '2d';
+const US_INDEX_HISTORY_DEFAULT_INTERVAL = '5m';
 const BINANCE_US_URL = 'https://api.binance.us/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22%5D';
 const EASTMONEY_ULIST_FIELDS = 'f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f20,f21,f47,f48,f100,f103,f115';
 const EASTMONEY_ULIST_BASE = 'https://push2.eastmoney.com/api/qt/ulist.np/get';
 const STOOQ_BATCH_BASE = 'https://stooq.com/q/l/?f=sd2t2ohlcv&h&e=csv&s=';
+const YAHOO_CHART_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const SP500_SNAPSHOT_PATH = path.join(WEB_ROOT, 'assets', 'sp500-constituents.json');
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || '';
 const US_ENABLE_ALPHA_FALLBACK = String(process.env.US_ENABLE_ALPHA_FALLBACK || 'true').toLowerCase() !== 'false';
@@ -49,6 +55,13 @@ const US_INDEX_SYMBOL_CONFIG = {
     '^NDX': { symbol: '^NDX', aliases: ['^NDX', 'NDX'], name: 'Nasdaq 100' },
     '^SPX': { symbol: '^SPX', aliases: ['^SPX', 'SPX', '^GSPC', 'GSPC'], name: 'S&P 500' }
 };
+const US_HISTORY_RANGE_ALLOW = new Set(['1d', '2d', '5d']);
+const US_HISTORY_INTERVAL_ALLOW = new Set(['1m', '2m', '5m', '15m']);
+const US_INDEX_HISTORY_SYMBOLS = {
+    dow: '^DJI',
+    nasdaq100: '^NDX',
+    sp500: '^GSPC'
+};
 const LIMIT_STATUS_ORDER = {
     LIMIT_UP: 3,
     LIMIT_DOWN: 2,
@@ -61,6 +74,11 @@ let cnCache = null;
 let cnCacheAt = 0;
 let usCache = null;
 let usCacheAt = 0;
+let usIndicesCache = null;
+let usIndicesCacheAt = 0;
+let usIndicesHistoryCache = null;
+let usIndicesHistoryCacheAt = 0;
+let usIndicesHistoryCacheKey = '';
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -330,6 +348,17 @@ function nextUsTradingDateKey(currentDate) {
     const date = new Date(currentDate.getTime());
     while (true) {
         date.setUTCDate(date.getUTCDate() + 1);
+        const ny = toNewYorkNow(date);
+        if (isUsTradingDate(ny.dateKey, ny.weekday)) {
+            return ny.dateKey;
+        }
+    }
+}
+
+function previousUsTradingDateKey(currentDate) {
+    const date = new Date(currentDate.getTime());
+    while (true) {
+        date.setUTCDate(date.getUTCDate() - 1);
         const ny = toNewYorkNow(date);
         if (isUsTradingDate(ny.dateKey, ny.weekday)) {
             return ny.dateKey;
@@ -1533,7 +1562,10 @@ function usQuoteFromStooqRow(stooqRow) {
         low: stooqRow.low,
         price: stooqRow.price,
         volume: stooqRow.volume,
-        changePct: stooqRow.changePct
+        changePct: stooqRow.changePct,
+        quoteDate: stooqRow.date || null,
+        quoteTime: stooqRow.time || null,
+        quoteTimezone: 'ET'
     };
 }
 
@@ -1750,7 +1782,10 @@ async function fetchUsLivePayload() {
             open: quote?.open ?? null,
             high: quote?.high ?? null,
             low: quote?.low ?? null,
-            volume: quote?.volume ?? null
+            volume: quote?.volume ?? null,
+            quoteDate: quote?.quoteDate ?? null,
+            quoteTime: quote?.quoteTime ?? null,
+            quoteTimezone: quote?.quoteTimezone ?? 'ET'
         };
     }
 
@@ -1778,6 +1813,231 @@ async function fetchUsLivePayload() {
             rows
         }
     };
+}
+
+async function fetchUsIndicesPayload() {
+    const indexSymbols = ['^DJI', '^NDX', '^SPX'];
+    const quoteMap = await fetchStooqQuotes(indexSymbols);
+    let source = 'stooq';
+
+    const indices = {};
+    for (const canonical of indexSymbols) {
+        const config = US_INDEX_SYMBOL_CONFIG[canonical];
+        const row = quoteMap.get(canonical);
+        let quote = usQuoteFromStooqRow(row);
+        if ((!quote || quote.price === null) && US_ENABLE_ALPHA_FALLBACK && ALPHA_VANTAGE_API_KEY) {
+            const alphaQuote = await fetchAlphaIndexQuote(canonical);
+            if (alphaQuote && alphaQuote.price !== null) {
+                quote = {
+                    ...alphaQuote,
+                    quoteDate: null,
+                    quoteTime: null,
+                    quoteTimezone: 'ET'
+                };
+                source = 'stooq+alpha';
+            }
+        }
+        indices[canonical] = {
+            symbol: canonical,
+            name: config.name,
+            price: quote?.price ?? null,
+            changePct: quote?.changePct ?? null,
+            open: quote?.open ?? null,
+            high: quote?.high ?? null,
+            low: quote?.low ?? null,
+            volume: quote?.volume ?? null,
+            quoteDate: quote?.quoteDate ?? null,
+            quoteTime: quote?.quoteTime ?? null,
+            quoteTimezone: quote?.quoteTimezone ?? 'ET'
+        };
+    }
+
+    return {
+        meta: {
+            source,
+            timestamp: new Date().toISOString(),
+            stale: false,
+            pollIntervalSec: US_INDEX_FAST_POLL_INTERVAL_SEC,
+            delayNote: US_DELAY_NOTE,
+            disclaimer: US_DISCLAIMER
+        },
+        marketSession: computeUsMarketSession(),
+        indices: {
+            dow: indices['^DJI'],
+            nasdaq100: indices['^NDX'],
+            sp500: indices['^SPX']
+        }
+    };
+}
+
+function parseUsIndicesHistoryQuery(parsedUrl) {
+    const rangeCandidate = String(parsedUrl.searchParams.get('range') || US_INDEX_HISTORY_DEFAULT_RANGE).toLowerCase();
+    const intervalCandidate = String(parsedUrl.searchParams.get('interval') || US_INDEX_HISTORY_DEFAULT_INTERVAL).toLowerCase();
+    const range = US_HISTORY_RANGE_ALLOW.has(rangeCandidate) ? rangeCandidate : US_INDEX_HISTORY_DEFAULT_RANGE;
+    const interval = US_HISTORY_INTERVAL_ALLOW.has(intervalCandidate) ? intervalCandidate : US_INDEX_HISTORY_DEFAULT_INTERVAL;
+    return { range, interval };
+}
+
+function buildYahooChartUrl(symbol, range, interval) {
+    const encodedSymbol = encodeURIComponent(symbol);
+    const encodedRange = encodeURIComponent(range);
+    const encodedInterval = encodeURIComponent(interval);
+    return `${YAHOO_CHART_BASE}${encodedSymbol}?range=${encodedRange}&interval=${encodedInterval}&includePrePost=true&events=div,split`;
+}
+
+function parseYahooIndexHistoryPoints(payload) {
+    const result = payload?.chart?.result?.[0];
+    const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+    const closes = Array.isArray(result?.indicators?.quote?.[0]?.close) ? result.indicators.quote[0].close : [];
+    const points = [];
+    const size = Math.min(timestamps.length, closes.length);
+    for (let i = 0; i < size; i += 1) {
+        const tsSec = Number(timestamps[i]);
+        const price = parseNumber(closes[i]);
+        if (!Number.isFinite(tsSec) || price === null) continue;
+        points.push({
+            ts: new Date(tsSec * 1000).toISOString(),
+            price
+        });
+    }
+    points.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts));
+    return points;
+}
+
+function resolveUsHistorySessionTarget(now = new Date()) {
+    const marketSession = computeUsMarketSession(now);
+    const ny = toNewYorkNow(now);
+    const isTradingDate = isUsTradingDate(ny.dateKey, ny.weekday);
+    const premarketStartToday = makeNewYorkDate(ny.dateKey, 4, 0);
+    const afterHoursEndToday = makeNewYorkDate(ny.dateKey, 20, 0);
+
+    let selectedType = 'TODAY_REGULAR';
+    let targetDateKey = ny.dateKey;
+
+    if (marketSession.phaseCode === 'CLOSED') {
+        selectedType = 'LAST_REGULAR';
+        const nowMs = ny.date.getTime();
+        if (isTradingDate && nowMs >= afterHoursEndToday.getTime()) {
+            targetDateKey = ny.dateKey;
+        } else if (isTradingDate && nowMs >= premarketStartToday.getTime()) {
+            targetDateKey = ny.dateKey;
+        } else {
+            targetDateKey = previousUsTradingDateKey(ny.date);
+        }
+    }
+
+    const isEarlyClose = US_EARLY_CLOSE_2026.has(targetDateKey);
+    const regularCloseHour = isEarlyClose ? 13 : 16;
+    const sessionStart = makeNewYorkDate(targetDateKey, 9, 30);
+    const sessionEnd = makeNewYorkDate(targetDateKey, regularCloseHour, 0);
+
+    return {
+        marketSession,
+        selectedType,
+        targetDateKey,
+        sessionStart,
+        sessionEnd
+    };
+}
+
+function filterSeriesBySession(points, sessionStart, sessionEnd) {
+    if (!Array.isArray(points) || !points.length) return [];
+    const startMs = sessionStart.getTime();
+    const endMs = sessionEnd.getTime();
+    return points.filter((point) => {
+        const pointMs = Date.parse(point.ts);
+        return Number.isFinite(pointMs) && pointMs >= startMs && pointMs <= endMs;
+    });
+}
+
+function formatEtTimeHm(date) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: US_SESSION_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+    return formatter.format(date);
+}
+
+async function fetchUsIndicesHistoryPayload(range, interval) {
+    const targets = Object.entries(US_INDEX_HISTORY_SYMBOLS);
+    const series = {
+        dow: [],
+        nasdaq100: [],
+        sp500: []
+    };
+    const [dowPayload, ndxPayload, spxPayload] = await Promise.all(targets.map(([, symbol]) => fetchJsonFromHttps(buildYahooChartUrl(symbol, range, interval), 9000)));
+    series.dow = parseYahooIndexHistoryPoints(dowPayload);
+    series.nasdaq100 = parseYahooIndexHistoryPoints(ndxPayload);
+    series.sp500 = parseYahooIndexHistoryPoints(spxPayload);
+
+    const target = resolveUsHistorySessionTarget();
+    let selectedType = target.selectedType;
+    let start = target.sessionStart;
+    let end = target.sessionEnd;
+
+    series.dow = filterSeriesBySession(series.dow, start, end);
+    series.nasdaq100 = filterSeriesBySession(series.nasdaq100, start, end);
+    series.sp500 = filterSeriesBySession(series.sp500, start, end);
+
+    if (selectedType === 'TODAY_REGULAR' && !series.dow.length && !series.nasdaq100.length && !series.sp500.length) {
+        const fallbackDateKey = previousUsTradingDateKey(target.sessionStart);
+        const isEarlyClose = US_EARLY_CLOSE_2026.has(fallbackDateKey);
+        const regularCloseHour = isEarlyClose ? 13 : 16;
+        start = makeNewYorkDate(fallbackDateKey, 9, 30);
+        end = makeNewYorkDate(fallbackDateKey, regularCloseHour, 0);
+        series.dow = filterSeriesBySession(parseYahooIndexHistoryPoints(dowPayload), start, end);
+        series.nasdaq100 = filterSeriesBySession(parseYahooIndexHistoryPoints(ndxPayload), start, end);
+        series.sp500 = filterSeriesBySession(parseYahooIndexHistoryPoints(spxPayload), start, end);
+        selectedType = 'LAST_REGULAR';
+    }
+
+    return {
+        meta: {
+            source: 'yahoo_chart',
+            timestamp: new Date().toISOString(),
+            stale: false,
+            range,
+            interval
+        },
+        marketSession: {
+            phaseCode: target.marketSession.phaseCode,
+            timezoneLabel: target.marketSession.timezoneLabel
+        },
+        series,
+        selectedSession: {
+            type: selectedType,
+            startEt: start.toISOString(),
+            endEt: end.toISOString(),
+            label: `${selectedType === 'LAST_REGULAR' ? 'Last Regular Session' : 'Regular Session'} (${formatEtTimeHm(start)}-${formatEtTimeHm(end)} ET)`
+        }
+    };
+}
+
+async function getUsIndicesHistoryWithCache(range, interval) {
+    const now = Date.now();
+    const cacheKey = `${range}|${interval}`;
+    if (usIndicesHistoryCache && usIndicesHistoryCacheKey === cacheKey && now - usIndicesHistoryCacheAt <= US_INDEX_HISTORY_CACHE_TTL_MS) {
+        return deepCopy(usIndicesHistoryCache);
+    }
+
+    try {
+        const payload = await fetchUsIndicesHistoryPayload(range, interval);
+        usIndicesHistoryCache = payload;
+        usIndicesHistoryCacheAt = Date.now();
+        usIndicesHistoryCacheKey = cacheKey;
+        return deepCopy(payload);
+    } catch (error) {
+        if (usIndicesHistoryCache && usIndicesHistoryCacheKey === cacheKey) {
+            const stalePayload = deepCopy(usIndicesHistoryCache);
+            stalePayload.meta.stale = true;
+            stalePayload.meta.staleReason = error.message;
+            stalePayload.meta.timestamp = new Date().toISOString();
+            return stalePayload;
+        }
+        throw error;
+    }
 }
 
 async function getUsPayloadWithCache() {
@@ -1889,6 +2149,65 @@ async function handleUsPrices(req, res, parsedUrl) {
     } catch (error) {
         sendJson(res, 502, {
             error: 'Failed to fetch US equity prices from upstream',
+            detail: error.message
+        });
+    }
+}
+
+async function handleUsIndices(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+
+    const now = Date.now();
+    if (usIndicesCache && now - usIndicesCacheAt <= US_INDEX_FAST_CACHE_TTL_MS) {
+        sendJson(res, 200, deepCopy(usIndicesCache));
+        return;
+    }
+
+    try {
+        const payload = await fetchUsIndicesPayload();
+        usIndicesCache = payload;
+        usIndicesCacheAt = Date.now();
+        sendJson(res, 200, payload);
+    } catch (error) {
+        if (usIndicesCache) {
+            const stalePayload = deepCopy(usIndicesCache);
+            stalePayload.meta.stale = true;
+            stalePayload.meta.staleReason = error.message;
+            stalePayload.meta.timestamp = new Date().toISOString();
+            sendJson(res, 200, stalePayload);
+            return;
+        }
+        sendJson(res, 502, {
+            error: 'Failed to fetch US indices from upstream',
+            detail: error.message
+        });
+    }
+}
+
+async function handleUsIndicesHistory(req, res, parsedUrl) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+
+    const query = parseUsIndicesHistoryQuery(parsedUrl);
+    try {
+        const payload = await getUsIndicesHistoryWithCache(query.range, query.interval);
+        sendJson(res, 200, payload);
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to fetch US index history from upstream',
             detail: error.message
         });
     }
@@ -2285,6 +2604,14 @@ const server = http.createServer((req, res) => {
 
     if (parsedUrl.pathname === '/api/us-equity/prices') {
         handleUsPrices(req, res, parsedUrl);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/us-equity/indices/history') {
+        handleUsIndicesHistory(req, res, parsedUrl);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/us-equity/indices') {
+        handleUsIndices(req, res);
         return;
     }
     if (parsedUrl.pathname === '/api/us-equity/sp500/quotes') {

@@ -137,6 +137,41 @@
             color: #cbd5e1;
             border: 1px solid rgba(148, 163, 184, 0.45);
         }
+        .us-quote-note {
+            margin-top: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.73rem;
+        }
+        .us-sparkline-wrap {
+            height: 72px;
+            margin-top: 0.6rem;
+        }
+        .us-mini-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 0.8rem;
+            margin-bottom: 1.4rem;
+        }
+        .us-mini-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            padding: 0.7rem 0.8rem;
+        }
+        .us-mini-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-bottom: 0.45rem;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .us-mini-canvas {
+            height: 72px;
+        }
     </style>
 </head>
 <body>
@@ -193,18 +228,24 @@
                     <div class="metric-label">Dow Jones</div>
                     <div class="metric-value" id="dowIndexValue">--</div>
                     <div class="metric-change" id="dowIndexChange">--</div>
+                    <div class="us-quote-note" id="dowQuoteTime">Quote: -- ET</div>
+                    <div class="us-sparkline-wrap"><canvas id="dowSparkline"></canvas></div>
                     <div style="margin-top:0.7rem;"><span class="status-badge info" id="dowIndexStatus">WAITING</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Nasdaq 100</div>
                     <div class="metric-value" id="ndxIndexValue">--</div>
                     <div class="metric-change" id="ndxIndexChange">--</div>
+                    <div class="us-quote-note" id="ndxQuoteTime">Quote: -- ET</div>
+                    <div class="us-sparkline-wrap"><canvas id="ndxSparkline"></canvas></div>
                     <div style="margin-top:0.7rem;"><span class="status-badge info" id="ndxIndexStatus">WAITING</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">S&amp;P 500</div>
                     <div class="metric-value" id="spxIndexValue">--</div>
                     <div class="metric-change" id="spxIndexChange">--</div>
+                    <div class="us-quote-note" id="spxQuoteTime">Quote: -- ET</div>
+                    <div class="us-sparkline-wrap"><canvas id="spxSparkline"></canvas></div>
                     <div style="margin-top:0.7rem;"><span class="status-badge info" id="spxIndexStatus">WAITING</span></div>
                 </div>
                 <div class="metric-card">
@@ -214,6 +255,28 @@
                     <div style="margin-top:0.7rem;"><span class="status-badge warning" id="nextPhaseBadge">--</span></div>
                 </div>
             </div>
+
+            <section class="us-mini-grid">
+                <div class="us-mini-card">
+                    <div class="us-mini-head">
+                        <span>Dow Jones Mini Trend</span>
+                        <span class="us-mono" id="dowMiniLabel">Regular Session (09:30-16:00 ET)</span>
+                        <div class="us-control-group">
+                            <button type="button" class="us-control-chip active" data-axis-mode="normalized">Normalized %</button>
+                            <button type="button" class="us-control-chip" data-axis-mode="absolute">Absolute Points</button>
+                        </div>
+                    </div>
+                    <div class="us-mini-canvas"><canvas id="dowMiniTrend"></canvas></div>
+                </div>
+                <div class="us-mini-card">
+                    <div class="us-mini-head"><span>Nasdaq 100 Mini Trend</span><span class="us-mono" id="ndxMiniLabel">Regular Session (09:30-16:00 ET)</span></div>
+                    <div class="us-mini-canvas"><canvas id="ndxMiniTrend"></canvas></div>
+                </div>
+                <div class="us-mini-card">
+                    <div class="us-mini-head"><span>S&amp;P 500 Mini Trend</span><span class="us-mono" id="spxMiniLabel">Regular Session (09:30-16:00 ET)</span></div>
+                    <div class="us-mini-canvas"><canvas id="spxMiniTrend"></canvas></div>
+                </div>
+            </section>
 
             <section class="us-chart-panel">
                 <div class="us-chart-head">

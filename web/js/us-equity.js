@@ -2,11 +2,17 @@
 // StockandCrypto - US Equity Page Logic
 // ========================================
 
-const US_POLL_INTERVAL_MS = 10000;
-const MAX_POINTS_BY_TIMEFRAME = {
-    '1d': 36,
-    '5d': 72,
-    '1m': 140
+const US_FAST_POLL_INTERVAL_MS = 5000;
+const US_SLOW_POLL_INTERVAL_MS = 30000;
+const US_INDEX_HISTORY_RANGE = '2d';
+const US_INDEX_HISTORY_INTERVAL = '5m';
+const US_ET_TIMEZONE = 'America/New_York';
+const SESSION_REFRESH_COOLDOWN_MS = 60000;
+const DEFAULT_SESSION_LABEL = 'Regular Session (09:30-16:00 ET)';
+const MAX_MAIN_POINTS_BY_TIMEFRAME = {
+    '1d': 180,
+    '5d': 540,
+    '1m': 1200
 };
 
 const state = {
@@ -17,11 +23,13 @@ const state = {
     search: '',
     sector: 'all',
     timeframe: '5d',
+    axisMode: 'normalized',
     predictionIndexSymbol: '^SPX',
     tickCount: 0,
     lastUpdated: null,
     mode: 'loading',
-    loading: false,
+    fastLoading: false,
+    slowLoading: false,
     indices: null,
     prediction: null,
     marketSession: null,
@@ -40,7 +48,36 @@ const state = {
         predictedOpen: [],
         predictedClose: []
     },
-    pollTimer: null,
+    indexSeries: {
+        dow: [],
+        nasdaq100: [],
+        sp500: []
+    },
+    lastQuoteStampByIndex: {
+        dow: '--',
+        nasdaq100: '--',
+        sp500: '--'
+    },
+    lastQuoteKeyByIndex: {
+        dow: '',
+        nasdaq100: '',
+        sp500: ''
+    },
+    historySeedInfo: null,
+    historySessionStartMs: null,
+    historySessionEndMs: null,
+    historySessionLabel: DEFAULT_SESSION_LABEL,
+    lastHistoryReseedAttemptAt: 0,
+    sparklineCharts: {
+        dowCard: null,
+        ndxCard: null,
+        spxCard: null,
+        dowMini: null,
+        ndxMini: null,
+        spxMini: null
+    },
+    fastTickTimer: null,
+    slowTableTimer: null,
     countdownTimer: null,
     localCountdownSec: 0
 };
@@ -55,12 +92,18 @@ const phaseToneToBadge = {
     muted: 'muted'
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     cacheElements();
     bindEvents();
-    initializeChart();
-    refreshAll();
-    startPolling();
+    initializeMainChart();
+    initializeSparklineCharts();
+
+    await seedIndexHistory();
+    await refreshIndicesFast(true);
+    await refreshFullData(true);
+
+    startFastTimer();
+    startSlowTimer();
     startCountdownTimer();
 });
 
@@ -85,6 +128,9 @@ function cacheElements() {
         spxIndexValue: byId('spxIndexValue'),
         spxIndexChange: byId('spxIndexChange'),
         spxIndexStatus: byId('spxIndexStatus'),
+        dowQuoteTime: byId('dowQuoteTime'),
+        ndxQuoteTime: byId('ndxQuoteTime'),
+        spxQuoteTime: byId('spxQuoteTime'),
         refreshNowBtn: byId('refreshNowBtn'),
         indexSelector: byId('indexSelector'),
         indexChart: byId('indexChart'),
@@ -114,7 +160,16 @@ function cacheElements() {
         sp500TableBody: byId('sp500TableBody'),
         prevPageBtn: byId('prevPageBtn'),
         nextPageBtn: byId('nextPageBtn'),
-        pageInfo: byId('pageInfo')
+        pageInfo: byId('pageInfo'),
+        dowSparkline: byId('dowSparkline'),
+        ndxSparkline: byId('ndxSparkline'),
+        spxSparkline: byId('spxSparkline'),
+        dowMiniTrend: byId('dowMiniTrend'),
+        ndxMiniTrend: byId('ndxMiniTrend'),
+        spxMiniTrend: byId('spxMiniTrend'),
+        dowMiniLabel: byId('dowMiniLabel'),
+        ndxMiniLabel: byId('ndxMiniLabel'),
+        spxMiniLabel: byId('spxMiniLabel')
     });
 }
 
@@ -122,7 +177,7 @@ function bindEvents() {
     const debouncedSearch = utils.debounce(() => {
         state.page = 1;
         state.search = (els.searchInput?.value || '').trim();
-        refreshAll();
+        refreshFullData();
     }, 300);
 
     if (els.searchInput) {
@@ -133,7 +188,7 @@ function bindEvents() {
         els.sectorSelect.addEventListener('change', () => {
             state.page = 1;
             state.sector = els.sectorSelect.value || 'all';
-            refreshAll();
+            refreshFullData();
         });
     }
 
@@ -141,7 +196,7 @@ function bindEvents() {
         els.pageSizeSelect.addEventListener('change', () => {
             state.page = 1;
             state.pageSize = Number(els.pageSizeSelect.value || 50);
-            refreshAll();
+            refreshFullData();
         });
     }
 
@@ -149,7 +204,7 @@ function bindEvents() {
         els.prevPageBtn.addEventListener('click', () => {
             if (state.page > 1) {
                 state.page -= 1;
-                refreshAll();
+                refreshFullData();
             }
         });
     }
@@ -158,7 +213,7 @@ function bindEvents() {
         els.nextPageBtn.addEventListener('click', () => {
             if (state.page < (state.universe.totalPages || 1)) {
                 state.page += 1;
-                refreshAll();
+                refreshFullData();
             }
         });
     }
@@ -172,7 +227,10 @@ function bindEvents() {
     }
 
     if (els.refreshNowBtn) {
-        els.refreshNowBtn.addEventListener('click', () => refreshAll(true));
+        els.refreshNowBtn.addEventListener('click', async () => {
+            await refreshIndicesFast(true);
+            await refreshFullData(true);
+        });
     }
 
     document.querySelectorAll('[data-sort]').forEach((th) => {
@@ -186,7 +244,7 @@ function bindEvents() {
                 state.direction = ['symbol', 'name', 'sector'].includes(key) ? 'asc' : 'desc';
             }
             state.page = 1;
-            refreshAll();
+            refreshFullData();
         });
     });
 
@@ -196,13 +254,23 @@ function bindEvents() {
             if (!timeframe) return;
             state.timeframe = timeframe;
             document.querySelectorAll('[data-timeframe]').forEach((chip) => chip.classList.toggle('active', chip === button));
-            trimChartSeries();
-            syncChartDatasets();
+            trimMainChartSeries();
+            syncMainChartDatasets();
+        });
+    });
+
+    document.querySelectorAll('[data-axis-mode]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const mode = button.getAttribute('data-axis-mode');
+            if (!mode) return;
+            state.axisMode = mode;
+            document.querySelectorAll('[data-axis-mode]').forEach((chip) => chip.classList.toggle('active', chip === button));
+            updateAllSparklines();
         });
     });
 }
 
-function initializeChart() {
+function initializeMainChart() {
     if (!els.indexChart || !window.Chart) return;
     const ctx = els.indexChart.getContext('2d');
     state.chart = new Chart(ctx, {
@@ -254,9 +322,53 @@ function initializeChart() {
     });
 }
 
-function startPolling() {
-    if (state.pollTimer) clearInterval(state.pollTimer);
-    state.pollTimer = setInterval(() => refreshAll(), US_POLL_INTERVAL_MS);
+function createSparklineChart(canvasEl) {
+    if (!canvasEl || !window.Chart) return null;
+    return new Chart(canvasEl.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                data: [],
+                borderColor: '#00E5FF',
+                borderWidth: 1.8,
+                pointRadius: 0,
+                tension: 0.22,
+                fill: false
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: true }
+            },
+            scales: {
+                x: { display: false },
+                y: { display: false }
+            }
+        }
+    });
+}
+
+function initializeSparklineCharts() {
+    state.sparklineCharts.dowCard = createSparklineChart(els.dowSparkline);
+    state.sparklineCharts.ndxCard = createSparklineChart(els.ndxSparkline);
+    state.sparklineCharts.spxCard = createSparklineChart(els.spxSparkline);
+    state.sparklineCharts.dowMini = createSparklineChart(els.dowMiniTrend);
+    state.sparklineCharts.ndxMini = createSparklineChart(els.ndxMiniTrend);
+    state.sparklineCharts.spxMini = createSparklineChart(els.spxMiniTrend);
+}
+
+function startFastTimer() {
+    if (state.fastTickTimer) clearInterval(state.fastTickTimer);
+    state.fastTickTimer = setInterval(() => refreshIndicesFast(), US_FAST_POLL_INTERVAL_MS);
+}
+
+function startSlowTimer() {
+    if (state.slowTableTimer) clearInterval(state.slowTableTimer);
+    state.slowTableTimer = setInterval(() => refreshFullData(), US_SLOW_POLL_INTERVAL_MS);
 }
 
 function startCountdownTimer() {
@@ -267,9 +379,80 @@ function startCountdownTimer() {
     }, 1000);
 }
 
-async function refreshAll(manual = false) {
-    if (state.loading) return;
-    state.loading = true;
+async function seedIndexHistory(silent = false) {
+    try {
+        const payload = await api.getUSEquityIndicesHistory({
+            range: US_INDEX_HISTORY_RANGE,
+            interval: US_INDEX_HISTORY_INTERVAL
+        });
+        applyHistorySessionMetadata(payload?.selectedSession);
+        const seeded = hydrateIndexSeriesFromHistory(payload?.series);
+        state.historySeedInfo = payload?.selectedSession || null;
+        if (!state.marketSession && payload?.marketSession) {
+            state.marketSession = payload.marketSession;
+        }
+        if (seeded > 0) {
+            updateAllSparklines();
+            return true;
+        }
+        return false;
+    } catch (error) {
+        if (!silent && window.showToast?.warning) {
+            window.showToast.warning('Unable to preload intraday history. Live sampling will continue.');
+        }
+        return false;
+    }
+}
+
+async function refreshIndicesFast(manual = false) {
+    if (state.fastLoading) return;
+    state.fastLoading = true;
+    try {
+        const payload = await api.getUSEquityIndices();
+        state.indices = payload.indices || state.indices;
+        state.marketSession = payload.marketSession || state.marketSession;
+        state.localCountdownSec = Math.max(0, Number(payload.marketSession?.countdownSec || state.localCountdownSec));
+        state.lastUpdated = payload.meta?.timestamp || new Date().toISOString();
+        state.mode = payload.meta?.stale ? 'stale' : 'live';
+        state.tickCount += 1;
+
+        const nowMs = Date.parse(state.lastUpdated) || Date.now();
+        if (shouldReseedHistory(nowMs)) {
+            const cooldownElapsed = Date.now() - state.lastHistoryReseedAttemptAt > SESSION_REFRESH_COOLDOWN_MS;
+            if (cooldownElapsed) {
+                state.lastHistoryReseedAttemptAt = Date.now();
+                await seedIndexHistory(true);
+            }
+        }
+
+        text(els.sourceDelayNote, payload.meta?.delayNote || 'US Level-1 quote feed; normal delay depends on venue');
+        text(els.disclaimerText, payload.meta?.disclaimer || 'Not for actual trading - simulation only');
+
+        appendIndexSeriesPoints(payload.indices, state.lastUpdated, true);
+        if (Number.isFinite(payload.indices?.sp500?.price)) {
+            pushMainChartPoint(payload.indices.sp500.price, state.lastUpdated);
+        }
+
+        renderModeBanner();
+        renderSession();
+        renderIndices();
+        updateAllSparklines();
+    } catch (error) {
+        if (!state.indices) {
+            state.mode = 'error';
+            renderModeBanner(error.message || 'US indices request failed.');
+        }
+        if (manual && window.showToast?.error) {
+            window.showToast.error('Failed to refresh US indices.');
+        }
+    } finally {
+        state.fastLoading = false;
+    }
+}
+
+async function refreshFullData(manual = false) {
+    if (state.slowLoading) return;
+    state.slowLoading = true;
     try {
         const payload = await api.getUSEquityPrices({
             page: state.page,
@@ -280,33 +463,27 @@ async function refreshAll(manual = false) {
             sector: state.sector
         });
 
-        state.indices = payload.indices || null;
+        if (!state.indices) state.indices = payload.indices || null;
         state.universe = payload.universe || state.universe;
-        state.marketSession = payload.marketSession || null;
-        state.localCountdownSec = Math.max(0, Number(payload.marketSession?.countdownSec || 0));
-        state.lastUpdated = payload.meta?.timestamp || new Date().toISOString();
-        state.tickCount += 1;
-        state.mode = payload.meta?.stale ? 'stale' : 'live';
-
-        text(els.sourceDelayNote, payload.meta?.delayNote || 'US Level-1 quote feed; normal delay depends on venue');
-        text(els.disclaimerText, payload.meta?.disclaimer || 'Not for actual trading - simulation only');
-
-        if (state.indices?.sp500?.price !== null && state.indices?.sp500?.price !== undefined) {
-            pushChartPoint(state.indices.sp500.price, state.lastUpdated);
-        }
-
+        if (!state.marketSession) state.marketSession = payload.marketSession || null;
+        if (!state.lastUpdated) state.lastUpdated = payload.meta?.timestamp || new Date().toISOString();
         updateSectorOptions(state.universe.rows || []);
+
         await loadIndexPrediction();
-        renderAll();
+        renderPrediction();
+        renderTable();
+        renderSortIndicators();
+
+        if (manual && window.showToast?.success) {
+            window.showToast.success('US equity snapshot refreshed.');
+        }
     } catch (error) {
-        state.mode = 'error';
-        renderModeBanner(error.message || 'US data request failed.');
         renderTableError(error.message || 'US data request failed.');
         if (manual && window.showToast?.error) {
-            window.showToast.error('Failed to refresh US equity data.');
+            window.showToast.error('Failed to refresh US equity table/prediction.');
         }
     } finally {
-        state.loading = false;
+        state.slowLoading = false;
     }
 }
 
@@ -318,19 +495,10 @@ async function loadIndexPrediction() {
     }
 }
 
-function renderAll() {
-    renderModeBanner();
-    renderSession();
-    renderIndices();
-    renderPrediction();
-    renderTable();
-    renderSortIndicators();
-}
-
 function renderModeBanner(message) {
     let label = 'LIVE FEED';
     let badgeClass = 'status-badge success';
-    let feedText = message || 'Streaming via Stooq polling.';
+    let feedText = message || `Indices @ ${Math.round(US_FAST_POLL_INTERVAL_MS / 1000)}s, table @ ${Math.round(US_SLOW_POLL_INTERVAL_MS / 1000)}s.`;
     if (state.mode === 'stale') {
         label = 'STALE FEED';
         badgeClass = 'status-badge warning';
@@ -367,12 +535,12 @@ function renderSession() {
 }
 
 function renderIndices() {
-    renderIndexCard(state.indices?.dow, els.dowIndexValue, els.dowIndexChange, els.dowIndexStatus);
-    renderIndexCard(state.indices?.nasdaq100, els.ndxIndexValue, els.ndxIndexChange, els.ndxIndexStatus);
-    renderIndexCard(state.indices?.sp500, els.spxIndexValue, els.spxIndexChange, els.spxIndexStatus);
+    renderIndexCard('dow', state.indices?.dow, els.dowIndexValue, els.dowIndexChange, els.dowIndexStatus, els.dowQuoteTime);
+    renderIndexCard('nasdaq100', state.indices?.nasdaq100, els.ndxIndexValue, els.ndxIndexChange, els.ndxIndexStatus, els.ndxQuoteTime);
+    renderIndexCard('sp500', state.indices?.sp500, els.spxIndexValue, els.spxIndexChange, els.spxIndexStatus, els.spxQuoteTime);
 }
 
-function renderIndexCard(data, valueEl, changeEl, statusEl) {
+function renderIndexCard(seriesKey, data, valueEl, changeEl, statusEl, quoteEl) {
     if (!data) return;
     text(valueEl, data.price === null ? '--' : utils.formatNumber(data.price, 2));
     if (changeEl) {
@@ -384,6 +552,16 @@ function renderIndexCard(data, valueEl, changeEl, statusEl) {
         statusEl.textContent = state.mode === 'live' ? 'LIVE' : state.mode === 'stale' ? 'STALE' : 'ERROR';
         statusEl.className = `status-badge ${state.mode === 'live' ? 'success' : state.mode === 'stale' ? 'warning' : 'danger'}`;
     }
+
+    const quoteText = formatQuoteLabel(data);
+    state.lastQuoteStampByIndex[seriesKey] = quoteText;
+    text(quoteEl, quoteText);
+}
+
+function formatQuoteLabel(indexData) {
+    const time = String(indexData?.quoteTime || '--').trim();
+    const tz = String(indexData?.quoteTimezone || 'ET').trim();
+    return `Quote: ${time} ${tz}`;
 }
 
 function renderPrediction() {
@@ -429,10 +607,10 @@ function renderPrediction() {
     text(els.q10Value, formatSignedRatioAsPercent(magnitude.q10));
     text(els.q50Value, formatSignedRatioAsPercent(magnitude.q50));
     text(els.q90Value, formatSignedRatioAsPercent(magnitude.q90));
-    const width = (Number(magnitude.q90 || 0) - Number(magnitude.q10 || 0));
+    const width = Number(magnitude.q90 || 0) - Number(magnitude.q10 || 0);
     text(els.intervalWidthValue, formatSignedRatioAsPercent(width, false));
 
-    updateChartOverlays(magnitude);
+    updateMainChartOverlays(magnitude);
 }
 
 function renderWindow(prefix, value) {
@@ -492,18 +670,76 @@ function renderSortIndicators() {
     });
 }
 
-function pushChartPoint(price, timestamp) {
+function hydrateIndexSeriesFromHistory(series) {
+    if (!series || typeof series !== 'object') return 0;
+    let count = 0;
+    ['dow', 'nasdaq100', 'sp500'].forEach((key) => {
+        const raw = Array.isArray(series[key]) ? series[key] : [];
+        const normalized = raw
+            .map((point) => {
+                const ts = Date.parse(point?.ts);
+                const price = Number(point?.price);
+                if (!Number.isFinite(ts) || !Number.isFinite(price)) return null;
+                return { ts, price };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.ts - b.ts);
+        const sessionBounded = trimPointsToSessionWindow(normalized);
+        state.indexSeries[key] = sessionBounded;
+        count += sessionBounded.length;
+    });
+    return count;
+}
+
+function appendIndexSeriesPoints(indices, timestampIso, dedupeByQuoteStamp = false) {
+    const nowMs = Date.parse(timestampIso) || Date.now();
+    if (!shouldAppendRealtimePoint(nowMs)) return;
+    appendSingleIndexPoint('dow', indices?.dow?.price, nowMs, buildQuoteStamp(indices?.dow), dedupeByQuoteStamp);
+    appendSingleIndexPoint('nasdaq100', indices?.nasdaq100?.price, nowMs, buildQuoteStamp(indices?.nasdaq100), dedupeByQuoteStamp);
+    appendSingleIndexPoint('sp500', indices?.sp500?.price, nowMs, buildQuoteStamp(indices?.sp500), dedupeByQuoteStamp);
+}
+
+function buildQuoteStamp(indexQuote) {
+    const date = String(indexQuote?.quoteDate || '').trim();
+    const time = String(indexQuote?.quoteTime || '').trim();
+    const stamp = `${date} ${time}`.trim();
+    return stamp || null;
+}
+
+function appendSingleIndexPoint(key, price, nowMs, quoteStamp, dedupeByQuoteStamp) {
+    if (!Number.isFinite(price)) return;
+    const arr = state.indexSeries[key];
+    if (dedupeByQuoteStamp) {
+        if (quoteStamp && state.lastQuoteKeyByIndex[key] === quoteStamp) return;
+        if (!quoteStamp && arr.length) {
+            const last = arr[arr.length - 1];
+            if (last && Math.abs(last.price - Number(price)) < 0.000001) return;
+        }
+    }
+
+    if (quoteStamp) {
+        state.lastQuoteKeyByIndex[key] = quoteStamp;
+    }
+    arr.push({ ts: nowMs, price: Number(price) });
+    const bounded = trimPointsToSessionWindow(arr);
+    if (bounded.length > 2000) {
+        bounded.splice(0, bounded.length - 2000);
+    }
+    state.indexSeries[key] = bounded;
+}
+
+function pushMainChartPoint(price, timestampIso) {
     if (!state.chart || !Number.isFinite(price)) return;
-    state.chartLabels.push(utils.formatTimestamp(timestamp, 'time'));
+    state.chartLabels.push(utils.formatTimestamp(timestampIso, 'time'));
     state.chartSeries.actual.push(Number(price.toFixed(2)));
     state.chartSeries.predictedOpen.push(null);
     state.chartSeries.predictedClose.push(null);
-    trimChartSeries();
-    syncChartDatasets();
+    trimMainChartSeries();
+    syncMainChartDatasets();
 }
 
-function trimChartSeries() {
-    const maxPoints = MAX_POINTS_BY_TIMEFRAME[state.timeframe] || MAX_POINTS_BY_TIMEFRAME['5d'];
+function trimMainChartSeries() {
+    const maxPoints = MAX_MAIN_POINTS_BY_TIMEFRAME[state.timeframe] || MAX_MAIN_POINTS_BY_TIMEFRAME['5d'];
     while (state.chartLabels.length > maxPoints) {
         state.chartLabels.shift();
         state.chartSeries.actual.shift();
@@ -512,7 +748,7 @@ function trimChartSeries() {
     }
 }
 
-function updateChartOverlays(magnitude) {
+function updateMainChartOverlays(magnitude) {
     if (!state.chart || !state.chartSeries.actual.length) return;
     const latestPrice = state.chartSeries.actual[state.chartSeries.actual.length - 1];
     const q10 = Number(magnitude?.q10 || 0);
@@ -525,16 +761,127 @@ function updateChartOverlays(magnitude) {
     state.chartSeries.predictedClose = state.chartSeries.actual.map(() => null);
     state.chartSeries.predictedOpen[idx] = predictedOpen;
     state.chartSeries.predictedClose[idx] = predictedClose;
-    syncChartDatasets();
+    syncMainChartDatasets();
 }
 
-function syncChartDatasets() {
+function syncMainChartDatasets() {
     if (!state.chart) return;
     state.chart.data.labels = state.chartLabels;
     state.chart.data.datasets[0].data = state.chartSeries.actual;
     state.chart.data.datasets[1].data = state.chartSeries.predictedOpen;
     state.chart.data.datasets[2].data = state.chartSeries.predictedClose;
     state.chart.update('none');
+}
+
+function updateAllSparklines() {
+    updateSparklinePair('dow', state.sparklineCharts.dowCard, state.sparklineCharts.dowMini);
+    updateSparklinePair('nasdaq100', state.sparklineCharts.ndxCard, state.sparklineCharts.ndxMini);
+    updateSparklinePair('sp500', state.sparklineCharts.spxCard, state.sparklineCharts.spxMini);
+}
+
+function updateSparklinePair(key, cardChart, miniChart) {
+    const fullPoints = state.indexSeries[key] || [];
+    const cardTransformed = transformSparklineSeries(fullPoints);
+    const cardLabels = fullPoints.map((point) => utils.formatTimestamp(new Date(point.ts).toISOString(), 'time'));
+    const miniTransformed = transformSparklineSeries(fullPoints);
+    const miniLabels = fullPoints.map((point) => utils.formatTimestamp(new Date(point.ts).toISOString(), 'time'));
+    const color = chooseSparklineColor(fullPoints);
+
+    applySparklineData(cardChart, cardLabels, cardTransformed, color);
+    applySparklineData(miniChart, miniLabels, miniTransformed, color);
+}
+
+function transformSparklineSeries(points) {
+    if (!points.length) return [];
+    if (state.axisMode === 'absolute') {
+        return points.map((point) => Number(point.price.toFixed(4)));
+    }
+    const base = points[0].price;
+    if (!Number.isFinite(base) || base === 0) {
+        return points.map(() => 0);
+    }
+    return points.map((point) => Number((((point.price / base) - 1) * 100).toFixed(4)));
+}
+
+function chooseSparklineColor(points) {
+    if (state.mode === 'stale') return 'rgba(245,158,11,0.95)';
+    if (state.mode === 'error') return 'rgba(148,163,184,0.85)';
+    if (!points.length) return 'rgba(0,229,255,0.9)';
+    const first = points[0].price;
+    const last = points[points.length - 1].price;
+    if (last > first) return 'rgba(0,255,170,0.95)';
+    if (last < first) return 'rgba(255,77,79,0.95)';
+    return 'rgba(0,229,255,0.95)';
+}
+
+function applySparklineData(chart, labels, values, color) {
+    if (!chart) return;
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    chart.data.datasets[0].borderColor = color;
+    chart.update('none');
+}
+
+function applyHistorySessionMetadata(selectedSession) {
+    const startMs = Date.parse(selectedSession?.startEt || '');
+    const endMs = Date.parse(selectedSession?.endEt || '');
+    state.historySessionStartMs = Number.isFinite(startMs) ? startMs : null;
+    state.historySessionEndMs = Number.isFinite(endMs) ? endMs : null;
+    state.historySessionLabel = String(selectedSession?.label || buildHistorySessionLabel(selectedSession)).trim() || DEFAULT_SESSION_LABEL;
+    updateMiniSessionLabels();
+}
+
+function buildHistorySessionLabel(selectedSession) {
+    const isLast = String(selectedSession?.type || '') === 'LAST_REGULAR';
+    return `${isLast ? 'Last Regular Session' : 'Regular Session'} (09:30-16:00 ET)`;
+}
+
+function updateMiniSessionLabels() {
+    const label = state.historySessionLabel || DEFAULT_SESSION_LABEL;
+    text(els.dowMiniLabel, label);
+    text(els.ndxMiniLabel, label);
+    text(els.spxMiniLabel, label);
+}
+
+function trimPointsToSessionWindow(points) {
+    const arr = Array.isArray(points) ? points : [];
+    if (!arr.length) return [];
+    if (!Number.isFinite(state.historySessionStartMs) || !Number.isFinite(state.historySessionEndMs)) {
+        return arr.slice();
+    }
+    const trimmed = arr.filter((point) => {
+        const ts = Number(point?.ts);
+        return Number.isFinite(ts) && ts >= state.historySessionStartMs && ts <= state.historySessionEndMs;
+    });
+    return trimmed;
+}
+
+function shouldAppendRealtimePoint(nowMs) {
+    const phaseCode = String(state.marketSession?.phaseCode || '').toUpperCase();
+    if (phaseCode !== 'REGULAR') return false;
+    if (Number.isFinite(state.historySessionStartMs) && nowMs < state.historySessionStartMs) return false;
+    if (Number.isFinite(state.historySessionEndMs) && nowMs > state.historySessionEndMs) return false;
+    return true;
+}
+
+function shouldReseedHistory(nowMs) {
+    if (!Number.isFinite(nowMs)) return false;
+    if (!Number.isFinite(state.historySessionStartMs) || !Number.isFinite(state.historySessionEndMs)) return true;
+    const phaseCode = String(state.marketSession?.phaseCode || '').toUpperCase();
+    if (phaseCode !== 'PREMARKET' && phaseCode !== 'REGULAR') return false;
+    const currentEtDate = toEtDateKey(nowMs);
+    const sessionEtDate = toEtDateKey(state.historySessionStartMs);
+    return currentEtDate !== sessionEtDate;
+}
+
+function toEtDateKey(timestampMs) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: US_ET_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    return formatter.format(new Date(timestampMs));
 }
 
 function updateSectorOptions(rows) {

@@ -133,6 +133,16 @@ const api = {
         return this.get(`/us-equity/prices${buildQueryString(params)}`);
     },
 
+    // Get fast US indices snapshot
+    async getUSEquityIndices() {
+        return this.get('/us-equity/indices');
+    },
+
+    // Get US intraday index history seed
+    async getUSEquityIndicesHistory(params = {}) {
+        return this.get(`/us-equity/indices/history${buildQueryString(params)}`);
+    },
+
     // Get US equity predictions legacy alias
     async getUSEquityPredictions(symbol) {
         return this.get(`/us-equity/predictions${buildQueryString({ symbol })}`);
