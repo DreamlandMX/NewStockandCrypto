@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backtest Lab - StockandCrypto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body style="background: #050A1A; color: #F8FAFC; font-family: 'Inter', sans-serif;">
+    <header style="position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(5, 10, 26, 0.85); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 1rem 0;">
+        <div style="max-width: 1400px; margin: 0 auto; padding: 0 2rem; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <a href="index.html" style="text-decoration: none; display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 2rem; color: #00E5FF;">◈</span>
+                    <span style="color: #F8FAFC; font-weight: 800; font-size: 1.5rem;">StockandCrypto</span>
+                </a>
+            </div>
+            <nav>
+                <ul style="display: flex; list-style: none; gap: 0.5rem;">
+                    <li><a href="index.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">Home</a></li>
+                    <li><a href="model-explorer.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">AI Models</a></li>
+                    <li><a href="backtest-lab.html" style="padding: 0.5rem 1rem; color: #00E5FF; background: rgba(0, 229, 255, 0.15); border-radius: 6px; text-decoration: none;">Backtest</a></li>
+                    <li><a href="risk-engine.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">Risk</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div style="max-width: 1400px; margin: 0 auto; padding: 0 2rem;">
+            <div style="margin-bottom: 3rem;">
+                <h1 style="font-size: 3rem; margin-bottom: 1rem; font-weight: 800;">Backtest Lab</h1>
+                <p style="color: #64748B; font-size: 1.1rem;">Walk-forward validation with purged gaps and multi-strategy comparison</p>
+            </div>
+
+            <!-- Parameter Upload -->
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+                <h2 style="font-size: 1.5rem; margin-bottom: 1.5rem; font-weight: 700;">Configure Parameters</h2>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;">
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; color: #94A3B8; font-size: 0.85rem; font-weight: 600;">Model</label>
+                        <select style="width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.75rem; color: #F8FAFC; font-family: 'JetBrains Mono', monospace;">
+                            <option>LSTM+Attention</option>
+                            <option>LightGBM Ensemble</option>
+                            <option>Transformer</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; color: #94A3B8; font-size: 0.85rem; font-weight: 600;">Asset</label>
+                        <select style="width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.75rem; color: #F8FAFC; font-family: 'JetBrains Mono', monospace;">
+                            <option>BTC/USDT</option>
+                            <option>ETH/USDT</option>
+                            <option>SSE Composite</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; color: #94A3B8; font-size: 0.85rem; font-weight: 600;">Horizon</label>
+                        <select style="width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.75rem; color: #F8FAFC; font-family: 'JetBrains Mono', monospace;">
+                            <option>1-Hour</option>
+                            <option>4-Hour</option>
+                            <option>1-Day</option>
+                        </select>
+                    </div>
+                </div>
+                <button style="margin-top: 1.5rem; padding: 1rem 2rem; background: linear-gradient(135deg, #00E5FF 0%, #00FFAA 100%); color: #050A1A; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; box-shadow: 0 0 20px rgba(0, 229, 255, 0.3);">
+                    Run Backtest
+                </button>
+            </div>
+
+            <!-- Results -->
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                <!-- Equity Curve -->
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem;">
+                    <h3 style="font-size: 1.25rem; margin-bottom: 1.5rem; font-weight: 700;">Equity Curve</h3>
+                    <div style="height: 350px; position: relative;">
+                        <canvas id="equityChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Metrics -->
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem;">
+                    <h3 style="font-size: 1.25rem; margin-bottom: 1.5rem; font-weight: 700;">Performance Metrics</h3>
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">Total Return</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: #00FFAA; font-weight: 700; font-size: 1.1rem;">+12.4%</span>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">Sharpe Ratio</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: #00FFAA; font-weight: 700; font-size: 1.1rem;">2.34</span>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">Max Drawdown</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: #FF4D4F; font-weight: 700; font-size: 1.1rem;">-14.2%</span>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">Win Rate</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: #F8FAFC; font-weight: 700; font-size: 1.1rem;">54.2%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">Total Trades</span>
+                            <span style="font-family: 'JetBrains Mono', monospace; color: #F8FAFC; font-weight: 700; font-size: 1.1rem;">1,868</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Radar Chart -->
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem;">
+                <h3 style="font-size: 1.25rem; margin-bottom: 1.5rem; font-weight: 700;">Multi-Strategy Comparison</h3>
+                <div style="height: 400px; position: relative;">
+                    <canvas id="radarChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Initialize Charts
+        const equityCtx = document.getElementById('equityChart');
+        if (equityCtx) {
+            new Chart(equityCtx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: 30}, (_, i) => `Day ${i+1}`),
+                    datasets: [{
+                        label: 'Strategy',
+                        data: Array.from({length: 30}, (_, i) => 100 + i * 0.4 + Math.random() * 2),
+                        borderColor: '#00FFAA',
+                        backgroundColor: 'rgba(0, 255, 170, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'Benchmark',
+                        data: Array.from({length: 30}, (_, i) => 100 + i * 0.27 + Math.random() * 1.5),
+                        borderColor: '#00E5FF',
+                        backgroundColor: 'rgba(0, 229, 255, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { ticks: { color: '#64748B' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                        x: { ticks: { color: '#64748B', maxTicksLimit: 7 }, grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        const radarCtx = document.getElementById('radarChart');
+        if (radarCtx) {
+            new Chart(radarCtx, {
+                type: 'radar',
+                data: {
+                    labels: ['Return', 'Sharpe', 'Win Rate', 'Max DD', 'Stability', 'Coverage'],
+                    datasets: [{
+                        label: 'LSTM',
+                        data: [85, 90, 75, 70, 80, 85],
+                        borderColor: '#00FFAA',
+                        backgroundColor: 'rgba(0, 255, 170, 0.2)'
+                    }, {
+                        label: 'LightGBM',
+                        data: [80, 85, 80, 75, 85, 80],
+                        borderColor: '#00E5FF',
+                        backgroundColor: 'rgba(0, 229, 255, 0.2)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            ticks: { color: '#64748B' },
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            pointLabels: { color: '#94A3B8' }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

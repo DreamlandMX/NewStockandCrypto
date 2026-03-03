@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Risk Engine - StockandCrypto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body style="background: #050A1A; color: #F8FAFC; font-family: 'Inter', sans-serif;">
+    <header style="position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: rgba(5, 10, 26, 0.85); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding: 1rem 0;">
+        <div style="max-width: 1400px; margin: 0 auto; padding: 0 2rem; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <a href="index.html" style="text-decoration: none; display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="font-size: 2rem; color: #00E5FF;">◈</span>
+                    <span style="color: #F8FAFC; font-weight: 800; font-size: 1.5rem;">StockandCrypto</span>
+                </a>
+            </div>
+            <nav>
+                <ul style="display: flex; list-style: none; gap: 0.5rem;">
+                    <li><a href="index.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">Home</a></li>
+                    <li><a href="model-explorer.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">AI Models</a></li>
+                    <li><a href="backtest-lab.html" style="padding: 0.5rem 1rem; color: #94A3B8; text-decoration: none;">Backtest</a></li>
+                    <li><a href="risk-engine.html" style="padding: 0.5rem 1rem; color: #00E5FF; background: rgba(0, 229, 255, 0.15); border-radius: 6px; text-decoration: none;">Risk</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div style="max-width: 1400px; margin: 0 auto; padding: 0 2rem;">
+            <div style="margin-bottom: 3rem;">
+                <h1 style="font-size: 3rem; margin-bottom: 1rem; font-weight: 800;">Risk Engine</h1>
+                <p style="color: #64748B; font-size: 1.1rem;">Real-time VaR, Expected Shortfall, and dynamic position sizing</p>
+            </div>
+
+            <!-- Risk Metrics Dashboard -->
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-bottom: 2rem;">
+                <div style="background: rgba(255, 77, 79, 0.1); border: 1px solid rgba(255, 77, 79, 0.3); border-radius: 12px; padding: 2rem;">
+                    <div style="font-size: 0.75rem; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">VaR (95%)</div>
+                    <div style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #FF4D4F;">-2.8%</div>
+                    <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">Value at Risk</div>
+                </div>
+
+                <div style="background: rgba(255, 77, 79, 0.1); border: 1px solid rgba(255, 77, 79, 0.3); border-radius: 12px; padding: 2rem;">
+                    <div style="font-size: 0.75rem; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Expected Shortfall</div>
+                    <div style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #FF4D4F;">-4.1%</div>
+                    <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">Tail Risk</div>
+                </div>
+
+                <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 12px; padding: 2rem;">
+                    <div style="font-size: 0.75rem; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Current Drawdown</div>
+                    <div style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #F59E0B;">-3.2%</div>
+                    <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">Peak to Trough</div>
+                </div>
+
+                <div style="background: rgba(0, 255, 170, 0.1); border: 1px solid rgba(0, 255, 170, 0.3); border-radius: 12px; padding: 2rem;">
+                    <div style="font-size: 0.75rem; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">Position Size</div>
+                    <div style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #00FFAA;">1.2x</div>
+                    <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace;">Confidence-Based</div>
+                </div>
+            </div>
+
+            <!-- Position Sizer Calculator -->
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem; margin-bottom: 2rem;">
+                <h2 style="font-size: 1.5rem; margin-bottom: 1.5rem; font-weight: 700;">Position Sizer Calculator</h2>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 2rem;">
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; color: #94A3B8; font-size: 0.85rem; font-weight: 600;">Confidence Level</label>
+                        <input type="range" min="0" max="100" value="95" style="width: 100%;" id="confidenceInput">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: #64748B; margin-top: 0.5rem;">
+                            <span>0%</span>
+                            <span id="confidenceValue" style="font-family: 'JetBrains Mono', monospace; color: #00FFAA; font-weight: 700;">95%</span>
+                            <span>100%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 0.5rem; color: #94A3B8; font-size: 0.85rem; font-weight: 600;">Portfolio Value</label>
+                        <input type="number" value="100000" style="width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 0.75rem; color: #F8FAFC; font-family: 'JetBrains Mono', monospace;">
+                    </div>
+                </div>
+                <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(0, 229, 255, 0.05); border: 1px solid rgba(0, 229, 255, 0.2); border-radius: 8px;">
+                    <div style="font-size: 0.85rem; color: #64748B; margin-bottom: 0.75rem;">Suggested Position Size</div>
+                    <div style="font-size: 3rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #00E5FF;" id="positionOutput">1.2x</div>
+                    <div style="font-size: 0.75rem; color: #94A3B8; margin-top: 0.5rem;">Based on confidence and risk parameters</div>
+                </div>
+            </div>
+
+            <!-- Risk Limits -->
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 2rem;">
+                <h2 style="font-size: 1.5rem; margin-bottom: 1.5rem; font-weight: 700;">Risk Limits & Alerts</h2>
+                <div style="display: grid; gap: 1rem;">
+                    <div style="padding: 1rem; background: rgba(0, 255, 170, 0.05); border-left: 3px solid #00FFAA; border-radius: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 0.25rem;">Max Position Size</div>
+                                <div style="font-size: 0.85rem; color: #64748B;">Limit: 2.0x leverage</div>
+                            </div>
+                            <div style="font-family: 'JetBrains Mono', monospace; color: #00FFAA; font-weight: 700;">1.2x</div>
+                        </div>
+                        <div style="margin-top: 0.75rem; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                            <div style="width: 60%; height: 100%; background: #00FFAA;"></div>
+                        </div>
+                    </div>
+
+                    <div style="padding: 1rem; background: rgba(245, 158, 11, 0.05); border-left: 3px solid #F59E0B; border-radius: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 0.25rem;">Daily Loss Limit</div>
+                                <div style="font-size: 0.85rem; color: #64748B;">Limit: 5% of portfolio</div>
+                            </div>
+                            <div style="font-family: 'JetBrains Mono', monospace; color: #F59E0B; font-weight: 700;">-3.2%</div>
+                        </div>
+                        <div style="margin-top: 0.75rem; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                            <div style="width: 64%; height: 100%; background: #F59E0B;"></div>
+                        </div>
+                    </div>
+
+                    <div style="padding: 1rem; background: rgba(255, 77, 79, 0.05); border-left: 3px solid #FF4D4F; border-radius: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 0.25rem;">Max Drawdown</div>
+                                <div style="font-size: 0.85rem; color: #64748B;">Limit: 20% peak-to-trough</div>
+                            </div>
+                            <div style="font-family: 'JetBrains Mono', monospace; color: #FF4D4F; font-weight: 700;">-14.2%</div>
+                        </div>
+                        <div style="margin-top: 0.75rem; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                            <div style="width: 71%; height: 100%; background: #FF4D4F;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const confidenceInput = document.getElementById('confidenceInput');
+        const confidenceValue = document.getElementById('confidenceValue');
+        const positionOutput = document.getElementById('positionOutput');
+
+        if (confidenceInput) {
+            confidenceInput.addEventListener('input', function() {
+                const val = this.value;
+                confidenceValue.textContent = val + '%';
+                
+                // Calculate position size based on confidence
+                const positionSize = (val / 100 * 1.5).toFixed(1);
+                positionOutput.textContent = positionSize + 'x';
+            });
+        }
+    </script>
+</body>
+</html>
