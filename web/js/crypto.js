@@ -184,7 +184,7 @@ async function loadPrices() {
         const normalized = normalizePrices(payload);
         if (Object.keys(normalized).length === 0) throw new Error('No live prices');
         state.prices = normalized;
-        state.dataMode = 'Live Feed';
+        state.dataMode = payload?.meta?.stale ? 'Stale Feed' : 'Live Feed';
     } catch (error) {
         state.prices = simulatedPrices();
         state.dataMode = 'Simulated Feed';
@@ -527,7 +527,9 @@ function buildUniverseRows() {
             pUp,
             signal: inferSignal(pUp),
             volume: priceRow.volume,
-            status: state.dataMode === 'Live Feed' && CRYPTO_SYMBOLS.includes(symbol) ? 'Live' : 'Simulated'
+            status: CRYPTO_SYMBOLS.includes(symbol)
+                ? (state.dataMode === 'Live Feed' ? 'Live' : state.dataMode === 'Stale Feed' ? 'Stale' : 'Simulated')
+                : 'Simulated'
         };
     });
 
