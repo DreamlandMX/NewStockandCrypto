@@ -70,23 +70,44 @@ const lastPointPulsePlugin = {
         const datasetMeta = chart.getDatasetMeta(0);
         if (!datasetMeta || !datasetMeta.data || datasetMeta.data.length === 0) return;
         const points = datasetMeta.data;
-        const targetPoint = points[points.length - 1];
+        const chartArea = chart.chartArea;
+        if (!chartArea) return;
+
+        let targetPoint = null;
+        for (let index = points.length - 1; index >= 0; index -= 1) {
+            const point = points[index];
+            if (!point || point.skip) continue;
+            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+            if (
+                point.x < chartArea.left
+                || point.x > chartArea.right
+                || point.y < chartArea.top
+                || point.y > chartArea.bottom
+            ) {
+                continue;
+            }
+            targetPoint = point;
+            break;
+        }
         if (!targetPoint) return;
 
         const { ctx } = chart;
         const phase = (Date.now() % 1200) / 1200;
         const pulseRadius = 4 + Math.sin(phase * Math.PI * 2) * 2;
+        const outerRadius = pulseRadius + 4;
+        const safeX = clamp(targetPoint.x, chartArea.left + outerRadius + 2, chartArea.right - outerRadius - 2);
+        const safeY = clamp(targetPoint.y, chartArea.top + outerRadius + 2, chartArea.bottom - outerRadius - 2);
 
         ctx.save();
         ctx.fillStyle = 'rgba(0, 229, 255, 0.85)';
         ctx.beginPath();
-        ctx.arc(targetPoint.x, targetPoint.y, pulseRadius, 0, Math.PI * 2);
+        ctx.arc(safeX, safeY, pulseRadius, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(targetPoint.x, targetPoint.y, pulseRadius + 4, 0, Math.PI * 2);
+        ctx.arc(safeX, safeY, outerRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
     }
