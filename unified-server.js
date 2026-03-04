@@ -34,6 +34,11 @@ const EASTMONEY_ULIST_FIELDS = 'f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f20,f21,f47
 const EASTMONEY_ULIST_BASE = 'https://push2.eastmoney.com/api/qt/ulist.np/get';
 const STOOQ_BATCH_BASE = 'https://stooq.com/q/l/?f=sd2t2ohlcv&h&e=csv&s=';
 const YAHOO_CHART_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const YAHOO_SPARK_BASE = 'https://query1.finance.yahoo.com/v7/finance/spark';
+const US_YAHOO_SPARK_RANGE = '1d';
+const US_YAHOO_SPARK_INTERVAL = '1m';
+const US_YAHOO_SPARK_CHUNK_SIZE = Number(process.env.US_YAHOO_SPARK_CHUNK_SIZE || 20);
+const US_MIN_LIVE_COVERAGE_PCT = Number(process.env.US_MIN_LIVE_COVERAGE_PCT || 95);
 const SP500_SNAPSHOT_PATH = path.join(WEB_ROOT, 'assets', 'sp500-constituents.json');
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || '';
 const US_ENABLE_ALPHA_FALLBACK = String(process.env.US_ENABLE_ALPHA_FALLBACK || 'true').toLowerCase() !== 'false';
@@ -632,8 +637,47 @@ function buildStooqBatchUrl(symbols) {
     return `${STOOQ_BATCH_BASE}${symbolPart}`;
 }
 
+function stooqSymbolToYahooSymbol(symbol) {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    if (normalized === '^SPX') return '^GSPC';
+    if (normalized.endsWith('.US')) {
+        return normalized.replace(/\.US$/, '').replace(/\./g, '-');
+    }
+    return normalized;
+}
+
+function yahooSymbolToStooqSymbol(symbol) {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    if (normalized === '^GSPC') return '^SPX';
+    if (normalized.startsWith('^')) return normalized;
+    return `${normalized}.US`;
+}
+
+function buildYahooSparkUrl(symbols, range = US_YAHOO_SPARK_RANGE, interval = US_YAHOO_SPARK_INTERVAL) {
+    const symbolPart = symbols.map((symbol) => encodeURIComponent(symbol)).join(',');
+    const rangePart = encodeURIComponent(range);
+    const intervalPart = encodeURIComponent(interval);
+    return `${YAHOO_SPARK_BASE}?symbols=${symbolPart}&range=${rangePart}&interval=${intervalPart}`;
+}
+
+function isStooqRateLimitText(payloadText) {
+    const text = String(payloadText || '');
+    return /daily hits limit/i.test(text) || /too many requests/i.test(text);
+}
+
 function parseStooqCsvRows(csvText) {
-    const lines = String(csvText || '').trim().split(/\r?\n/);
+    const payloadText = String(csvText || '').trim();
+    if (!payloadText) {
+        throw new Error('Empty Stooq response');
+    }
+    if (isStooqRateLimitText(payloadText)) {
+        throw new Error('Stooq daily hits limit exceeded');
+    }
+    const lines = payloadText.split(/\r?\n/);
+    const header = String(lines[0] || '').replace(/^\uFEFF/, '').trim().toLowerCase();
+    if (header !== 'symbol,date,time,open,high,low,close,volume') {
+        throw new Error(`Unexpected Stooq CSV header: ${header || '<empty>'}`);
+    }
     if (lines.length <= 1) return [];
     const rows = [];
     for (let i = 1; i < lines.length; i += 1) {
@@ -670,11 +714,134 @@ function parseStooqCsvRows(csvText) {
 async function fetchStooqQuotes(sourceSymbols) {
     const CHUNK_SIZE = 40;
     const bySymbol = new Map();
+    let totalRows = 0;
     for (let i = 0; i < sourceSymbols.length; i += CHUNK_SIZE) {
         const chunk = sourceSymbols.slice(i, i + CHUNK_SIZE);
         const csvText = await fetchTextFromHttps(buildStooqBatchUrl(chunk), 9000);
         const rows = parseStooqCsvRows(csvText);
+        totalRows += rows.length;
         rows.forEach((row) => bySymbol.set(row.symbol, row));
+    }
+    if (totalRows === 0) {
+        throw new Error('Stooq returned zero quote rows');
+    }
+    return bySymbol;
+}
+
+function firstFiniteNumber(values) {
+    if (!Array.isArray(values)) return null;
+    for (const value of values) {
+        const parsed = parseNumber(value);
+        if (parsed !== null) return parsed;
+    }
+    return null;
+}
+
+function lastFiniteNumber(values) {
+    if (!Array.isArray(values)) return null;
+    for (let i = values.length - 1; i >= 0; i -= 1) {
+        const parsed = parseNumber(values[i]);
+        if (parsed !== null) return parsed;
+    }
+    return null;
+}
+
+function minFiniteNumber(values) {
+    if (!Array.isArray(values)) return null;
+    const finite = values.map((value) => parseNumber(value)).filter((value) => value !== null);
+    if (!finite.length) return null;
+    return Math.min(...finite);
+}
+
+function maxFiniteNumber(values) {
+    if (!Array.isArray(values)) return null;
+    const finite = values.map((value) => parseNumber(value)).filter((value) => value !== null);
+    if (!finite.length) return null;
+    return Math.max(...finite);
+}
+
+function formatEpochToEtDateTime(epochSeconds) {
+    if (!Number.isFinite(epochSeconds)) {
+        return { date: null, time: null };
+    }
+    const dt = new Date(epochSeconds * 1000);
+    if (!Number.isFinite(dt.getTime())) {
+        return { date: null, time: null };
+    }
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: US_SESSION_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    const parts = formatter.formatToParts(dt);
+    const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    if (!map.year || !map.month || !map.day) {
+        return { date: null, time: null };
+    }
+    return {
+        date: `${map.year}-${map.month}-${map.day}`,
+        time: map.hour && map.minute && map.second ? `${map.hour}:${map.minute}:${map.second}` : null
+    };
+}
+
+function parseYahooSparkQuoteRow(entry) {
+    const yahooSymbol = String(entry?.symbol || '').trim().toUpperCase();
+    if (!yahooSymbol) return null;
+    const stooqSymbol = yahooSymbolToStooqSymbol(yahooSymbol);
+    const response = Array.isArray(entry?.response) ? entry.response[0] : null;
+    const meta = response?.meta || {};
+    const closes = response?.indicators?.quote?.[0]?.close || [];
+    const firstClose = firstFiniteNumber(closes);
+    const lastClose = lastFiniteNumber(closes);
+    const price = parseNumber(meta.regularMarketPrice) ?? lastClose;
+    if (price === null) return null;
+    const high = parseNumber(meta.regularMarketDayHigh) ?? maxFiniteNumber(closes);
+    const low = parseNumber(meta.regularMarketDayLow) ?? minFiniteNumber(closes);
+    const open = firstClose ?? parseNumber(meta.chartPreviousClose) ?? parseNumber(meta.previousClose);
+    const volume = parseNumber(meta.regularMarketVolume);
+    const previousClose = parseNumber(meta.previousClose) ?? parseNumber(meta.chartPreviousClose);
+    const changePct = previousClose !== null && previousClose !== 0
+        ? Number((((price - previousClose) / previousClose) * 100).toFixed(4))
+        : null;
+    const marketTime = parseNumber(meta.regularMarketTime);
+    const dateTime = formatEpochToEtDateTime(marketTime);
+    return {
+        symbol: stooqSymbol,
+        date: dateTime.date,
+        time: dateTime.time,
+        open,
+        high,
+        low,
+        price,
+        volume,
+        changePct
+    };
+}
+
+async function fetchYahooSparkQuotes(stooqSymbols, range = US_YAHOO_SPARK_RANGE, interval = US_YAHOO_SPARK_INTERVAL) {
+    const bySymbol = new Map();
+    const yahooSymbols = Array.from(new Set(stooqSymbols.map((symbol) => stooqSymbolToYahooSymbol(symbol)).filter(Boolean)));
+    const chunkSize = clamp(US_YAHOO_SPARK_CHUNK_SIZE, 1, 20);
+    for (let i = 0; i < yahooSymbols.length; i += chunkSize) {
+        const chunk = yahooSymbols.slice(i, i + chunkSize);
+        const payload = await fetchJsonFromHttps(buildYahooSparkUrl(chunk, range, interval), 9000);
+        if (payload?.spark?.error) {
+            throw new Error(`Yahoo Spark error: ${payload.spark.error}`);
+        }
+        const results = payload?.spark?.result;
+        if (!Array.isArray(results)) {
+            throw new Error('Unexpected Yahoo Spark payload');
+        }
+        for (const entry of results) {
+            const parsed = parseYahooSparkQuoteRow(entry);
+            if (!parsed || !parsed.symbol) continue;
+            bySymbol.set(parsed.symbol, parsed);
+        }
     }
     return bySymbol;
 }
@@ -1860,6 +2027,90 @@ function usQuoteFromStooqRow(stooqRow) {
     };
 }
 
+function appendProviderSource(baseSource, providerTag) {
+    const parts = String(baseSource || '')
+        .split('+')
+        .map((part) => part.trim())
+        .filter(Boolean);
+    if (!parts.includes(providerTag)) {
+        parts.push(providerTag);
+    }
+    return parts.join('+');
+}
+
+function buildUsCoverageStats(quoteMap, symbols) {
+    const total = symbols.length;
+    if (!total) {
+        return { total: 0, live: 0, pct: 0 };
+    }
+    let live = 0;
+    for (const symbol of symbols) {
+        const quote = usQuoteFromStooqRow(quoteMap.get(symbol));
+        if (quote && Number.isFinite(quote.price)) {
+            live += 1;
+        }
+    }
+    const pct = Number(((live / total) * 100).toFixed(2));
+    return { total, live, pct };
+}
+
+async function fetchUsQuoteMapWithFallback(symbols, options = {}) {
+    const minCoveragePct = Number.isFinite(options.minCoveragePct) ? options.minCoveragePct : US_MIN_LIVE_COVERAGE_PCT;
+    const requiredSymbols = Array.isArray(options.requiredSymbols) ? options.requiredSymbols : [];
+    let source = 'stooq';
+    let providerFallbackUsed = false;
+    let quoteMap = new Map();
+    let stooqError = null;
+
+    try {
+        quoteMap = await fetchStooqQuotes(symbols);
+    } catch (error) {
+        stooqError = error;
+        quoteMap = new Map();
+    }
+
+    const stooqCoverage = buildUsCoverageStats(quoteMap, symbols);
+    const hasRequired = requiredSymbols.every((symbol) => {
+        const quote = usQuoteFromStooqRow(quoteMap.get(symbol));
+        return quote && Number.isFinite(quote.price);
+    });
+    const needFallback = Boolean(stooqError) || !hasRequired || stooqCoverage.pct < minCoveragePct;
+
+    if (needFallback) {
+        const missingSymbols = symbols.filter((symbol) => {
+            const quote = usQuoteFromStooqRow(quoteMap.get(symbol));
+            return !(quote && Number.isFinite(quote.price));
+        });
+        const fallbackTargets = stooqError ? symbols : (missingSymbols.length ? missingSymbols : symbols);
+        try {
+            const yahooMap = await fetchYahooSparkQuotes(fallbackTargets, US_YAHOO_SPARK_RANGE, US_YAHOO_SPARK_INTERVAL);
+            providerFallbackUsed = true;
+            yahooMap.forEach((row, symbol) => {
+                const current = usQuoteFromStooqRow(quoteMap.get(symbol));
+                if (!current || !Number.isFinite(current.price)) {
+                    quoteMap.set(symbol, row);
+                }
+            });
+            source = stooqError ? 'yahoo_spark' : 'stooq+yahoo_spark';
+        } catch (yahooError) {
+            if (stooqError) {
+                throw new Error(`US quote providers failed: stooq=${stooqError.message}; yahoo=${yahooError.message}`);
+            }
+            source = 'stooq';
+        }
+    }
+
+    const finalCoverage = buildUsCoverageStats(quoteMap, symbols);
+    return {
+        quoteMap,
+        source,
+        providerFallbackUsed,
+        liveCoveragePct: finalCoverage.pct,
+        liveCount: finalCoverage.live,
+        totalCount: finalCoverage.total
+    };
+}
+
 function calculateUsPrediction(quote) {
     const price = quote?.price ?? null;
     const open = quote?.open ?? price ?? null;
@@ -2043,15 +2294,20 @@ function asUsUniverseRow(constituent, stooqRow, status) {
             marketCap: null,
             peTtm: null
         },
-        status: quote.price === null ? 'ERROR' : status
+        status: quote.price === null ? 'UNAVAILABLE' : status
     };
 }
 
 async function fetchUsLivePayload() {
     const indexSymbols = ['^DJI', '^NDX', '^SPX'];
     const allSymbols = [...new Set([...indexSymbols, ...sp500SourceSymbols])];
-    const quoteMap = await fetchStooqQuotes(allSymbols);
-    let source = 'stooq';
+    const quoteBundle = await fetchUsQuoteMapWithFallback(allSymbols, {
+        minCoveragePct: US_MIN_LIVE_COVERAGE_PCT,
+        requiredSymbols: indexSymbols
+    });
+    const quoteMap = quoteBundle.quoteMap;
+    let source = quoteBundle.source;
+    let providerFallbackUsed = quoteBundle.providerFallbackUsed;
 
     const indices = {};
     for (const canonical of indexSymbols) {
@@ -2062,7 +2318,8 @@ async function fetchUsLivePayload() {
             const alphaQuote = await fetchAlphaIndexQuote(canonical);
             if (alphaQuote && alphaQuote.price !== null) {
                 quote = alphaQuote;
-                source = 'stooq+alpha';
+                source = appendProviderSource(source, 'alpha');
+                providerFallbackUsed = true;
             }
         }
         indices[canonical] = {
@@ -2082,6 +2339,14 @@ async function fetchUsLivePayload() {
 
     const status = 'LIVE';
     const rows = sp500Snapshot.map((constituent) => asUsUniverseRow(constituent, quoteMap.get(constituent.sourceSymbol), status));
+    const liveRows = rows.filter((row) => Number.isFinite(row.price)).length;
+    const liveCoveragePct = Number(((liveRows / Math.max(1, rows.length)) * 100).toFixed(2));
+    if (!Object.values(indices).every((item) => Number.isFinite(item.price))) {
+        throw new Error('US index quotes unavailable from upstream providers');
+    }
+    if (liveRows === 0) {
+        throw new Error('US constituent quotes unavailable from upstream providers');
+    }
     const marketSession = computeUsMarketSession();
 
     return {
@@ -2091,7 +2356,9 @@ async function fetchUsLivePayload() {
             stale: false,
             pollIntervalSec: US_POLL_INTERVAL_SEC,
             delayNote: US_DELAY_NOTE,
-            disclaimer: US_DISCLAIMER
+            disclaimer: US_DISCLAIMER,
+            providerFallbackUsed,
+            liveCoveragePct
         },
         marketSession,
         indices: {
@@ -2108,8 +2375,13 @@ async function fetchUsLivePayload() {
 
 async function fetchUsIndicesPayload() {
     const indexSymbols = ['^DJI', '^NDX', '^SPX'];
-    const quoteMap = await fetchStooqQuotes(indexSymbols);
-    let source = 'stooq';
+    const quoteBundle = await fetchUsQuoteMapWithFallback(indexSymbols, {
+        minCoveragePct: 100,
+        requiredSymbols: indexSymbols
+    });
+    const quoteMap = quoteBundle.quoteMap;
+    let source = quoteBundle.source;
+    let providerFallbackUsed = quoteBundle.providerFallbackUsed;
 
     const indices = {};
     for (const canonical of indexSymbols) {
@@ -2125,7 +2397,8 @@ async function fetchUsIndicesPayload() {
                     quoteTime: null,
                     quoteTimezone: 'ET'
                 };
-                source = 'stooq+alpha';
+                source = appendProviderSource(source, 'alpha');
+                providerFallbackUsed = true;
             }
         }
         indices[canonical] = {
@@ -2142,6 +2415,11 @@ async function fetchUsIndicesPayload() {
             quoteTimezone: quote?.quoteTimezone ?? 'ET'
         };
     }
+    const liveCount = Object.values(indices).filter((item) => Number.isFinite(item.price)).length;
+    const liveCoveragePct = Number(((liveCount / indexSymbols.length) * 100).toFixed(2));
+    if (liveCount === 0) {
+        throw new Error('US index quotes unavailable from upstream providers');
+    }
 
     return {
         meta: {
@@ -2150,7 +2428,9 @@ async function fetchUsIndicesPayload() {
             stale: false,
             pollIntervalSec: US_INDEX_FAST_POLL_INTERVAL_SEC,
             delayNote: US_DELAY_NOTE,
-            disclaimer: US_DISCLAIMER
+            disclaimer: US_DISCLAIMER,
+            providerFallbackUsed,
+            liveCoveragePct
         },
         marketSession: computeUsMarketSession(),
         indices: {
@@ -2450,6 +2730,11 @@ function applyUsUniverseQuery(rows, search, sector, sort, direction, page, pageS
 
     const directionFactor = direction === 'asc' ? 1 : -1;
     filtered.sort((a, b) => {
+        const aUnavailable = String(a.status || '').toUpperCase() === 'UNAVAILABLE';
+        const bUnavailable = String(b.status || '').toUpperCase() === 'UNAVAILABLE';
+        if (aUnavailable !== bUnavailable) {
+            return aUnavailable ? 1 : -1;
+        }
         const av = getUsSortValue(a, sort);
         const bv = getUsSortValue(b, sort);
         if (typeof av === 'string' && typeof bv === 'string') {
@@ -2498,7 +2783,11 @@ async function handleUsPrices(req, res, parsedUrl) {
         const payload = await getUsPayloadWithCache();
         const universe = applyUsUniverseQuery(payload.universe.rows, query.search, query.sector, query.sort, query.direction, query.page, query.pageSize);
         const status = payload.meta.stale ? 'STALE' : 'LIVE';
-        universe.rows = universe.rows.map((row) => ({ ...row, status: row.price === null ? 'ERROR' : status }));
+        universe.rows = universe.rows.map((row) => {
+            const baseStatus = row.price === null ? 'UNAVAILABLE' : String(row.status || 'LIVE').toUpperCase();
+            const resolvedStatus = baseStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : status;
+            return { ...row, status: resolvedStatus };
+        });
 
         sendJson(res, 200, {
             meta: payload.meta,
@@ -2588,7 +2877,11 @@ async function handleUsSp500Quotes(req, res, parsedUrl) {
         const payload = await getUsPayloadWithCache();
         const universe = applyUsUniverseQuery(payload.universe.rows, query.search, query.sector, query.sort, query.direction, query.page, query.pageSize);
         const status = payload.meta.stale ? 'STALE' : 'LIVE';
-        universe.rows = universe.rows.map((row) => ({ ...row, status: row.price === null ? 'ERROR' : status }));
+        universe.rows = universe.rows.map((row) => {
+            const baseStatus = row.price === null ? 'UNAVAILABLE' : String(row.status || 'LIVE').toUpperCase();
+            const resolvedStatus = baseStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : status;
+            return { ...row, status: resolvedStatus };
+        });
 
         sendJson(res, 200, {
             meta: payload.meta,
@@ -2732,7 +3025,7 @@ async function handleUsStock(req, res, rawSymbol) {
             policy,
             tpSl,
             valuation: row.valuation,
-            status: row.price === null ? 'ERROR' : (payload.meta.stale ? 'STALE' : 'LIVE')
+            status: row.price === null ? 'UNAVAILABLE' : (payload.meta.stale ? 'STALE' : 'LIVE')
         });
     } catch (error) {
         sendJson(res, 502, {

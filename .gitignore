@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-gpu/
+venv/
+env/
+
+# Logs
+logs/
+*.log
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build & Cache
+dist/
+build/
+.cache/
+*.egg-info/
+.eggs/
+
+# Data (optional - uncomment if needed)
+# data/raw/
+# data/processed/
+
+# Model artifacts (large files)
+# ml-service/artifacts/
+
+# Temp files
+*.tmp
+*.temp
+.temp/

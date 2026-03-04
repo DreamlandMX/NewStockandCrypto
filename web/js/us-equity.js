@@ -32,6 +32,7 @@ const state = {
     predictionIndexSymbol: '^SPX',
     tickCount: 0,
     lastUpdated: null,
+    lastMeta: null,
     mode: 'loading',
     fastLoading: false,
     slowLoading: false,
@@ -528,6 +529,7 @@ async function refreshIndicesFast(manual = false) {
         state.marketSession = payload.marketSession || state.marketSession;
         state.localCountdownSec = Math.max(0, Number(payload.marketSession?.countdownSec || state.localCountdownSec));
         state.lastUpdated = payload.meta?.timestamp || new Date().toISOString();
+        state.lastMeta = payload.meta || state.lastMeta;
         state.mode = payload.meta?.stale ? 'stale' : 'live';
         state.tickCount += 1;
 
@@ -580,6 +582,7 @@ async function refreshFullData(manual = false) {
         });
 
         if (!state.indices) state.indices = payload.indices || null;
+        state.lastMeta = payload.meta || state.lastMeta;
         state.universe = payload.universe || state.universe;
         if (!state.marketSession) state.marketSession = payload.marketSession || null;
         if (!state.lastUpdated) state.lastUpdated = payload.meta?.timestamp || new Date().toISOString();
@@ -614,11 +617,15 @@ async function loadIndexPrediction() {
 function renderModeBanner(message) {
     let label = 'LIVE FEED';
     let badgeClass = 'status-badge success';
-    let feedText = message || `Indices @ ${Math.round(US_FAST_POLL_INTERVAL_MS / 1000)}s, table @ ${Math.round(US_SLOW_POLL_INTERVAL_MS / 1000)}s.`;
+    const source = state.lastMeta?.source || '--';
+    const coverage = Number(state.lastMeta?.liveCoveragePct);
+    const coverageText = Number.isFinite(coverage) ? `${coverage.toFixed(1)}%` : '--';
+    const fallbackText = state.lastMeta?.providerFallbackUsed ? ' | Fallback active' : '';
+    let feedText = message || `Source: ${source} | Live coverage: ${coverageText}${fallbackText} | Indices @ ${Math.round(US_FAST_POLL_INTERVAL_MS / 1000)}s, table @ ${Math.round(US_SLOW_POLL_INTERVAL_MS / 1000)}s.`;
     if (state.mode === 'stale') {
         label = 'STALE FEED';
         badgeClass = 'status-badge warning';
-        feedText = message || 'Serving cached data because upstream refresh failed.';
+        feedText = message || `Serving cached data because upstream refresh failed. Source: ${source}`;
     } else if (state.mode === 'error') {
         label = 'ERROR';
         badgeClass = 'status-badge danger';
@@ -666,8 +673,14 @@ function renderIndexCard(seriesKey, data, valueEl, changeEl, statusEl, quoteEl, 
         changeEl.className = `metric-change ${change >= 0 ? 'positive' : 'negative'}`;
     }
     if (statusEl) {
-        statusEl.textContent = state.mode === 'live' ? 'LIVE' : state.mode === 'stale' ? 'STALE' : 'ERROR';
-        statusEl.className = `status-badge ${state.mode === 'live' ? 'success' : state.mode === 'stale' ? 'warning' : 'danger'}`;
+        const hasPrice = Number.isFinite(Number(data.price));
+        if (!hasPrice) {
+            statusEl.textContent = 'UNAVAILABLE';
+            statusEl.className = 'status-badge muted';
+        } else {
+            statusEl.textContent = state.mode === 'live' ? 'LIVE' : state.mode === 'stale' ? 'STALE' : 'ERROR';
+            statusEl.className = `status-badge ${state.mode === 'live' ? 'success' : state.mode === 'stale' ? 'warning' : 'danger'}`;
+        }
     }
 
     const quoteText = formatQuoteLabel(data);
@@ -778,21 +791,35 @@ function renderTable() {
         els.sp500TableBody.innerHTML = '<tr><td colspan="10">No data available.</td></tr>';
     } else {
         els.sp500TableBody.innerHTML = rows.map((row) => {
-            const changeClass = row.changePct >= 0 ? 'positive' : 'negative';
-            const signalClass = row.prediction.signal.includes('LONG') ? 'success' : row.prediction.signal.includes('SHORT') ? 'danger' : 'warning';
-            const statusClass = row.status === 'LIVE' ? 'us-status-live' : row.status === 'STALE' ? 'us-status-stale' : 'us-status-error';
+            const statusValue = String(row.status || '--').toUpperCase();
+            const isUnavailable = statusValue === 'UNAVAILABLE';
+            const hasChange = Number.isFinite(Number(row.changePct));
+            const changeClass = !hasChange ? 'us-muted-value' : row.changePct >= 0 ? 'positive' : 'negative';
+            const signalClass = isUnavailable
+                ? 'muted'
+                : (row.prediction.signal.includes('LONG') ? 'success' : row.prediction.signal.includes('SHORT') ? 'danger' : 'warning');
+            const statusClass = statusValue === 'LIVE'
+                ? 'us-status-live'
+                : statusValue === 'STALE'
+                    ? 'us-status-stale'
+                    : statusValue === 'UNAVAILABLE'
+                        ? 'us-status-unavailable'
+                        : 'us-status-error';
+            const signalText = isUnavailable ? 'N/A' : (row.prediction.signal || '--');
+            const pUpText = isUnavailable ? '--' : formatRate(row.prediction.pUp);
+            const confidenceText = isUnavailable ? '--' : formatRate(row.prediction.confidence);
             return `
-                <tr>
+                <tr class="${isUnavailable ? 'us-row-unavailable' : ''}">
                     <td><strong>${escapeHtml(row.symbol)}</strong></td>
                     <td>${escapeHtml(row.name)}</td>
                     <td>${escapeHtml(row.sector || 'Other')}</td>
                     <td>${row.price === null ? '--' : utils.formatNumber(row.price, 2)}</td>
                     <td class="${changeClass}">${row.changePct === null ? '--' : formatSignedPercent(row.changePct)}</td>
-                    <td>${formatRate(row.prediction.pUp)}</td>
-                    <td>${formatRate(row.prediction.confidence)}</td>
+                    <td>${pUpText}</td>
+                    <td>${confidenceText}</td>
                     <td>${row.volume === null ? '--' : utils.formatNumber(row.volume, 0)}</td>
-                    <td><span class="status-badge ${signalClass}">${escapeHtml(row.prediction.signal || '--')}</span></td>
-                    <td><span class="${statusClass}">${escapeHtml(row.status || '--')}</span></td>
+                    <td><span class="status-badge ${signalClass}">${escapeHtml(signalText)}</span></td>
+                    <td><span class="${statusClass}">${escapeHtml(statusValue || '--')}</span></td>
                 </tr>
             `;
         }).join('');
