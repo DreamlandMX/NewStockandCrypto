@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -44,7 +44,13 @@
                             <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
                         </ul>
                     </li>
-                    <li><a href="session-crypto.html" class="nav-link">Session Forecast</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
+                        <ul class="nav-dropdown-menu" id="sessionMenu">
+                            <li><a href="session-crypto.html" class="nav-link">Crypto Session</a></li>
+                            <li><a href="session-index.html" class="nav-link">Index Session</a></li>
+                        </ul>
+                    </li>
                     <li><a href="tracking.html" class="nav-link">Tracking</a></li>
                 </ul>
                 <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
@@ -61,7 +67,7 @@
         <div class="container">
             <div style="max-width: 800px;">
                 <div style="margin-bottom: 1rem;">
-                    <span class="status-badge model-tag">Model v3.2 • PyTorch • LSTM+Attention</span>
+                    <span class="status-badge model-tag">Model v3.2 â€¢ PyTorch â€¢ LSTM+Attention</span>
                 </div>
                 <h1 style="font-size: 4rem; margin-bottom: 1.5rem; line-height: 1.1;">
                     AI-Powered<br/>
@@ -88,7 +94,7 @@
                         </div>
                         <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
                             <span style="color: var(--text-primary); font-weight: 600;">Direction Accuracy</span>
-                            <span class="mono" style="color: var(--success);"> (±1.2%)</span>
+                            <span class="mono" style="color: var(--success);"> (Â±1.2%)</span>
                         </div>
                         <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
                             Sharpe: 2.34 | Win Rate: 54.2%
@@ -102,7 +108,7 @@
                             <span style="color: var(--text-primary); font-weight: 600;">Assets Covered</span>
                         </div>
                         <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
-                            Crypto • CN A-Share • US Equity
+                            Crypto â€¢ CN A-Share â€¢ US Equity
                         </div>
                     </div>
                     <div>
@@ -279,7 +285,7 @@
 
                     <div class="metric-card">
                         <div class="metric-label">600519 Moutai</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">¥1,856</div>
+                        <div class="metric-value mono" style="font-size: 1.5rem;">Â¥1,856</div>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
                             <span class="metric-change positive mono">+2.3%</span>
                             <div style="text-align: right;">
@@ -407,11 +413,11 @@
         <div class="container">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div class="logo">
-                    <span class="logo-icon">◈</span>
+                    <span class="logo-icon">â—ˆ</span>
                     <span class="logo-text">StockandCrypto</span>
                 </div>
                 <p style="color: var(--text-muted); font-size: 0.85rem;" class="mono">
-                    © 2026 StockandCrypto. AI-powered quantitative trading platform.
+                    Â© 2026 StockandCrypto. AI-powered quantitative trading platform.
                 </p>
             </div>
         </div>
@@ -423,3 +429,4 @@
     <script src="js/main.js"></script>
 </body>
 </html>
+

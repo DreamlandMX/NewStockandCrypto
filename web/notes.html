@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -38,7 +38,13 @@
                             <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
                         </ul>
                     </li>
-                    <li><a href="session-crypto.html" class="nav-link">Session Forecast</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
+                        <ul class="nav-dropdown-menu" id="sessionMenu">
+                            <li><a href="session-crypto.html" class="nav-link">Crypto Session</a></li>
+                            <li><a href="session-index.html" class="nav-link">Index Session</a></li>
+                        </ul>
+                    </li>
                     <li><a href="tracking.html" class="nav-link">Tracking</a></li>
                 </ul>
                 <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
@@ -219,7 +225,7 @@ You can include:
         <div class="container">
             <div style="text-align: center;">
                 <p style="color: var(--text-muted); font-size: 0.875rem;">
-                    © 2026 StockandCrypto. AI-powered quantitative trading platform.
+                    Â© 2026 StockandCrypto. AI-powered quantitative trading platform.
                 </p>
             </div>
         </div>
@@ -230,3 +236,4 @@ You can include:
     <script src="js/notes.js"></script>
 </body>
 </html>
+

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -39,7 +39,13 @@
                             <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
                         </ul>
                     </li>
-                    <li><a href="session-crypto.html" class="nav-link">Session Forecast</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
+                        <ul class="nav-dropdown-menu" id="sessionMenu">
+                            <li><a href="session-crypto.html" class="nav-link">Crypto Session</a></li>
+                            <li><a href="session-index.html" class="nav-link">Index Session</a></li>
+                        </ul>
+                    </li>
                     <li><a href="tracking.html" class="nav-link">Tracking</a></li>
                 </ul>
                 <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
@@ -231,7 +237,7 @@
                         </div>
                         <div style="background: rgba(255, 51, 102, 0.1); border: 1px solid var(--danger); padding: 1rem; border-radius: 8px;">
                             <p style="color: var(--danger); font-size: 0.875rem; margin: 0;">
-                                ⚠️ Model status is NO-GO. Recommend retraining before live trading.
+                                âš ï¸ Model status is NO-GO. Recommend retraining before live trading.
                             </p>
                         </div>
                     </div>
@@ -328,7 +334,7 @@
         <div class="container">
             <div style="text-align: center;">
                 <p style="color: var(--text-muted); font-size: 0.875rem;">
-                    © 2026 StockandCrypto. AI-powered quantitative trading platform.
+                    Â© 2026 StockandCrypto. AI-powered quantitative trading platform.
                 </p>
             </div>
         </div>
@@ -340,3 +346,4 @@
     <script src="js/session-crypto.js"></script>
 </body>
 </html>
+
