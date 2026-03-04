@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+
+# Local Python venv
+.venv-gpu/
+

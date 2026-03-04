@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -12,8 +12,6 @@ try:
     import lightgbm as lgb  # type: ignore
 except Exception:  # pragma: no cover
     lgb = None
-
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 
 
 class LSTMClassifier(nn.Module):
@@ -113,25 +111,114 @@ class MetricPack:
     interval_coverage: float
 
 
-def train_ensemble(x_train: np.ndarray, y_train: np.ndarray, y_return_train: np.ndarray) -> EnsemblePack:
-    if lgb is not None:
-        direction_model = lgb.LGBMClassifier(
-            objective='binary',
-            learning_rate=0.05,
-            n_estimators=280,
-            num_leaves=63,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
+def validate_gpu_runtime(gpu_id: int) -> Dict[str, object]:
+    if not torch.cuda.is_available():
+        raise RuntimeError("GPU preflight failed: torch CUDA runtime is unavailable.")
+
+    device_count = torch.cuda.device_count()
+    if gpu_id < 0 or gpu_id >= device_count:
+        raise RuntimeError(
+            f"GPU preflight failed: requested gpu_id={gpu_id} is out of range. Detected CUDA devices={device_count}."
         )
-        q10_model = lgb.LGBMRegressor(objective='quantile', alpha=0.1, n_estimators=260, learning_rate=0.05, random_state=42)
-        q50_model = lgb.LGBMRegressor(objective='quantile', alpha=0.5, n_estimators=260, learning_rate=0.05, random_state=42)
-        q90_model = lgb.LGBMRegressor(objective='quantile', alpha=0.9, n_estimators=260, learning_rate=0.05, random_state=42)
-    else:
-        direction_model = GradientBoostingClassifier(random_state=42)
-        q10_model = GradientBoostingRegressor(loss='quantile', alpha=0.1, random_state=42)
-        q50_model = GradientBoostingRegressor(loss='quantile', alpha=0.5, random_state=42)
-        q90_model = GradientBoostingRegressor(loss='quantile', alpha=0.9, random_state=42)
+
+    device = torch.device(f"cuda:{gpu_id}")
+    gpu_name = torch.cuda.get_device_name(gpu_id)
+
+    try:
+        smoke = torch.randn((32, 32), device=device)
+        _ = (smoke @ smoke.T).mean().item()
+        torch.cuda.synchronize(device)
+    except Exception as exc:
+        raise RuntimeError(f"GPU preflight failed: CUDA tensor smoke test failed on {device}.") from exc
+
+    return {
+        "torch_device": str(device),
+        "torch_cuda_available": True,
+        "torch_gpu_name": gpu_name,
+    }
+
+
+def probe_lightgbm_gpu(gpu_platform_id: Optional[int], gpu_device_id: int) -> None:
+    if lgb is None:
+        raise RuntimeError("LightGBM GPU preflight failed: lightgbm package is not installed.")
+
+    rng = np.random.default_rng(42)
+    x = rng.normal(size=(256, 12)).astype(np.float32)
+    y = (x[:, 0] + 0.6 * x[:, 1] - 0.3 * x[:, 2] > 0.0).astype(np.int32)
+
+    params = {
+        "objective": "binary",
+        "learning_rate": 0.1,
+        "n_estimators": 20,
+        "num_leaves": 31,
+        "device_type": "gpu",
+        "gpu_device_id": int(gpu_device_id),
+        "random_state": 42,
+        "verbosity": -1,
+    }
+    if gpu_platform_id is not None:
+        params["gpu_platform_id"] = int(gpu_platform_id)
+
+    try:
+        probe = lgb.LGBMClassifier(**params)
+        probe.fit(x, y)
+        _ = probe.predict_proba(x[:8])
+    except Exception as exc:
+        raise RuntimeError(
+            "LightGBM GPU preflight failed: GPU backend is unavailable or not compiled with OpenCL support."
+        ) from exc
+
+
+def train_ensemble(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    y_return_train: np.ndarray,
+    *,
+    gpu_platform_id: Optional[int],
+    gpu_device_id: int,
+) -> EnsemblePack:
+    if lgb is None:
+        raise RuntimeError("LightGBM training failed: lightgbm package is required for GPU-only training.")
+
+    common_gpu = {
+        "device_type": "gpu",
+        "gpu_device_id": int(gpu_device_id),
+        "random_state": 42,
+        "verbosity": -1,
+    }
+    if gpu_platform_id is not None:
+        common_gpu["gpu_platform_id"] = int(gpu_platform_id)
+
+    direction_model = lgb.LGBMClassifier(
+        objective='binary',
+        learning_rate=0.05,
+        n_estimators=280,
+        num_leaves=63,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        **common_gpu,
+    )
+    q10_model = lgb.LGBMRegressor(
+        objective='quantile',
+        alpha=0.1,
+        n_estimators=260,
+        learning_rate=0.05,
+        **common_gpu,
+    )
+    q50_model = lgb.LGBMRegressor(
+        objective='quantile',
+        alpha=0.5,
+        n_estimators=260,
+        learning_rate=0.05,
+        **common_gpu,
+    )
+    q90_model = lgb.LGBMRegressor(
+        objective='quantile',
+        alpha=0.9,
+        n_estimators=260,
+        learning_rate=0.05,
+        **common_gpu,
+    )
 
     direction_model.fit(x_train, y_train)
     q10_model.fit(x_train, y_return_train)
@@ -152,12 +239,18 @@ def train_torch_model(
     y_train: np.ndarray,
     x_test: np.ndarray,
     y_test: np.ndarray,
+    *,
+    gpu_id: int,
     epochs: int = 20,
     lr: float = 1e-3,
     batch_size: int = 128,
 ) -> TorchTrainResult:
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    runtime = validate_gpu_runtime(gpu_id)
+    device = torch.device(str(runtime["torch_device"]))
     model = model.to(device)
+    if next(model.parameters()).device != device:
+        raise RuntimeError(f"Torch training failed: model is not pinned to expected device {device}.")
+
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -170,6 +263,8 @@ def train_torch_model(
             idx = permutation[start:start + batch_size]
             batch_x = x_t[idx]
             batch_y = y_t[idx]
+            if batch_x.device != device or batch_y.device != device:
+                raise RuntimeError("Torch training failed: batch tensors are not on the configured CUDA device.")
             logits = model(batch_x)
             loss = criterion(logits, batch_y)
             optimizer.zero_grad()
@@ -185,7 +280,7 @@ def train_torch_model(
     y_pred = (probs >= 0.5).astype(np.int64)
     accuracy = float((y_pred == y_test).mean())
     brier = float(brier_score_loss(y_test, probs))
-    return TorchTrainResult(model=model.cpu(), accuracy=accuracy, brier=brier)
+    return TorchTrainResult(model=model, accuracy=accuracy, brier=brier)
 
 
 def expected_calibration_error(y_true: np.ndarray, probs: np.ndarray, bins: int = 10) -> float:

@@ -33,8 +33,10 @@ from training.models import (
     TCNClassifier,
     TransformerClassifier,
     build_metrics,
+    probe_lightgbm_gpu,
     train_ensemble,
     train_torch_model,
+    validate_gpu_runtime,
 )
 
 MODEL_IDS = ["ensemble", "lstm", "transformer", "tcn"]
@@ -132,10 +134,11 @@ def _sequence_map_for_asset(
 
 def _torch_predict_prob(model: torch.nn.Module, seq: np.ndarray) -> float:
     model.eval()
+    device = next(model.parameters()).device
     with torch.no_grad():
-        tensor = torch.tensor(seq[None, ...], dtype=torch.float32)
+        tensor = torch.tensor(seq[None, ...], dtype=torch.float32, device=device)
         logits = model(tensor)
-        prob = torch.sigmoid(logits).item()
+        prob = torch.sigmoid(logits).detach().cpu().item()
     return float(prob)
 
 
@@ -238,10 +241,30 @@ def train_and_export(
     epochs: int,
     window_config: TrainingWindowConfig,
     fetch_only: bool,
+    gpu_strict: bool,
+    gpu_id: int,
+    gpu_platform_id: Optional[int],
+    gpu_device_id: Optional[int],
 ) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     models_dir = artifact_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
+
+    if not gpu_strict:
+        raise RuntimeError("CPU fallback is disabled. Keep --gpu-strict enabled for all training runs.")
+
+    resolved_gpu_device_id = gpu_id if gpu_device_id is None else int(gpu_device_id)
+    torch_gpu = validate_gpu_runtime(int(gpu_id))
+    probe_lightgbm_gpu(gpu_platform_id, resolved_gpu_device_id)
+
+    print(f"GPU strict mode: enabled")
+    print(f"Selected torch device: {torch_gpu['torch_device']}")
+    print(f"Detected GPU: {torch_gpu['torch_gpu_name']}")
+    print(
+        "LightGBM GPU probe: passed "
+        f"(platform_id={gpu_platform_id if gpu_platform_id is not None else 'auto'}, "
+        f"device_id={resolved_gpu_device_id})"
+    )
 
     jobs = build_asset_jobs(SP500_SNAPSHOT_PATH, CSI300_SNAPSHOT_PATH)
 
@@ -285,7 +308,13 @@ def train_and_export(
         y_ret_train = train_df["target_return"].to_numpy(dtype=np.float32)
         y_ret_test = test_df["target_return"].to_numpy(dtype=np.float32)
 
-        ensemble_pack = train_ensemble(x_train, y_train, y_ret_train)
+        ensemble_pack = train_ensemble(
+            x_train,
+            y_train,
+            y_ret_train,
+            gpu_platform_id=gpu_platform_id,
+            gpu_device_id=resolved_gpu_device_id,
+        )
         ensemble_probs = np.asarray(ensemble_pack.direction_model.predict_proba(x_test)[:, 1], dtype=np.float32)
         ensemble_q10 = np.asarray(ensemble_pack.q10_model.predict(x_test), dtype=np.float32)
         ensemble_q50 = np.asarray(ensemble_pack.q50_model.predict(x_test), dtype=np.float32)
@@ -321,6 +350,7 @@ def train_and_export(
             y_seq_train,
             x_seq_test,
             y_seq_test,
+            gpu_id=gpu_id,
             epochs=epochs,
         )
         transformer_result = train_torch_model(
@@ -329,6 +359,7 @@ def train_and_export(
             y_seq_train,
             x_seq_test,
             y_seq_test,
+            gpu_id=gpu_id,
             epochs=epochs,
         )
         tcn_result = train_torch_model(
@@ -337,6 +368,7 @@ def train_and_export(
             y_seq_train,
             x_seq_test,
             y_seq_test,
+            gpu_id=gpu_id,
             epochs=epochs,
         )
 
@@ -462,6 +494,16 @@ def train_and_export(
         },
         "coverage_report": coverage_report,
         "coverage_warnings": coverage_warnings,
+        "gpu": {
+            "required": True,
+            "policy": "hard_fail",
+            "torch_device": str(torch_gpu["torch_device"]),
+            "torch_cuda_available": bool(torch_gpu["torch_cuda_available"]),
+            "torch_gpu_name": str(torch_gpu["torch_gpu_name"]),
+            "lightgbm_gpu_enabled": True,
+            "lightgbm_platform_id": gpu_platform_id,
+            "lightgbm_device_id": int(resolved_gpu_device_id),
+        },
     }
 
     with (artifact_dir / "artifact_meta.json").open("w", encoding="utf-8") as fp:
@@ -493,6 +535,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-bars-intraday", type=int, default=2000, help="Minimum bars required for intraday symbol inclusion")
     parser.add_argument("--min-bars-daily", type=int, default=400, help="Minimum bars required for daily symbol inclusion")
     parser.add_argument("--fetch-only", action="store_true", help="Only fetch and validate coverage, without model training")
+
+    parser.add_argument("--gpu-id", type=int, default=0, help="CUDA GPU id for torch training")
+    parser.add_argument("--gpu-strict", action=argparse.BooleanOptionalAction, default=True, help="Require usable GPU runtime and fail fast when unavailable")
+    parser.add_argument("--gpu-platform-id", type=int, default=None, help="Optional LightGBM OpenCL platform id")
+    parser.add_argument("--gpu-device-id", type=int, default=None, help="Optional LightGBM OpenCL device id override")
     return parser.parse_args()
 
 
@@ -505,10 +552,13 @@ def main() -> None:
         epochs=max(1, int(args.epochs)),
         window_config=window_config,
         fetch_only=bool(args.fetch_only),
+        gpu_strict=bool(args.gpu_strict),
+        gpu_id=int(args.gpu_id),
+        gpu_platform_id=args.gpu_platform_id,
+        gpu_device_id=args.gpu_device_id,
     )
     print(f"Artifacts generated in: {artifact_dir}")
 
 
 if __name__ == "__main__":
     main()
-

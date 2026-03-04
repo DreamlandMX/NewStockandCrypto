@@ -14,7 +14,11 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ## Train (full multi-model)
 ```bash
-python -m training.train_all --artifact-dir ml-service/artifacts/latest --epochs 20
+python -m training.train_all \
+  --artifact-dir ml-service/artifacts/latest \
+  --epochs 20 \
+  --gpu-id 0 \
+  --gpu-strict
 ```
 
 The training pipeline fetches live market data from:
@@ -29,6 +33,8 @@ python -m training.train_all \
   --start-index-daily 2010-01-01 \
   --start-stock 2020-01-01 \
   --end-date now \
+  --gpu-id 0 \
+  --gpu-strict \
   --fetch-only
 ```
 
@@ -36,3 +42,4 @@ Notes:
 - `1H/4H` horizons use `1h` bars.
 - `1D/3D` horizons use `1d` bars.
 - Stock universe for model fitting includes S&P 500 + CSI 300 snapshots.
+- Training is GPU-strict: CUDA and LightGBM GPU probes must pass, or the run aborts.
