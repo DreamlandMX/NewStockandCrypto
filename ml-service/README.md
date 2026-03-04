@@ -20,3 +20,19 @@ python -m training.train_all --artifact-dir ml-service/artifacts/latest --epochs
 The training pipeline fetches live market data from:
 - Binance (BTCUSDT/ETHUSDT/SOLUSDT)
 - Yahoo Chart API (`^GSPC`, `^DJI`, `^NDX`, `000001.SS`)
+
+## Training window controls
+```bash
+python -m training.train_all \
+  --start-crypto 2020-01-01 \
+  --start-index-intraday 2020-01-01 \
+  --start-index-daily 2010-01-01 \
+  --start-stock 2020-01-01 \
+  --end-date now \
+  --fetch-only
+```
+
+Notes:
+- `1H/4H` horizons use `1h` bars.
+- `1D/3D` horizons use `1d` bars.
+- Stock universe for model fitting includes S&P 500 + CSI 300 snapshots.

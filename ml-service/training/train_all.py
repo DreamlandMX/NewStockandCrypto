@@ -1,21 +1,30 @@
 from __future__ import annotations
 
 import argparse
-import json
 from datetime import datetime, timezone
+import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
+import pandas as pd
 import torch
 
 from training.data_pipeline import (
     DEFAULT_HORIZON_STEPS,
+    HorizonFramesResult,
+    INTRADAY_HORIZONS,
+    REPO_ROOT,
+    SP500_SNAPSHOT_PATH,
+    CSI300_SNAPSHOT_PATH,
     TrainingDataset,
+    TrainingWindowConfig,
+    build_asset_jobs,
     build_sequence_dataset,
     build_training_dataset,
-    fetch_market_frames,
+    build_training_frames_for_horizon,
+    parse_boundary,
     split_sequence_train_test,
     split_train_test,
 )
@@ -28,10 +37,10 @@ from training.models import (
     train_torch_model,
 )
 
-MODEL_IDS = ['ensemble', 'lstm', 'transformer', 'tcn']
-SERVE_ASSETS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', '000001.SS', '^GSPC']
-HEATMAP_FEATURES = ['return_1', 'return_3', 'return_6', 'momentum_6', 'momentum_12', 'vol_6']
-HEATMAP_X = ['W-7', 'W-6', 'W-5', 'W-4', 'W-3', 'W-2', 'W-1', 'W0']
+MODEL_IDS = ["ensemble", "lstm", "transformer", "tcn"]
+SERVE_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "000001.SS", "^GSPC"]
+HEATMAP_FEATURES = ["return_1", "return_3", "return_6", "momentum_6", "momentum_12", "vol_6"]
+HEATMAP_X = ["W-7", "W-6", "W-5", "W-4", "W-3", "W-2", "W-1", "W0"]
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
@@ -40,21 +49,21 @@ def clamp(value: float, min_value: float, max_value: float) -> float:
 
 def horizon_signal(p_up: float) -> str:
     if p_up >= 0.55:
-        return 'LONG'
+        return "LONG"
     if p_up <= 0.45:
-        return 'SHORT'
-    return 'FLAT'
+        return "SHORT"
+    return "FLAT"
 
 
-def _latest_feature_row(dataset: TrainingDataset, asset: str) -> np.ndarray:
-    asset_rows = dataset.table[dataset.table['asset'] == asset]
+def _latest_feature_row(dataset: TrainingDataset, asset: str) -> Optional[np.ndarray]:
+    asset_rows = dataset.table[dataset.table["asset"] == asset]
     if asset_rows.empty:
-        raise ValueError(f'No training rows available for asset {asset}')
+        return None
     return asset_rows.iloc[-1:][dataset.feature_columns].to_numpy(dtype=np.float32)
 
 
 def _latest_heatmap_matrix(dataset: TrainingDataset, asset: str) -> List[List[float]]:
-    asset_rows = dataset.table[dataset.table['asset'] == asset]
+    asset_rows = dataset.table[dataset.table["asset"] == asset]
     if asset_rows.empty:
         return [[0.0 for _ in HEATMAP_X] for _ in HEATMAP_FEATURES]
 
@@ -73,10 +82,10 @@ def _latest_heatmap_matrix(dataset: TrainingDataset, asset: str) -> List[List[fl
 
 def _feature_importance(direction_model: object, feature_columns: List[str]) -> List[dict]:
     raw = None
-    if hasattr(direction_model, 'feature_importances_'):
+    if hasattr(direction_model, "feature_importances_"):
         raw = np.asarray(direction_model.feature_importances_, dtype=float)
-    elif hasattr(direction_model, 'booster_') and hasattr(direction_model.booster_, 'feature_importance'):
-        raw = np.asarray(direction_model.booster_.feature_importance(importance_type='gain'), dtype=float)
+    elif hasattr(direction_model, "booster_") and hasattr(direction_model.booster_, "feature_importance"):
+        raw = np.asarray(direction_model.booster_.feature_importance(importance_type="gain"), dtype=float)
 
     if raw is None or raw.size != len(feature_columns):
         raw = np.ones(len(feature_columns), dtype=float)
@@ -86,26 +95,30 @@ def _feature_importance(direction_model: object, feature_columns: List[str]) -> 
     for idx in order[:6]:
         score = float(raw[idx])
         value = score / (np.max(np.abs(raw)) + 1e-9)
-        top.append({'name': feature_columns[idx], 'value': round(float(value), 3)})
+        top.append({"name": feature_columns[idx], "value": round(float(value), 3)})
     return top
 
 
-def _sequence_map_for_asset(frames: Dict[str, object], horizon_steps: int, sequence_length: int) -> Dict[str, np.ndarray]:
+def _sequence_map_for_asset(
+    frames: Dict[str, pd.DataFrame],
+    horizon_steps: int,
+    sequence_length: int,
+) -> Dict[str, np.ndarray]:
     sequence_map: Dict[str, np.ndarray] = {}
-    seq_features = ['return_1', 'return_3', 'return_6', 'momentum_6', 'momentum_12', 'vol_6', 'vol_12', 'hl_spread', 'oc_spread', 'volume_z']
+    seq_features = ["return_1", "return_3", "return_6", "momentum_6", "momentum_12", "vol_6", "vol_12", "hl_spread", "oc_spread", "volume_z"]
 
     for asset, frame in frames.items():
         working = frame.copy()
-        working['return_1'] = working['close'].pct_change(1)
-        working['return_3'] = working['close'].pct_change(3)
-        working['return_6'] = working['close'].pct_change(6)
-        working['momentum_6'] = working['close'] / working['close'].shift(6) - 1.0
-        working['momentum_12'] = working['close'] / working['close'].shift(12) - 1.0
-        working['vol_6'] = working['return_1'].rolling(6).std()
-        working['vol_12'] = working['return_1'].rolling(12).std()
-        working['hl_spread'] = (working['high'] - working['low']) / working['close'].replace(0.0, np.nan)
-        working['oc_spread'] = (working['close'] - working['open']) / working['open'].replace(0.0, np.nan)
-        working['volume_z'] = (working['volume'] - working['volume'].rolling(24).mean()) / (working['volume'].rolling(24).std() + 1e-9)
+        working["return_1"] = working["close"].pct_change(1)
+        working["return_3"] = working["close"].pct_change(3)
+        working["return_6"] = working["close"].pct_change(6)
+        working["momentum_6"] = working["close"] / working["close"].shift(6) - 1.0
+        working["momentum_12"] = working["close"] / working["close"].shift(12) - 1.0
+        working["vol_6"] = working["return_1"].rolling(6).std()
+        working["vol_12"] = working["return_1"].rolling(12).std()
+        working["hl_spread"] = (working["high"] - working["low"]) / working["close"].replace(0.0, np.nan)
+        working["oc_spread"] = (working["close"] - working["open"]) / working["open"].replace(0.0, np.nan)
+        working["volume_z"] = (working["volume"] - working["volume"].rolling(24).mean()) / (working["volume"].rolling(24).std() + 1e-9)
         working = working.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
 
         if len(working) < sequence_length + horizon_steps + 1:
@@ -126,89 +139,228 @@ def _torch_predict_prob(model: torch.nn.Module, seq: np.ndarray) -> float:
     return float(prob)
 
 
-def train_and_export(artifact_dir: Path, epochs: int) -> None:
+def _fallback_output_payload(horizon: str, global_metrics: Dict[str, Dict[str, dict]], model_id: str, asset: str) -> dict:
+    perf = global_metrics.get(model_id, {}).get(horizon, {})
+    return {
+        "referencePrice": 0.0,
+        "prediction": {
+            "pUp": 0.5,
+            "q10": -0.01,
+            "q50": 0.0,
+            "q90": 0.01,
+            "intervalWidth": 0.02,
+            "confidence": 0.5,
+            "signal": "FLAT",
+        },
+        "explanation": {
+            "summary": f"{model_id.upper()} fallback forecast for {asset} at {horizon}. Missing asset coverage in this horizon run.",
+            "topFeatures": [{"name": "missing_coverage", "value": 0.0}],
+        },
+        "performance": perf if perf else {
+            "directionAccuracy": 0.0,
+            "brierScore": 1.0,
+            "ece": 1.0,
+            "intervalCoverage": 0.0,
+        },
+        "heatmap": {
+            "xLabels": HEATMAP_X,
+            "yLabels": HEATMAP_FEATURES,
+            "matrix": [[0.0 for _ in HEATMAP_X] for _ in HEATMAP_FEATURES],
+        },
+    }
+
+
+def _train_windows_from_args(args: argparse.Namespace) -> TrainingWindowConfig:
+    return TrainingWindowConfig(
+        start_crypto=args.start_crypto,
+        start_index_intraday=args.start_index_intraday,
+        start_index_daily=args.start_index_daily,
+        start_stock=args.start_stock,
+        end_date=args.end_date,
+        intraday_interval=args.intraday_interval,
+        daily_interval=args.daily_interval,
+        max_workers=max(1, int(args.max_workers)),
+        min_bars_intraday=max(64, int(args.min_bars_intraday)),
+        min_bars_daily=max(32, int(args.min_bars_daily)),
+    )
+
+
+def _build_coverage_summary(results: Dict[str, HorizonFramesResult]) -> tuple[Dict[str, Dict[str, int]], List[str], Dict[str, Dict[str, Dict[str, object]]]]:
+    coverage_report: Dict[str, Dict[str, int]] = {}
+    coverage_warnings: List[str] = []
+    diagnostics: Dict[str, Dict[str, Dict[str, object]]] = {}
+
+    for horizon, result in results.items():
+        coverage_report[horizon] = {
+            "requestedSymbols": int(result.coverage["requestedSymbols"]),
+            "loadedSymbols": int(result.coverage["loadedSymbols"]),
+            "droppedSymbols": int(result.coverage["droppedSymbols"]),
+        }
+        coverage_warnings.extend(result.warnings)
+        diagnostics[horizon] = result.diagnostics
+
+    deduped = sorted(set(coverage_warnings))
+    return coverage_report, deduped, diagnostics
+
+
+def _run_fetch_only_report(
+    *,
+    artifact_dir: Path,
+    window_config: TrainingWindowConfig,
+    results: Dict[str, HorizonFramesResult],
+) -> None:
+    coverage_report, coverage_warnings, diagnostics = _build_coverage_summary(results)
+    payload = {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "mode": "fetch_only",
+        "training_windows": {
+            "crypto": {"intraday_start": window_config.start_crypto, "daily_start": window_config.start_crypto},
+            "index": {
+                "intraday_start": window_config.start_index_intraday,
+                "daily_start": window_config.start_index_daily,
+            },
+            "stock": {"intraday_start": window_config.start_stock, "daily_start": window_config.start_stock},
+            "end": parse_boundary(window_config.end_date, is_end=True).isoformat(),
+        },
+        "coverage_report": coverage_report,
+        "coverage_warnings": coverage_warnings,
+        "diagnostics": diagnostics,
+    }
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    models_dir = artifact_dir / 'models'
+    with (artifact_dir / "fetch_report.json").open("w", encoding="utf-8") as fp:
+        json.dump(payload, fp, indent=2)
+    print(json.dumps(payload, indent=2))
+
+
+def train_and_export(
+    artifact_dir: Path,
+    *,
+    epochs: int,
+    window_config: TrainingWindowConfig,
+    fetch_only: bool,
+) -> None:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    models_dir = artifact_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    frames = fetch_market_frames()
-    frames = {asset: frame for asset, frame in frames.items() if asset in set(SERVE_ASSETS)}
+    jobs = build_asset_jobs(SP500_SNAPSHOT_PATH, CSI300_SNAPSHOT_PATH)
 
-    outputs: Dict[str, Dict[str, Dict[str, dict]]] = {model_id: {} for model_id in MODEL_IDS}
+    horizon_results: Dict[str, HorizonFramesResult] = {}
+    for horizon in DEFAULT_HORIZON_STEPS:
+        horizon_results[horizon] = build_training_frames_for_horizon(horizon, jobs=jobs, windows=window_config)
 
-    for model_id in MODEL_IDS:
-        for asset in SERVE_ASSETS:
-            outputs[model_id][asset] = {}
+    if fetch_only:
+        _run_fetch_only_report(artifact_dir=artifact_dir, window_config=window_config, results=horizon_results)
+        return
 
+    outputs: Dict[str, Dict[str, Dict[str, dict]]] = {model_id: {asset: {} for asset in SERVE_ASSETS} for model_id in MODEL_IDS}
     global_metrics: Dict[str, Dict[str, dict]] = {model_id: {} for model_id in MODEL_IDS}
+    all_training_warnings: List[str] = []
 
     for horizon, horizon_steps in DEFAULT_HORIZON_STEPS.items():
+        horizon_result = horizon_results[horizon]
+        frames = horizon_result.frames
+        all_training_warnings.extend(horizon_result.warnings)
+
+        if not frames:
+            all_training_warnings.append(f"Horizon {horizon}: no training frames loaded. Using fallback outputs.")
+            for model_id in MODEL_IDS:
+                global_metrics[model_id][horizon] = {
+                    "directionAccuracy": 0.0,
+                    "brierScore": 1.0,
+                    "ece": 1.0,
+                    "intervalCoverage": 0.0,
+                }
+                for asset in SERVE_ASSETS:
+                    outputs[model_id][asset][horizon] = _fallback_output_payload(horizon, global_metrics, model_id, asset)
+            continue
+
         dataset = build_training_dataset(frames, horizon_steps)
         train_df, test_df = split_train_test(dataset.table, train_ratio=0.8)
 
         x_train = train_df[dataset.feature_columns].to_numpy(dtype=np.float32)
         x_test = test_df[dataset.feature_columns].to_numpy(dtype=np.float32)
-        y_train = train_df['target_direction'].to_numpy(dtype=np.int64)
-        y_test = test_df['target_direction'].to_numpy(dtype=np.int64)
-        y_ret_train = train_df['target_return'].to_numpy(dtype=np.float32)
-        y_ret_test = test_df['target_return'].to_numpy(dtype=np.float32)
+        y_train = train_df["target_direction"].to_numpy(dtype=np.int64)
+        y_test = test_df["target_direction"].to_numpy(dtype=np.int64)
+        y_ret_train = train_df["target_return"].to_numpy(dtype=np.float32)
+        y_ret_test = test_df["target_return"].to_numpy(dtype=np.float32)
 
         ensemble_pack = train_ensemble(x_train, y_train, y_ret_train)
-
         ensemble_probs = np.asarray(ensemble_pack.direction_model.predict_proba(x_test)[:, 1], dtype=np.float32)
         ensemble_q10 = np.asarray(ensemble_pack.q10_model.predict(x_test), dtype=np.float32)
         ensemble_q50 = np.asarray(ensemble_pack.q50_model.predict(x_test), dtype=np.float32)
         ensemble_q90 = np.asarray(ensemble_pack.q90_model.predict(x_test), dtype=np.float32)
         ensemble_metrics = build_metrics(y_test, ensemble_probs, ensemble_q10, ensemble_q90, y_ret_test)
-        global_metrics['ensemble'][horizon] = {
-            'directionAccuracy': round(ensemble_metrics.direction_accuracy, 3),
-            'brierScore': round(ensemble_metrics.brier_score, 3),
-            'ece': round(ensemble_metrics.ece, 3),
-            'intervalCoverage': round(ensemble_metrics.interval_coverage, 3),
+        global_metrics["ensemble"][horizon] = {
+            "directionAccuracy": round(ensemble_metrics.direction_accuracy, 3),
+            "brierScore": round(ensemble_metrics.brier_score, 3),
+            "ece": round(ensemble_metrics.ece, 3),
+            "intervalCoverage": round(ensemble_metrics.interval_coverage, 3),
         }
 
         horizon_dir = models_dir / horizon
         horizon_dir.mkdir(parents=True, exist_ok=True)
         joblib.dump(
             {
-                'direction_model': ensemble_pack.direction_model,
-                'q10_model': ensemble_pack.q10_model,
-                'q50_model': ensemble_pack.q50_model,
-                'q90_model': ensemble_pack.q90_model,
-                'feature_columns': dataset.feature_columns,
+                "direction_model": ensemble_pack.direction_model,
+                "q10_model": ensemble_pack.q10_model,
+                "q50_model": ensemble_pack.q50_model,
+                "q90_model": ensemble_pack.q90_model,
+                "feature_columns": dataset.feature_columns,
             },
-            horizon_dir / 'ensemble.joblib',
+            horizon_dir / "ensemble.joblib",
         )
 
         seq_dataset = build_sequence_dataset(frames, horizon_steps=horizon_steps, sequence_length=32)
         x_seq_train, x_seq_test, y_seq_train, y_seq_test = split_sequence_train_test(seq_dataset.x, seq_dataset.y, train_ratio=0.8)
         input_dim = x_seq_train.shape[-1]
 
-        lstm_result = train_torch_model(LSTMClassifier(input_dim=input_dim), x_seq_train, y_seq_train, x_seq_test, y_seq_test, epochs=epochs)
-        transformer_result = train_torch_model(TransformerClassifier(input_dim=input_dim), x_seq_train, y_seq_train, x_seq_test, y_seq_test, epochs=epochs)
-        tcn_result = train_torch_model(TCNClassifier(input_dim=input_dim), x_seq_train, y_seq_train, x_seq_test, y_seq_test, epochs=epochs)
+        lstm_result = train_torch_model(
+            LSTMClassifier(input_dim=input_dim),
+            x_seq_train,
+            y_seq_train,
+            x_seq_test,
+            y_seq_test,
+            epochs=epochs,
+        )
+        transformer_result = train_torch_model(
+            TransformerClassifier(input_dim=input_dim),
+            x_seq_train,
+            y_seq_train,
+            x_seq_test,
+            y_seq_test,
+            epochs=epochs,
+        )
+        tcn_result = train_torch_model(
+            TCNClassifier(input_dim=input_dim),
+            x_seq_train,
+            y_seq_train,
+            x_seq_test,
+            y_seq_test,
+            epochs=epochs,
+        )
 
-        torch.save(lstm_result.model.state_dict(), horizon_dir / 'lstm.pt')
-        torch.save(transformer_result.model.state_dict(), horizon_dir / 'transformer.pt')
-        torch.save(tcn_result.model.state_dict(), horizon_dir / 'tcn.pt')
+        torch.save(lstm_result.model.state_dict(), horizon_dir / "lstm.pt")
+        torch.save(transformer_result.model.state_dict(), horizon_dir / "transformer.pt")
+        torch.save(tcn_result.model.state_dict(), horizon_dir / "tcn.pt")
 
-        global_metrics['lstm'][horizon] = {
-            'directionAccuracy': round(lstm_result.accuracy, 3),
-            'brierScore': round(lstm_result.brier, 3),
-            'ece': round(max(0.02, min(0.15, lstm_result.brier * 0.35)), 3),
-            'intervalCoverage': round(global_metrics['ensemble'][horizon]['intervalCoverage'], 3),
+        global_metrics["lstm"][horizon] = {
+            "directionAccuracy": round(lstm_result.accuracy, 3),
+            "brierScore": round(lstm_result.brier, 3),
+            "ece": round(max(0.02, min(0.15, lstm_result.brier * 0.35)), 3),
+            "intervalCoverage": round(global_metrics["ensemble"][horizon]["intervalCoverage"], 3),
         }
-        global_metrics['transformer'][horizon] = {
-            'directionAccuracy': round(transformer_result.accuracy, 3),
-            'brierScore': round(transformer_result.brier, 3),
-            'ece': round(max(0.02, min(0.15, transformer_result.brier * 0.35)), 3),
-            'intervalCoverage': round(global_metrics['ensemble'][horizon]['intervalCoverage'], 3),
+        global_metrics["transformer"][horizon] = {
+            "directionAccuracy": round(transformer_result.accuracy, 3),
+            "brierScore": round(transformer_result.brier, 3),
+            "ece": round(max(0.02, min(0.15, transformer_result.brier * 0.35)), 3),
+            "intervalCoverage": round(global_metrics["ensemble"][horizon]["intervalCoverage"], 3),
         }
-        global_metrics['tcn'][horizon] = {
-            'directionAccuracy': round(tcn_result.accuracy, 3),
-            'brierScore': round(tcn_result.brier, 3),
-            'ece': round(max(0.02, min(0.15, tcn_result.brier * 0.35)), 3),
-            'intervalCoverage': round(global_metrics['ensemble'][horizon]['intervalCoverage'], 3),
+        global_metrics["tcn"][horizon] = {
+            "directionAccuracy": round(tcn_result.accuracy, 3),
+            "brierScore": round(tcn_result.brier, 3),
+            "ece": round(max(0.02, min(0.15, tcn_result.brier * 0.35)), 3),
+            "intervalCoverage": round(global_metrics["ensemble"][horizon]["intervalCoverage"], 3),
         }
 
         feature_importance = _feature_importance(ensemble_pack.direction_model, dataset.feature_columns)
@@ -216,6 +368,14 @@ def train_and_export(artifact_dir: Path, epochs: int) -> None:
 
         for asset in SERVE_ASSETS:
             latest_x = _latest_feature_row(dataset, asset)
+            if latest_x is None:
+                all_training_warnings.append(
+                    f"{asset}: no horizon dataset rows for {horizon}. Output fallback generated."
+                )
+                for model_id in MODEL_IDS:
+                    outputs[model_id][asset][horizon] = _fallback_output_payload(horizon, global_metrics, model_id, asset)
+                continue
+
             p_up_ensemble = float(ensemble_pack.direction_model.predict_proba(latest_x)[:, 1][0])
             q10 = float(ensemble_pack.q10_model.predict(latest_x)[0])
             q50 = float(ensemble_pack.q50_model.predict(latest_x)[0])
@@ -231,17 +391,20 @@ def train_and_export(artifact_dir: Path, epochs: int) -> None:
                 p_up_lstm = p_up_ensemble
                 p_up_transformer = p_up_ensemble
                 p_up_tcn = p_up_ensemble
+                all_training_warnings.append(
+                    f"{asset}: sequence features unavailable for {horizon}. Deep models reused ensemble probability."
+                )
 
-            ref_price = float(frames[asset]['close'].iloc[-1])
+            ref_price = float(frames[asset]["close"].iloc[-1]) if asset in frames and not frames[asset].empty else 0.0
             heatmap_matrix = _latest_heatmap_matrix(dataset, asset)
 
             for model_id, p_up in {
-                'ensemble': p_up_ensemble,
-                'lstm': p_up_lstm,
-                'transformer': p_up_transformer,
-                'tcn': p_up_tcn,
+                "ensemble": p_up_ensemble,
+                "lstm": p_up_lstm,
+                "transformer": p_up_transformer,
+                "tcn": p_up_tcn,
             }.items():
-                if model_id == 'ensemble':
+                if model_id == "ensemble":
                     adj_q10, adj_q50, adj_q90 = q10, q50, q90
                 else:
                     center_shift = (p_up - 0.5) * 0.01
@@ -250,65 +413,102 @@ def train_and_export(artifact_dir: Path, epochs: int) -> None:
 
                 confidence = clamp(0.5 + abs(p_up - 0.5) * 1.8, 0.0, 0.99)
                 outputs[model_id][asset][horizon] = {
-                    'referencePrice': round(ref_price, 6),
-                    'prediction': {
-                        'pUp': round(float(p_up), 3),
-                        'q10': round(float(adj_q10), 4),
-                        'q50': round(float(adj_q50), 4),
-                        'q90': round(float(adj_q90), 4),
-                        'intervalWidth': round(float(adj_q90 - adj_q10), 4),
-                        'confidence': round(float(confidence), 3),
-                        'signal': horizon_signal(float(p_up)),
+                    "referencePrice": round(ref_price, 6),
+                    "prediction": {
+                        "pUp": round(float(p_up), 3),
+                        "q10": round(float(adj_q10), 4),
+                        "q50": round(float(adj_q50), 4),
+                        "q90": round(float(adj_q90), 4),
+                        "intervalWidth": round(float(adj_q90 - adj_q10), 4),
+                        "confidence": round(float(confidence), 3),
+                        "signal": horizon_signal(float(p_up)),
                     },
-                    'explanation': {
-                        'summary': (
+                    "explanation": {
+                        "summary": (
                             f"{model_id.upper()} live artifact forecast for {asset} at {horizon}. "
                             f"P(UP)={float(p_up):.2f}, median move={float(adj_q50):+.3%}."
                         ),
-                        'topFeatures': feature_importance,
+                        "topFeatures": feature_importance,
                     },
-                    'performance': global_metrics[model_id][horizon],
-                    'heatmap': {
-                        'xLabels': HEATMAP_X,
-                        'yLabels': HEATMAP_FEATURES,
-                        'matrix': heatmap_matrix,
+                    "performance": global_metrics[model_id][horizon],
+                    "heatmap": {
+                        "xLabels": HEATMAP_X,
+                        "yLabels": HEATMAP_FEATURES,
+                        "matrix": heatmap_matrix,
                     },
                 }
 
+    coverage_report, coverage_warnings, diagnostics = _build_coverage_summary(horizon_results)
+    coverage_warnings.extend(all_training_warnings)
+    coverage_warnings = sorted(set(coverage_warnings))
     generated_at = datetime.now(timezone.utc).isoformat()
 
+    end_iso = parse_boundary(window_config.end_date, is_end=True).isoformat()
     artifact_meta = {
-        'model_version': f'model-explorer-{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}',
-        'training_timestamp': generated_at,
-        'models': MODEL_IDS,
-        'horizons': list(DEFAULT_HORIZON_STEPS.keys()),
-        'assets': SERVE_ASSETS,
-        'data_sources': ['Binance', 'Yahoo Chart API'],
+        "model_version": f"model-explorer-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+        "training_timestamp": generated_at,
+        "models": MODEL_IDS,
+        "horizons": list(DEFAULT_HORIZON_STEPS.keys()),
+        "assets": SERVE_ASSETS,
+        "data_sources": ["Binance", "Yahoo Chart API", "S&P500 Snapshot", "CSI300 Snapshot"],
+        "training_windows": {
+            "crypto": {"intraday_start": window_config.start_crypto, "daily_start": window_config.start_crypto},
+            "index": {
+                "intraday_start": window_config.start_index_intraday,
+                "daily_start": window_config.start_index_daily,
+            },
+            "stock": {"intraday_start": window_config.start_stock, "daily_start": window_config.start_stock},
+            "end": end_iso,
+        },
+        "coverage_report": coverage_report,
+        "coverage_warnings": coverage_warnings,
     }
 
-    with (artifact_dir / 'artifact_meta.json').open('w', encoding='utf-8') as fp:
+    with (artifact_dir / "artifact_meta.json").open("w", encoding="utf-8") as fp:
         json.dump(artifact_meta, fp, indent=2)
 
-    with (artifact_dir / 'model_outputs.json').open('w', encoding='utf-8') as fp:
-        json.dump({'generatedAt': generated_at, 'outputs': outputs}, fp, indent=2)
+    with (artifact_dir / "model_outputs.json").open("w", encoding="utf-8") as fp:
+        json.dump({"generatedAt": generated_at, "outputs": outputs}, fp, indent=2)
 
-    with (artifact_dir / 'metrics.json').open('w', encoding='utf-8') as fp:
+    with (artifact_dir / "metrics.json").open("w", encoding="utf-8") as fp:
         json.dump(global_metrics, fp, indent=2)
+
+    with (artifact_dir / "coverage_diagnostics.json").open("w", encoding="utf-8") as fp:
+        json.dump(diagnostics, fp, indent=2)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='Train full multi-model artifacts for Model Explorer.')
-    parser.add_argument('--artifact-dir', type=str, default='ml-service/artifacts/latest', help='Artifact output directory')
-    parser.add_argument('--epochs', type=int, default=20, help='Training epochs for deep models')
+    parser = argparse.ArgumentParser(description="Train full multi-model artifacts for Model Explorer.")
+    parser.add_argument("--artifact-dir", type=str, default="ml-service/artifacts/latest", help="Artifact output directory")
+    parser.add_argument("--epochs", type=int, default=20, help="Training epochs for deep models")
+
+    parser.add_argument("--start-crypto", type=str, default="2020-01-01", help="Crypto training start date (ISO date)")
+    parser.add_argument("--start-index-intraday", type=str, default="2020-01-01", help="Index intraday training start date")
+    parser.add_argument("--start-index-daily", type=str, default="2010-01-01", help="Index daily training start date")
+    parser.add_argument("--start-stock", type=str, default="2020-01-01", help="Stock training start date")
+    parser.add_argument("--end-date", type=str, default="now", help="Training end date or now")
+    parser.add_argument("--intraday-interval", type=str, default="1h", choices=["1h"], help="Intraday interval")
+    parser.add_argument("--daily-interval", type=str, default="1d", choices=["1d"], help="Daily interval")
+    parser.add_argument("--max-workers", type=int, default=8, help="Maximum concurrent fetch workers")
+    parser.add_argument("--min-bars-intraday", type=int, default=2000, help="Minimum bars required for intraday symbol inclusion")
+    parser.add_argument("--min-bars-daily", type=int, default=400, help="Minimum bars required for daily symbol inclusion")
+    parser.add_argument("--fetch-only", action="store_true", help="Only fetch and validate coverage, without model training")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    window_config = _train_windows_from_args(args)
     artifact_dir = Path(args.artifact_dir)
-    train_and_export(artifact_dir=artifact_dir, epochs=max(1, int(args.epochs)))
-    print(f'Artifacts generated in: {artifact_dir}')
+    train_and_export(
+        artifact_dir=artifact_dir,
+        epochs=max(1, int(args.epochs)),
+        window_config=window_config,
+        fetch_only=bool(args.fetch_only),
+    )
+    print(f"Artifacts generated in: {artifact_dir}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+
