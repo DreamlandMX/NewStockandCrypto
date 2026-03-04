@@ -7,9 +7,356 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .session-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .session-controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .session-note {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(0, 229, 255, 0.08);
+            border: 1px solid rgba(0, 229, 255, 0.22);
+            border-radius: 999px;
+            padding: 0.3rem 0.7rem;
+        }
+        .session-note.stale {
+            background: rgba(245, 158, 11, 0.1);
+            border-color: rgba(245, 158, 11, 0.35);
+            color: var(--warning);
+        }
+        .session-note.unavailable {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.35);
+            color: var(--danger);
+        }
+        .current-session-banner {
+            background: linear-gradient(140deg, rgba(0, 229, 255, 0.09), rgba(245, 158, 11, 0.08));
+            border: 1px solid rgba(0, 229, 255, 0.28);
+            border-radius: var(--radius-lg);
+            padding: 1.1rem 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+        .current-session-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        .current-session-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .current-session-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.86rem;
+        }
+        .transition-alert {
+            margin-top: 0.65rem;
+            font-size: 0.78rem;
+            font-family: var(--font-mono);
+            color: var(--warning);
+            display: none;
+        }
+        .transition-alert.active {
+            display: block;
+            animation: pulseAlert 1.4s ease-in-out infinite;
+        }
+        @keyframes pulseAlert {
+            0% { opacity: 0.65; }
+            50% { opacity: 1; }
+            100% { opacity: 0.65; }
+        }
+        .dual-progress {
+            height: 10px;
+            width: 100%;
+            border-radius: 999px;
+            overflow: hidden;
+            display: flex;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-default);
+        }
+        .dual-progress-elapsed {
+            background: linear-gradient(90deg, #00ff88, #10b981);
+        }
+        .dual-progress-remaining {
+            background: linear-gradient(90deg, #f59e0b, #f97316);
+        }
+        .metric-card.active-session {
+            border-color: rgba(0, 255, 136, 0.55);
+            box-shadow: 0 0 26px rgba(0, 255, 136, 0.22);
+            background: rgba(16, 185, 129, 0.07);
+        }
+        .session-hours {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            margin-bottom: 0.5rem;
+        }
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+        .heatmap-grid {
+            margin-top: 1rem;
+            display: grid;
+            grid-template-columns: 140px repeat(3, 1fr);
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+        .heatmap-head {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+        }
+        .heatmap-row-label {
+            display: flex;
+            align-items: center;
+            padding-left: 0.75rem;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .heatmap-cell {
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            min-height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            color: #f8fafc;
+            transition: transform var(--transition-fast);
+        }
+        .heatmap-cell:hover {
+            transform: translateY(-1px);
+        }
+        .heatmap-legend {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 0.9rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            flex-wrap: wrap;
+        }
+        .heatmap-swatch {
+            width: 11px;
+            height: 11px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-right: 0.3rem;
+            vertical-align: middle;
+        }
+        .decision-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .confidence-ring {
+            width: 95px;
+            height: 95px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: conic-gradient(#00ff88 0deg, #00ff88 0deg, rgba(255, 255, 255, 0.12) 0deg);
+            border: 1px solid var(--border-default);
+        }
+        .confidence-ring-inner {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: var(--primary-bg);
+            display: grid;
+            place-items: center;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+        .leverage-toggle {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .leverage-btn {
+            border: 1px solid var(--border-default);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            padding: 0.35rem 0.7rem;
+            font-family: var(--font-mono);
+            cursor: pointer;
+        }
+        .leverage-btn.active {
+            color: var(--primary-accent);
+            border-color: rgba(0, 229, 255, 0.4);
+            background: rgba(0, 229, 255, 0.12);
+        }
+        .risk-breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+            font-family: var(--font-mono);
+        }
+        .health-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            gap: 0.55rem;
+            font-size: 0.88rem;
+        }
+        .health-list li {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.7rem;
+            color: var(--text-secondary);
+        }
+        .hourly-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+        }
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+        .sortable.active {
+            color: var(--primary-accent);
+        }
+        .hourly-preview {
+            position: fixed;
+            z-index: 1100;
+            width: 260px;
+            background: rgba(5, 10, 26, 0.95);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: 10px;
+            padding: 0.65rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+            display: none;
+            pointer-events: none;
+        }
+        .hourly-preview-title {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+            font-family: var(--font-mono);
+        }
+        .trade-log-table td,
+        .trade-log-table th {
+            font-size: 0.82rem;
+        }
+        .warning-inline {
+            margin-top: 0.6rem;
+            color: var(--warning);
+            font-size: 0.78rem;
+            font-family: var(--font-mono);
+        }
+        .sparkline-svg {
+            width: 96px;
+            height: 28px;
+            display: block;
+        }
+        .sparkline-line {
+            fill: none;
+            stroke: #00e5ff;
+            stroke-width: 2;
+        }
+        .scope-toggle {
+            min-width: 165px;
+        }
+        .mock-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(4, 10, 28, 0.72);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1400;
+            padding: 1rem;
+        }
+        .mock-modal.open {
+            display: flex;
+        }
+        .mock-modal-card {
+            width: min(520px, 100%);
+            background: linear-gradient(145deg, rgba(7, 16, 42, 0.96), rgba(9, 24, 56, 0.95));
+            border: 1px solid rgba(0, 229, 255, 0.25);
+            border-radius: 14px;
+            padding: 1rem;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+        .mock-modal-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .mock-modal-body {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            line-height: 1.5;
+        }
+        .mock-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            margin-top: 1rem;
+        }
+        .text-positive { color: #00ff88; }
+        .text-negative { color: #ff4d4f; }
+        .text-neutral { color: #f59e0b; }
+
+        @media (max-width: 992px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+            .heatmap-grid {
+                grid-template-columns: 120px repeat(3, 1fr);
+                gap: 0.4rem;
+            }
+            .metric-value {
+                font-size: 1.6rem;
+            }
+        }
+    </style>
 </head>
 <body>
-        <header class="header">
+    <header class="header">
         <div class="header-container">
             <div class="logo">
                 <a href="index.html">
@@ -58,287 +405,275 @@
 
     <main style="padding-top: 100px; min-height: 100vh;">
         <div class="container">
-            <div class="section-header" style="text-align: left; margin-bottom: 2rem;">
+            <div class="section-header" style="text-align: left; margin-bottom: 1.2rem;">
                 <span class="section-tag">Session Analysis</span>
                 <h1 class="section-title">Crypto Trading Session Forecast</h1>
-                <p style="color: var(--text-secondary);">24-hour session predictions: Asia (08:00-15:59), Europe (16:00-23:59), US (00:00-07:59) Beijing Time</p>
+                <p style="color: var(--text-secondary);">24-hour session intelligence in Beijing Time. No static placeholders.</p>
+                <div class="session-toolbar">
+                    <div class="session-controls">
+                        <label for="symbolSelector" style="color: var(--text-secondary); font-size: 0.86rem;">Symbol</label>
+                        <select id="symbolSelector" class="form-select" style="width: 150px;">
+                            <option value="BTCUSDT">BTCUSDT</option>
+                            <option value="ETHUSDT">ETHUSDT</option>
+                            <option value="SOLUSDT">SOLUSDT</option>
+                        </select>
+                        <button id="refreshSessionBtn" class="btn btn-secondary btn-sm" type="button">Refresh</button>
+                    </div>
+                    <div id="sessionSourceNote" class="session-note">Loading source...</div>
+                </div>
             </div>
 
-            <!-- Session Overview -->
-            <div class="dashboard-grid" style="margin-bottom: 2rem;">
-                <div class="metric-card">
+            <section id="currentSessionCard" class="current-session-banner">
+                <div class="current-session-row">
+                    <div class="current-session-title" id="currentSessionTitle">Current: --</div>
+                    <span id="currentSignalBadge" class="status-badge info">--</span>
+                </div>
+                <div class="current-session-meta">
+                    <span id="currentSessionRemaining">Time Remaining: --</span>
+                    <span id="currentSessionPup">P(UP): --</span>
+                    <span id="currentSessionVolatility">Volatility: --</span>
+                </div>
+                <div id="sessionTransitionAlert" class="transition-alert"></div>
+                <div class="dual-progress" style="margin-top: 0.85rem;">
+                    <div id="sessionProgressElapsed" class="dual-progress-elapsed" style="width: 0%;"></div>
+                    <div id="sessionProgressRemaining" class="dual-progress-remaining" style="width: 100%;"></div>
+                </div>
+            </section>
+
+            <div class="dashboard-grid" style="margin-bottom: 1.5rem;">
+                <article class="metric-card" id="sessionCardAsia" data-session="asia">
                     <div class="metric-label">Asia Session</div>
-                    <div class="metric-value" style="font-size: 2rem;">08:00-15:59</div>
-                    <div class="metric-change positive">
-                        <span>P(UP): 0.58</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge success">Active</span>
-                    </div>
-                </div>
+                    <div class="session-hours" id="asiaHours">08:00-15:59</div>
+                    <div class="metric-value" id="asiaPup">--</div>
+                    <div class="metric-change" id="asiaConfidence">Confidence: --</div>
+                    <div class="metric-change" id="asiaVolatility">Volatility: --</div>
+                    <div style="margin-top: 0.8rem;"><span class="status-badge info" id="asiaStatus">--</span></div>
+                </article>
 
-                <div class="metric-card">
+                <article class="metric-card" id="sessionCardEurope" data-session="europe">
                     <div class="metric-label">Europe Session</div>
-                    <div class="metric-value" style="font-size: 2rem;">16:00-23:59</div>
-                    <div class="metric-change negative">
-                        <span>P(UP): 0.45</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge warning">Pending</span>
-                    </div>
-                </div>
+                    <div class="session-hours" id="europeHours">16:00-23:59</div>
+                    <div class="metric-value" id="europePup">--</div>
+                    <div class="metric-change" id="europeConfidence">Confidence: --</div>
+                    <div class="metric-change" id="europeVolatility">Volatility: --</div>
+                    <div style="margin-top: 0.8rem;"><span class="status-badge info" id="europeStatus">--</span></div>
+                </article>
 
-                <div class="metric-card">
+                <article class="metric-card" id="sessionCardUs" data-session="us">
                     <div class="metric-label">US Session</div>
-                    <div class="metric-value" style="font-size: 2rem;">00:00-07:59</div>
-                    <div class="metric-change positive">
-                        <span>P(UP): 0.62</span>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge info">Upcoming</span>
-                    </div>
-                </div>
+                    <div class="session-hours" id="usHours">00:00-07:59</div>
+                    <div class="metric-value" id="usPup">--</div>
+                    <div class="metric-change" id="usConfidence">Confidence: --</div>
+                    <div class="metric-change" id="usVolatility">Volatility: --</div>
+                    <div style="margin-top: 0.8rem;"><span class="status-badge info" id="usStatus">--</span></div>
+                </article>
 
-                <div class="metric-card">
+                <article class="metric-card" id="liveMarketCard">
                     <div class="metric-label">Current Price</div>
-                    <div class="metric-value" id="currentPrice">$67,234.50</div>
-                    <div class="metric-change positive" id="priceChange">+2.3%</div>
-                    <div style="margin-top: 1rem;">
-                        <span class="status-badge success">Live</span>
-                    </div>
-                </div>
+                    <div class="metric-value" id="currentPrice">--</div>
+                    <div class="metric-change" id="currentPriceChange">--</div>
+                    <div class="metric-change" id="modeLabel">Mode: --</div>
+                    <div style="margin-top: 0.8rem;"><span class="status-badge info" id="liveDataStatus">--</span></div>
+                </article>
             </div>
 
-            <!-- Session Forecast Chart -->
-            <div class="chart-container" style="margin-bottom: 2rem;">
-                <div class="chart-header">
-                    <h3 class="chart-title">24-Hour Session Forecast</h3>
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-primary btn-sm">P(UP)</button>
-                        <button class="btn btn-secondary btn-sm">Volatility</button>
-                    </div>
-                </div>
-                <div class="chart-wrapper">
-                    <canvas id="sessionChart"></canvas>
-                </div>
-            </div>
-
-            <!-- Decision Cards -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-bottom: 2rem;">
-                <!-- Quick Decision Card -->
+            <section class="comparison-grid">
                 <div class="card">
                     <div class="card-header">
-                        <h3 class="card-title">Quick Decision</h3>
-                        <span class="status-badge success">Ready</span>
+                        <h3 class="card-title">Session Heatmap</h3>
+                        <span class="status-badge model-tag">P(UP) / Volatility / Risk</span>
                     </div>
                     <div class="card-body">
-                        <div style="margin: 1.5rem 0; text-align: center;">
-                            <div style="font-size: 4rem; font-weight: 700; color: var(--success); margin-bottom: 1rem;">LONG</div>
-                            <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">Recommended Action</div>
-                        </div>
-                        <div style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary);">Entry Price:</span>
-                                <span style="color: var(--text-primary); font-weight: 600;">$67,234.50</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary);">Stop Loss:</span>
-                                <span style="color: var(--danger); font-weight: 600;">$65,500.00 (-2.6%)</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-secondary);">Take Profit:</span>
-                                <span style="color: var(--success); font-weight: 600;">$70,000.00 (+4.2%)</span>
-                            </div>
+                        <div id="sessionHeatmap" class="heatmap-grid"></div>
+                        <div class="heatmap-legend">
+                            <span><span class="heatmap-swatch" style="background:#00ff88;"></span>Bullish / Low risk</span>
+                            <span><span class="heatmap-swatch" style="background:#f59e0b;"></span>Neutral</span>
+                            <span><span class="heatmap-swatch" style="background:#ff4d4f;"></span>Bearish / High risk</span>
                         </div>
                     </div>
                 </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Session Radar</h3>
+                        <span class="status-badge model-tag">Comparative profile</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="height: 280px;"><canvas id="sessionRadarChart"></canvas></div>
+                        <div style="margin-top:0.65rem; font-size:0.78rem; color:var(--text-secondary);">
+                            Radar legend: Green = stronger directional confidence, Red = higher risk concentration.
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-                <!-- Risk Assessment -->
+            <section class="decision-grid">
+                <div class="card" id="quickDecisionCard">
+                    <div class="card-header">
+                        <h3 class="card-title">Quick Decision</h3>
+                        <span class="status-badge info" id="decisionStatusBadge">--</span>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:flex; gap:1rem; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                            <div>
+                                <div style="font-size: 2rem; font-weight: 800;" id="decisionAction">--</div>
+                                <div style="color:var(--text-secondary);" id="decisionReason">Awaiting live data</div>
+                            </div>
+                            <div class="confidence-ring" id="decisionConfidenceRing">
+                                <div class="confidence-ring-inner" id="decisionConfidenceText">--</div>
+                            </div>
+                        </div>
+                        <div style="display:grid; gap:0.5rem; font-family:var(--font-mono);">
+                            <div class="risk-breakdown-row"><span>Entry</span><strong id="decisionEntry">--</strong></div>
+                            <div class="risk-breakdown-row"><span>Stop Loss</span><strong id="decisionStopLoss">--</strong></div>
+                            <div class="risk-breakdown-row"><span>Take Profit</span><strong id="decisionTakeProfit">--</strong></div>
+                            <div class="risk-breakdown-row"><span>Take Profit 2</span><strong id="decisionTakeProfit2">--</strong></div>
+                        </div>
+                        <button class="btn btn-primary" id="executeBtn" style="width:100%; margin-top:1rem;" type="button">Execute (Mock)</button>
+                        <div id="executeDisclaimer" class="warning-inline" style="color: var(--text-secondary);">
+                            Simulation only. Not investment advice. Execute action does not place real trades.
+                        </div>
+                        <div id="executeHint" class="warning-inline"></div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">Risk Assessment</h3>
-                        <span class="status-badge warning">Medium</span>
+                        <span class="status-badge warning" id="riskLevelBadge">--</span>
                     </div>
                     <div class="card-body">
-                        <div style="margin: 1.5rem 0;">
-                            <div style="margin-bottom: 1.5rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Risk Level:</span>
-                                    <span style="color: var(--warning); font-weight: 600;">Medium</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: 60%;"></div>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 1.5rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Volatility:</span>
-                                    <span style="color: var(--warning); font-weight: 600;">3.2%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: 45%; background: var(--gradient-secondary);"></div>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 1rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Confidence:</span>
-                                    <span style="color: var(--success); font-weight: 600;">72%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: 72%;"></div>
-                                </div>
-                            </div>
+                        <div class="leverage-toggle" id="leverageToggle">
+                            <button type="button" class="leverage-btn active" data-leverage="1">1x</button>
+                            <button type="button" class="leverage-btn" data-leverage="5">5x</button>
+                            <button type="button" class="leverage-btn" data-leverage="10">10x</button>
                         </div>
-                        <div style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary);">Expected Return:</span>
-                                <span style="color: var(--success); font-weight: 600;">+4.2%</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-secondary);">Net Edge:</span>
-                                <span style="color: var(--success); font-weight: 600;">+3.8% (after cost)</span>
-                            </div>
+                        <div style="margin-bottom:1rem;">
+                            <div class="risk-breakdown-row"><span>Gross Expected Return</span><strong id="grossReturnValue">--</strong></div>
+                            <div class="risk-breakdown-row"><span>Estimated Fees / Slippage</span><strong id="costValue">--</strong></div>
+                            <div class="risk-breakdown-row"><span>Net Edge</span><strong id="netEdgeValue">--</strong></div>
+                        </div>
+                        <div style="margin-bottom:0.9rem;">
+                            <div class="risk-breakdown-row"><span>Volatility Forecast</span><strong id="riskVolatilityValue">--</strong></div>
+                            <div class="progress-bar"><div id="riskVolatilityBar" class="progress-fill" style="width:0%;"></div></div>
+                        </div>
+                        <div>
+                            <div class="risk-breakdown-row"><span>Confidence (vol-adjusted)</span><strong id="riskConfidenceValue">--</strong></div>
+                            <div class="progress-bar"><div id="riskConfidenceBar" class="progress-fill" style="width:0%;"></div></div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Model Health -->
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">Model Health</h3>
-                        <span class="status-badge warning">NO-GO</span>
+                        <span class="status-badge info" id="healthStatusBadge">--</span>
                     </div>
                     <div class="card-body">
-                        <div style="margin: 1.5rem 0;">
-                            <div style="margin-bottom: 1rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Drift Status:</span>
-                                    <span style="color: var(--danger); font-weight: 600;">47 Alerts</span>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 1rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Data Freshness:</span>
-                                    <span style="color: var(--success); font-weight: 600;">2 hours ago</span>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 1rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Last Training:</span>
-                                    <span style="color: var(--warning); font-weight: 600;">2026-02-06</span>
-                                </div>
-                            </div>
-                            <div style="margin-bottom: 1rem;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <span style="color: var(--text-secondary);">Model Version:</span>
-                                    <span style="color: var(--text-primary); font-weight: 600;">baseline_momentum_quantile</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="background: rgba(255, 51, 102, 0.1); border: 1px solid var(--danger); padding: 1rem; border-radius: 8px;">
-                            <p style="color: var(--danger); font-size: 0.875rem; margin: 0;">
-                                âš ï¸ Model status is NO-GO. Recommend retraining before live trading.
-                            </p>
+                        <ul class="health-list">
+                            <li><span>Drift Alerts</span><strong id="healthDriftAlerts">--</strong></li>
+                            <li><span>Top Drift Factor</span><strong id="healthTopDrift">--</strong></li>
+                            <li><span>Top Drift Score</span><strong id="healthTopDriftScore">--</strong></li>
+                            <li><span>Data Freshness</span><strong id="healthFreshness">--</strong></li>
+                            <li><span>Last Training</span><strong id="healthLastTraining">--</strong></li>
+                        </ul>
+                        <div style="margin-top:1rem; padding:0.85rem; border:1px solid var(--border-default); border-radius:10px; background:rgba(255,255,255,0.02);">
+                            <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin-bottom:0.35rem;">Retrain Recommendation</div>
+                            <div id="healthRecommendation" style="color:var(--text-secondary);">--</div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <!-- Hourly Forecast Table -->
-            <div class="table-container">
+            <section class="table-container" style="margin-bottom: 1.5rem;">
                 <div class="table-header">
-                    <h3 style="font-size: 1.25rem; font-weight: 600;">Hourly Forecast Details</h3>
-                    <div class="table-controls">
-                        <select class="form-select" style="width: auto;">
-                            <option>All Sessions</option>
-                            <option>Asia</option>
-                            <option>Europe</option>
-                            <option>US</option>
+                    <h3 style="font-size:1.2rem; font-weight:700;">Hourly Forecast Details</h3>
+                    <div class="hourly-controls">
+                        <select id="hourlyScope" class="form-select scope-toggle" style="width:auto;">
+                            <option value="all">All Sessions</option>
+                            <option value="current">Current Session Only</option>
+                        </select>
+                        <select id="sessionFilter" class="form-select" style="width:auto;">
+                            <option value="all">All Sessions</option>
+                            <option value="asia">Asia</option>
+                            <option value="europe">Europe</option>
+                            <option value="us">US</option>
+                        </select>
+                        <select id="signalFilter" class="form-select" style="width:auto;">
+                            <option value="all">All Signals</option>
+                            <option value="strong-long">Strong Long</option>
+                            <option value="long">Long</option>
+                            <option value="flat">Flat</option>
+                            <option value="short">Short</option>
                         </select>
                     </div>
                 </div>
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Hour (BJT)</th>
-                            <th>Session</th>
-                            <th>P(UP)</th>
-                            <th>q10</th>
-                            <th>q50</th>
-                            <th>q90</th>
-                            <th>Signal</th>
+                            <th class="sortable" data-sort="hour">Hour (BJT)</th>
+                            <th class="sortable" data-sort="session">Session</th>
+                            <th class="sortable active" data-sort="pUp">P(UP)</th>
+                            <th class="sortable" data-sort="q10">q10</th>
+                            <th class="sortable" data-sort="q50">q50</th>
+                            <th class="sortable" data-sort="q90">q90</th>
+                            <th class="sortable" data-sort="volatility">Volatility Forecast</th>
+                            <th>Mini Trend</th>
+                            <th class="sortable" data-sort="signal">Signal</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>08:00</strong></td>
-                            <td>Asia</td>
-                            <td style="color: var(--success);">0.62</td>
-                            <td style="color: var(--danger);">-0.8%</td>
-                            <td style="color: var(--success);">+0.5%</td>
-                            <td style="color: var(--success);">+1.2%</td>
-                            <td><span class="status-badge success">LONG</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>09:00</strong></td>
-                            <td>Asia</td>
-                            <td style="color: var(--success);">0.58</td>
-                            <td style="color: var(--danger);">-1.0%</td>
-                            <td style="color: var(--success);">+0.3%</td>
-                            <td style="color: var(--success);">+1.5%</td>
-                            <td><span class="status-badge success">LONG</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>10:00</strong></td>
-                            <td>Asia</td>
-                            <td style="color: var(--success);">0.65</td>
-                            <td style="color: var(--danger);">-0.5%</td>
-                            <td style="color: var(--success);">+0.8%</td>
-                            <td style="color: var(--success);">+2.0%</td>
-                            <td><span class="status-badge success">STRONG LONG</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>16:00</strong></td>
-                            <td>Europe</td>
-                            <td style="color: var(--danger);">0.45</td>
-                            <td style="color: var(--danger);">-1.5%</td>
-                            <td style="color: var(--danger);">-0.2%</td>
-                            <td style="color: var(--success);">+0.8%</td>
-                            <td><span class="status-badge warning">FLAT</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>17:00</strong></td>
-                            <td>Europe</td>
-                            <td style="color: var(--danger);">0.42</td>
-                            <td style="color: var(--danger);">-2.0%</td>
-                            <td style="color: var(--danger);">-0.5%</td>
-                            <td style="color: var(--success);">+0.5%</td>
-                            <td><span class="status-badge warning">FLAT</span></td>
-                        </tr>
-                        <tr>
-                            <td><strong>00:00</strong></td>
-                            <td>US</td>
-                            <td style="color: var(--success);">0.68</td>
-                            <td style="color: var(--danger);">-0.6%</td>
-                            <td style="color: var(--success);">+1.0%</td>
-                            <td style="color: var(--success);">+2.5%</td>
-                            <td><span class="status-badge success">STRONG LONG</span></td>
-                        </tr>
+                    <tbody id="hourlyTableBody">
+                        <tr><td colspan="9" style="text-align:center; color:var(--text-muted);">Loading hourly forecast...</td></tr>
                     </tbody>
                 </table>
-            </div>
+            </section>
+
+            <section class="table-container" style="margin-bottom:2rem;">
+                <div class="table-header">
+                    <h3 style="font-size:1.1rem; font-weight:700;">Session Trade Log (Live Proxy)</h3>
+                    <span class="status-badge model-tag">Last 3 sessions</span>
+                </div>
+                <table class="data-table trade-log-table">
+                    <thead>
+                        <tr>
+                            <th>Session</th>
+                            <th>Predicted Edge</th>
+                            <th>Realized Edge</th>
+                            <th>Edge Realized</th>
+                            <th>Delta Reason</th>
+                            <th>Outcome</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradeLogBody">
+                        <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">Loading trade log...</td></tr>
+                    </tbody>
+                </table>
+            </section>
         </div>
     </main>
 
-    <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 2rem 0; margin-top: 4rem;">
+    <div id="hourlyPreview" class="hourly-preview">
+        <div id="hourlyPreviewTitle" class="hourly-preview-title"></div>
+        <canvas id="hourlyPreviewCanvas" width="240" height="120"></canvas>
+    </div>
+
+    <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 2rem 0; margin-top: 2rem;">
         <div class="container">
             <div style="text-align: center;">
-                <p style="color: var(--text-muted); font-size: 0.875rem;">
-                    Â© 2026 StockandCrypto. AI-powered quantitative trading platform.
-                </p>
+                <p style="color: var(--text-muted); font-size: 0.875rem;">© 2026 StockandCrypto. AI-powered quantitative trading platform.</p>
+                <p id="sessionFooterDisclaimer" style="margin-top: 0.4rem; color: var(--text-secondary); font-size: 0.8rem;">Mock Mode | Simulated Data | For Educational Use Only</p>
             </div>
         </div>
     </footer>
+
+    <div id="executeModal" class="mock-modal" aria-hidden="true">
+        <div class="mock-modal-card" role="dialog" aria-modal="true" aria-labelledby="executeModalTitle">
+            <div id="executeModalTitle" class="mock-modal-title">Mock Execution Confirmation</div>
+            <div id="executeModalBody" class="mock-modal-body">Preparing simulated execution...</div>
+            <div class="mock-modal-actions">
+                <button type="button" id="executeModalClose" class="btn btn-secondary btn-sm">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/nav.js"></script>
     <script src="js/utils.js"></script>
@@ -346,4 +681,3 @@
     <script src="js/session-crypto.js"></script>
 </body>
 </html>
-

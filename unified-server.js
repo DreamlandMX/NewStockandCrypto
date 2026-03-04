@@ -50,6 +50,13 @@ const CRYPTO_HISTORY_RANGE_CONFIG = {
     '24h': { interval: '5m', limit: 288, ttlMs: 60000 },
     '7d': { interval: '1h', limit: 168, ttlMs: 120000 }
 };
+const CRYPTO_SESSION_CACHE_TTL_MS = Number(process.env.CRYPTO_SESSION_CACHE_TTL_MS || 9000);
+const CRYPTO_SESSION_ORDER = ['asia', 'europe', 'us'];
+const CRYPTO_SESSION_META = {
+    asia: { code: 'asia', label: 'Asia Session', hoursBjt: '08:00-15:59', startMinute: 8 * 60, endMinute: 16 * 60 },
+    europe: { code: 'europe', label: 'Europe Session', hoursBjt: '16:00-23:59', startMinute: 16 * 60, endMinute: 24 * 60 },
+    us: { code: 'us', label: 'US Session', hoursBjt: '00:00-07:59', startMinute: 0, endMinute: 8 * 60 }
+};
 const INDEX_SECIDS = {
     '000001.SH': '1.000001',
     '000300.SH': '1.000300'
@@ -97,6 +104,7 @@ let cryptoPriceCacheAt = 0;
 const cryptoHistoryCache = new Map();
 const cryptoPredictionCache = new Map();
 const cryptoPerformanceCache = new Map();
+const cryptoSessionCache = new Map();
 const cryptoLastPriceBySymbol = new Map();
 const cryptoReturnHistoryBySymbol = new Map();
 let cnCache = null;
@@ -970,6 +978,473 @@ function buildCryptoPerformancePayload(symbol, predictionPayload, stale = false,
     return payload;
 }
 
+function resolveCryptoSessionSymbol(rawSymbol) {
+    const normalized = String(rawSymbol || '').trim().toUpperCase();
+    if (!normalized) return 'BTCUSDT';
+    if (CRYPTO_SUPPORTED_SYMBOLS.has(normalized)) return normalized;
+    if (normalized === 'BTC') return 'BTCUSDT';
+    if (normalized === 'ETH') return 'ETHUSDT';
+    if (normalized === 'SOL') return 'SOLUSDT';
+    return null;
+}
+
+function shanghaiMinuteOfDayFromIso(ts) {
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return null;
+    const shanghai = toShanghaiNow(date);
+    return shanghai.hour * 60 + shanghai.minute;
+}
+
+function sessionCodeFromMinuteOfDay(minuteOfDay) {
+    if (!Number.isFinite(minuteOfDay)) return 'asia';
+    for (const code of CRYPTO_SESSION_ORDER) {
+        const meta = CRYPTO_SESSION_META[code];
+        if (minuteOfDay >= meta.startMinute && minuteOfDay < meta.endMinute) {
+            return code;
+        }
+    }
+    return 'asia';
+}
+
+function computeCryptoCurrentSession(now = new Date()) {
+    const shanghai = toShanghaiNow(now);
+    const minuteOfDay = shanghai.hour * 60 + shanghai.minute;
+    const secondOfDay = minuteOfDay * 60 + shanghai.second;
+    const code = sessionCodeFromMinuteOfDay(minuteOfDay);
+    const currentMeta = CRYPTO_SESSION_META[code];
+    const startSec = currentMeta.startMinute * 60;
+    const endSec = currentMeta.endMinute * 60;
+    const totalSec = Math.max(1, endSec - startSec);
+    const elapsedSec = clamp(secondOfDay - startSec, 0, totalSec);
+    const remainingSec = Math.max(0, endSec - secondOfDay);
+    const elapsedRatio = clamp(elapsedSec / totalSec, 0, 1);
+    const nextCode = code === 'asia' ? 'europe' : code === 'europe' ? 'us' : 'asia';
+    const transitionSoon = remainingSec < 1800;
+    const transitionText = transitionSoon
+        ? `${currentMeta.label} Ending Soon - Prepare for ${CRYPTO_SESSION_META[nextCode].label}`
+        : '';
+    return {
+        code,
+        label: currentMeta.label,
+        hoursBjt: currentMeta.hoursBjt,
+        remainingSec,
+        elapsedRatio,
+        transitionSoon,
+        transitionText,
+        minuteOfDay
+    };
+}
+
+function classifyCryptoRisk(volatilityPct, confidence) {
+    if (volatilityPct >= 3.2 || confidence <= 0.42) return 'HIGH';
+    if (volatilityPct >= 1.8 || confidence <= 0.58) return 'MEDIUM';
+    return 'LOW';
+}
+
+function inferSessionStatus(code, currentMinute) {
+    const meta = CRYPTO_SESSION_META[code];
+    if (currentMinute >= meta.startMinute && currentMinute < meta.endMinute) return 'ACTIVE';
+    if (code === 'us') {
+        return currentMinute < meta.startMinute ? 'PENDING' : 'COMPLETED';
+    }
+    return currentMinute >= meta.endMinute ? 'COMPLETED' : 'PENDING';
+}
+
+function mean(values) {
+    if (!Array.isArray(values) || !values.length) return 0;
+    return values.reduce((acc, value) => acc + value, 0) / values.length;
+}
+
+function std(values, avg = mean(values)) {
+    if (!Array.isArray(values) || !values.length) return 0;
+    const variance = values.reduce((acc, value) => acc + ((value - avg) ** 2), 0) / values.length;
+    return Math.sqrt(Math.max(0, variance));
+}
+
+function buildSessionBuckets(historySeries) {
+    const buckets = {
+        asia: { returns: [], ranges: [], closes: [] },
+        europe: { returns: [], ranges: [], closes: [] },
+        us: { returns: [], ranges: [], closes: [] }
+    };
+    for (const point of historySeries || []) {
+        const minuteOfDay = shanghaiMinuteOfDayFromIso(point.ts);
+        if (minuteOfDay === null) continue;
+        const code = sessionCodeFromMinuteOfDay(minuteOfDay);
+        const bucket = buckets[code];
+        const open = Number(point.open);
+        const close = Number(point.close);
+        const high = Number(point.high);
+        const low = Number(point.low);
+        if (!Number.isFinite(open) || open <= 0 || !Number.isFinite(close)) continue;
+        bucket.returns.push(clamp((close - open) / open, -0.2, 0.2));
+        if (Number.isFinite(high) && Number.isFinite(low)) {
+            bucket.ranges.push(clamp((high - low) / open, 0, 0.25));
+        }
+        bucket.closes.push(close);
+    }
+    return buckets;
+}
+
+function buildSessionStat(code, bucket, basePrediction, changePct, minuteOfDay) {
+    const returns = bucket?.returns || [];
+    const ranges = bucket?.ranges || [];
+    const winRate = returns.length ? returns.filter((value) => value > 0).length / returns.length : 0.5;
+    const avgRet = mean(returns);
+    const retStd = std(returns, avgRet);
+    const avgRange = ranges.length ? mean(ranges) : Math.max(Math.abs(basePrediction.q90 - basePrediction.q10), 0.008);
+    const trendBoost = clamp(changePct / 100, -0.12, 0.12);
+
+    const pUp = clamp(
+        basePrediction.pUp + avgRet * 13 + (winRate - 0.5) * 0.24 + trendBoost * 0.16,
+        0.05,
+        0.95
+    );
+    const confidence = clamp(
+        basePrediction.confidence + Math.abs(avgRet) * 9 + (0.06 - retStd) * 1.6 - avgRange * 2.2,
+        0.2,
+        0.98
+    );
+    const q50 = clamp(basePrediction.q50 * 0.55 + avgRet * 1.35, -0.1, 0.1);
+    const spread = clamp(retStd * 1.7 + avgRange * 0.8, 0.004, 0.08);
+    const q10 = clamp(q50 - spread, -0.12, 0.12);
+    const q90 = clamp(q50 + spread, -0.12, 0.12);
+    const volatilityPct = Number(clamp(avgRange * 100 * 1.2, 0.2, 25).toFixed(2));
+    const riskLevel = classifyCryptoRisk(volatilityPct, confidence);
+
+    return {
+        code,
+        label: CRYPTO_SESSION_META[code].label,
+        hoursBjt: CRYPTO_SESSION_META[code].hoursBjt,
+        pUp: Number(pUp.toFixed(4)),
+        confidence: Number(confidence.toFixed(4)),
+        volatilityPct,
+        riskLevel,
+        status: inferSessionStatus(code, minuteOfDay),
+        q10: Number(q10.toFixed(4)),
+        q50: Number(q50.toFixed(4)),
+        q90: Number(q90.toFixed(4)),
+        winRate: Number(winRate.toFixed(4)),
+        meanReturn: Number(avgRet.toFixed(6))
+    };
+}
+
+function sessionCodeFromHour(hour) {
+    if (hour >= 8 && hour <= 15) return 'asia';
+    if (hour >= 16) return 'europe';
+    return 'us';
+}
+
+function extractHourFromShanghaiIso(ts) {
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return null;
+    return toShanghaiNow(date).hour;
+}
+
+function buildHourlyRows(symbol, history7d, history24h, sessions, predictionPayload, currentPrice) {
+    const byHour = new Map();
+    for (const point of history7d || []) {
+        const hour = extractHourFromShanghaiIso(point.ts);
+        if (hour === null) continue;
+        const open = Number(point.open);
+        const close = Number(point.close);
+        const high = Number(point.high);
+        const low = Number(point.low);
+        if (!Number.isFinite(open) || open <= 0 || !Number.isFinite(close)) continue;
+        const arr = byHour.get(hour) || [];
+        arr.push({
+            ret: clamp((close - open) / open, -0.2, 0.2),
+            range: Number.isFinite(high) && Number.isFinite(low) ? clamp((high - low) / open, 0, 0.25) : 0,
+            close
+        });
+        byHour.set(hour, arr);
+    }
+
+    const history24hByHour = new Map();
+    for (const point of history24h || []) {
+        const hour = extractHourFromShanghaiIso(point.ts);
+        if (hour === null) continue;
+        const close = Number(point.close);
+        if (!Number.isFinite(close)) continue;
+        const arr = history24hByHour.get(hour) || [];
+        arr.push(close);
+        history24hByHour.set(hour, arr);
+    }
+
+    const basePrediction = predictionPayload?.prediction || {};
+    const baseQ10 = Number(basePrediction?.magnitude?.q10 ?? -0.01);
+    const baseQ50 = Number(basePrediction?.magnitude?.q50 ?? 0);
+    const baseQ90 = Number(basePrediction?.magnitude?.q90 ?? 0.01);
+
+    const hourly = [];
+    for (let hour = 0; hour < 24; hour += 1) {
+        const code = sessionCodeFromHour(hour);
+        const sessionStat = sessions.find((row) => row.code === code);
+        const hourRows = byHour.get(hour) || [];
+        const hourReturns = hourRows.map((row) => row.ret);
+        const hourRanges = hourRows.map((row) => row.range);
+        const avgRet = hourReturns.length ? mean(hourReturns) : sessionStat?.meanReturn || 0;
+        const retStd = hourReturns.length ? std(hourReturns, avgRet) : Math.abs((sessionStat?.q90 || 0.01) - (sessionStat?.q10 || -0.01)) / 2;
+        const avgRange = hourRanges.length ? mean(hourRanges) : (sessionStat?.volatilityPct || 1.2) / 100;
+
+        const pUp = clamp((sessionStat?.pUp || basePrediction.p_up || 0.5) + avgRet * 8, 0.05, 0.95);
+        const confidence = clamp((sessionStat?.confidence || basePrediction.confidence || 0.5) - avgRange * 1.8 + 0.08, 0.2, 0.98);
+        const q50 = clamp((sessionStat?.q50 || baseQ50) * 0.6 + avgRet * 1.2, -0.12, 0.12);
+        const spread = clamp(retStd * 1.6 + avgRange * 0.7 + Math.abs(baseQ90 - baseQ10) * 0.2, 0.004, 0.09);
+        const q10 = clamp(q50 - spread, -0.15, 0.15);
+        const q90 = clamp(q50 + spread, -0.15, 0.15);
+        const volatilityForecastPct = Number(clamp(avgRange * 100 * 1.25, 0.2, 30).toFixed(2));
+        const signal = pUp >= 0.65
+            ? 'STRONG LONG'
+            : pUp >= 0.55
+                ? 'LONG'
+                : pUp <= 0.35
+                    ? 'STRONG SHORT'
+                    : pUp <= 0.45
+                        ? 'SHORT'
+                        : 'FLAT';
+
+        const hourPrices = history24hByHour.get(hour) || [];
+        let sparkline = hourPrices.slice(-4);
+        if (sparkline.length < 4) {
+            const base = Number.isFinite(currentPrice) ? currentPrice : (hourRows[hourRows.length - 1]?.close || 0);
+            const p1 = base * (1 + q10 * 0.35);
+            const p2 = base * (1 + q50 * 0.5);
+            const p3 = base * (1 + q50 * 0.8);
+            const p4 = base * (1 + q90 * 0.95);
+            sparkline = [p1, p2, p3, p4].map((value) => Number(value.toFixed(2)));
+        } else {
+            sparkline = sparkline.map((value) => Number(value.toFixed(2)));
+        }
+
+        hourly.push({
+            hourLabel: `${String(hour).padStart(2, '0')}:00`,
+            sessionCode: code,
+            pUp: Number(pUp.toFixed(4)),
+            q10: Number(q10.toFixed(4)),
+            q50: Number(q50.toFixed(4)),
+            q90: Number(q90.toFixed(4)),
+            volatilityForecastPct,
+            signal,
+            sparkline
+        });
+    }
+    return hourly;
+}
+
+function leverageScale(leverage) {
+    if (leverage >= 10) return 2.6;
+    if (leverage >= 5) return 1.8;
+    return 1;
+}
+
+function leverageCostScale(leverage) {
+    if (leverage >= 10) return 1.7;
+    if (leverage >= 5) return 1.35;
+    return 1;
+}
+
+function buildDecisionByLeverage(decision) {
+    const result = {};
+    const entry = Number(decision.entry);
+    const baseStop = Number(decision.stopLoss);
+    const baseTp1 = Number(decision.takeProfit1);
+    const baseTp2 = Number(decision.takeProfit2);
+    const action = String(decision.action || 'FLAT').toUpperCase();
+    const baseGross = Number(decision.grossReturnPct);
+    const baseCost = Number(decision.costPct);
+    const slPct = Number.isFinite(entry) && entry > 0 && Number.isFinite(baseStop) ? Math.abs(entry - baseStop) / entry : 0;
+    const tp1Pct = Number.isFinite(entry) && entry > 0 && Number.isFinite(baseTp1) ? Math.abs(baseTp1 - entry) / entry : 0;
+    const tp2Pct = Number.isFinite(entry) && entry > 0 && Number.isFinite(baseTp2) ? Math.abs(baseTp2 - entry) / entry : 0;
+
+    for (const leverage of [1, 5, 10]) {
+        const scale = leverageScale(leverage);
+        const costScale = leverageCostScale(leverage);
+        let stopLoss = baseStop;
+        let takeProfit1 = baseTp1;
+        let takeProfit2 = baseTp2;
+
+        if (Number.isFinite(entry) && entry > 0) {
+            if (action.includes('LONG')) {
+                stopLoss = entry * (1 - slPct * scale);
+                takeProfit1 = entry * (1 + tp1Pct * scale);
+                takeProfit2 = entry * (1 + tp2Pct * scale);
+            } else if (action.includes('SHORT')) {
+                stopLoss = entry * (1 + slPct * scale);
+                takeProfit1 = entry * (1 - tp1Pct * scale);
+                takeProfit2 = entry * (1 - tp2Pct * scale);
+            }
+        }
+
+        const gross = baseGross * scale;
+        const cost = baseCost * costScale;
+        const net = gross - cost;
+        result[String(leverage)] = {
+            netEdgePct: Number(net.toFixed(2)),
+            stopLoss: Number.isFinite(stopLoss) ? Number(stopLoss.toFixed(4)) : null,
+            takeProfit1: Number.isFinite(takeProfit1) ? Number(takeProfit1.toFixed(4)) : null,
+            takeProfit2: Number.isFinite(takeProfit2) ? Number(takeProfit2.toFixed(4)) : null
+        };
+    }
+    return result;
+}
+
+function classifyEdgeReason(deltaPct, volatilityPct) {
+    if (deltaPct <= -0.45 && volatilityPct >= 2.3) {
+        return 'Volatility spike caused additional slippage';
+    }
+    if (deltaPct >= 0.45) {
+        return 'Momentum persistence improved realized edge';
+    }
+    if (Math.abs(deltaPct) <= 0.2) {
+        return 'Execution tracked forecast within expected noise';
+    }
+    return 'Order flow divergence reduced follow-through';
+}
+
+function buildSessionTradeLog(sessions) {
+    const rows = [];
+    for (const session of sessions) {
+        const predictedEdgePct = Number((session.q50 * 100 - clamp(session.volatilityPct * 0.14, 0.18, 1.2)).toFixed(2));
+        const realizedEdgePct = Number((session.meanReturn * 100 - clamp(session.volatilityPct * 0.1, 0.1, 1)).toFixed(2));
+        const edgeDeltaPct = Number((realizedEdgePct - predictedEdgePct).toFixed(2));
+        const outcome = realizedEdgePct > 0.25 ? 'WIN' : realizedEdgePct < -0.25 ? 'LOSS' : 'BREAKEVEN';
+        rows.push({
+            sessionLabel: session.label,
+            predictedEdgePct,
+            realizedEdgePct,
+            edgeDeltaPct,
+            deltaReason: classifyEdgeReason(edgeDeltaPct, session.volatilityPct),
+            outcome
+        });
+    }
+    return rows;
+}
+
+function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7dPayload, history24hPayload, stale = false, staleReason = null) {
+    const currentSession = computeCryptoCurrentSession();
+    const prediction = predictionPayload?.prediction || {};
+    const basePrediction = {
+        pUp: Number(prediction.p_up ?? 0.5),
+        confidence: Number(prediction.confidence ?? 0.5),
+        q10: Number(prediction.magnitude?.q10 ?? -0.01),
+        q50: Number(prediction.magnitude?.q50 ?? 0),
+        q90: Number(prediction.magnitude?.q90 ?? 0.01)
+    };
+    const history7dSeries = Array.isArray(history7dPayload?.series) ? history7dPayload.series : [];
+    const history24hSeries = Array.isArray(history24hPayload?.series) ? history24hPayload.series : [];
+    const buckets = buildSessionBuckets(history7dSeries);
+    const changePct = Number.isFinite(quoteRow?.change) ? quoteRow.change : 0;
+
+    const sessions = CRYPTO_SESSION_ORDER.map((code) => buildSessionStat(code, buckets[code], basePrediction, changePct, currentSession.minuteOfDay));
+    const activeSession = sessions.find((row) => row.code === currentSession.code) || sessions[0];
+    const costPct = Number(clamp(activeSession.volatilityPct * 0.16, 0.18, 1.5).toFixed(2));
+    const grossReturnPct = Number((basePrediction.q50 * 100).toFixed(2));
+    const action = String(predictionPayload?.signal?.action || prediction.signal || 'FLAT').toUpperCase();
+
+    const decision = {
+        action,
+        confidence: Number(basePrediction.confidence.toFixed(4)),
+        entry: Number(Number(quoteRow.price).toFixed(4)),
+        stopLoss: Number(Number(predictionPayload?.signal?.stop_loss ?? quoteRow.price).toFixed(4)),
+        takeProfit1: Number(Number(predictionPayload?.signal?.take_profit_1 ?? quoteRow.price).toFixed(4)),
+        takeProfit2: Number(Number(predictionPayload?.signal?.take_profit_2 ?? quoteRow.price).toFixed(4)),
+        grossReturnPct,
+        costPct,
+        netEdgePct: Number((grossReturnPct - costPct).toFixed(2)),
+        riskLevel: activeSession.riskLevel,
+        rr1: Number(predictionPayload?.signal?.rr_1 ?? 0),
+        rr2: Number(predictionPayload?.signal?.rr_2 ?? 0),
+        reason: predictionPayload?.explanation?.summary || 'Generated from live model session engine.'
+    };
+
+    const payload = {
+        meta: {
+            source: 'model_session_engine',
+            timestamp: new Date().toISOString(),
+            stale: Boolean(stale),
+            symbol
+        },
+        currentSession: {
+            code: currentSession.code,
+            label: currentSession.label,
+            hoursBjt: currentSession.hoursBjt,
+            remainingSec: currentSession.remainingSec,
+            elapsedRatio: Number(currentSession.elapsedRatio.toFixed(4)),
+            transitionSoon: currentSession.transitionSoon,
+            transitionText: currentSession.transitionText
+        },
+        currentPrice: {
+            symbol,
+            price: Number(Number(quoteRow.price).toFixed(4)),
+            changePct: Number((Number(quoteRow.change || 0) / 100).toFixed(6)),
+            volume: Number.isFinite(quoteRow.volume) ? quoteRow.volume : null
+        },
+        sessions,
+        decision,
+        decisionByLeverage: buildDecisionByLeverage(decision),
+        hourly: buildHourlyRows(
+            symbol,
+            history7dSeries,
+            history24hSeries,
+            sessions,
+            predictionPayload,
+            Number(quoteRow.price)
+        ),
+        tradeLog: buildSessionTradeLog(sessions),
+        health: predictionPayload?.health || null
+    };
+
+    if (staleReason) payload.meta.stale_reason = staleReason;
+    return payload;
+}
+
+async function getCryptoSessionPayloadWithCache(symbol) {
+    const cacheEntry = cryptoSessionCache.get(symbol);
+    const now = Date.now();
+    if (cacheEntry && now - cacheEntry.at <= CRYPTO_SESSION_CACHE_TTL_MS) {
+        return deepCopy(cacheEntry.payload);
+    }
+
+    try {
+        const pricePayload = await getCryptoPricesWithCache();
+        const quote = getCryptoRowBySymbol(pricePayload, symbol);
+        if (!quote) {
+            throw new Error(`Quote unavailable for ${symbol}`);
+        }
+        const stale = Boolean(pricePayload?.meta?.stale);
+        const staleReason = pricePayload?.meta?.stale_reason || null;
+        const predictionPayload = buildCryptoPredictionPayload(symbol, quote, stale, staleReason);
+        const [history7dPayload, history24hPayload] = await Promise.all([
+            getCryptoHistoryWithCache(symbol, '7d'),
+            getCryptoHistoryWithCache(symbol, '24h')
+        ]);
+        const payload = buildCryptoSessionPayload(
+            symbol,
+            quote,
+            predictionPayload,
+            history7dPayload,
+            history24hPayload,
+            stale || Boolean(history7dPayload?.meta?.stale) || Boolean(history24hPayload?.meta?.stale),
+            staleReason || history7dPayload?.meta?.stale_reason || history24hPayload?.meta?.stale_reason || null
+        );
+        cryptoSessionCache.set(symbol, { payload, at: Date.now() });
+        return deepCopy(payload);
+    } catch (error) {
+        if (cacheEntry) {
+            const stalePayload = deepCopy(cacheEntry.payload);
+            stalePayload.meta = {
+                ...stalePayload.meta,
+                stale: true,
+                stale_reason: error.message,
+                timestamp: new Date().toISOString()
+            };
+            return stalePayload;
+        }
+        throw error;
+    }
+}
+
 function fetchTextFromHttps(url, timeoutMs = 5000, redirectCount = 0) {
     return new Promise((resolve, reject) => {
         const request = https.request(
@@ -1555,6 +2030,34 @@ async function handleCryptoPerformance(req, res, rawSymbol) {
         }
         sendJson(res, 502, {
             error: 'Failed to build crypto performance metrics',
+            detail: error.message
+        });
+    }
+}
+
+async function handleCryptoSessionForecast(req, res, parsedUrl) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+
+    const requested = parsedUrl.searchParams.get('symbol') || 'BTCUSDT';
+    const symbol = resolveCryptoSessionSymbol(requested);
+    if (!symbol) {
+        sendJson(res, 404, { error: `Unsupported crypto symbol: ${requested}` });
+        return;
+    }
+
+    try {
+        const payload = await getCryptoSessionPayloadWithCache(symbol);
+        sendJson(res, 200, payload);
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build crypto session forecast',
             detail: error.message
         });
     }
@@ -3796,6 +4299,10 @@ const server = http.createServer((req, res) => {
     if (parsedUrl.pathname.startsWith('/api/crypto/performance/')) {
         const symbol = decodeURIComponent(parsedUrl.pathname.replace('/api/crypto/performance/', ''));
         handleCryptoPerformance(req, res, symbol);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/session/crypto') {
+        handleCryptoSessionForecast(req, res, parsedUrl);
         return;
     }
 

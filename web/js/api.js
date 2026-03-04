@@ -211,7 +211,7 @@ const api = {
     // ==================== Session Forecast ====================
     
     // Get crypto session forecast
-    async getCryptoSessionForecast(symbol = 'BTC') {
+    async getCryptoSessionForecast(symbol = 'BTCUSDT') {
         return this.get(`/session/crypto?symbol=${symbol}`);
     },
 
