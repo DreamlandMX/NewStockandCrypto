@@ -10,6 +10,9 @@ class MetaPayload(BaseModel):
     mode: str
     modelVersion: str
     timestamp: datetime
+    scaleMin: Optional[float] = None
+    scaleMax: Optional[float] = None
+    stateSource: Optional[str] = None
 
 
 class PredictionPayload(BaseModel):
@@ -58,6 +61,7 @@ class HeatmapResponse(BaseModel):
     xLabels: List[str]
     yLabels: List[str]
     matrix: List[List[float]]
+    stateMatrix: Optional[List[List[float]]] = None
 
 
 class PerformanceResponse(BaseModel):
@@ -92,3 +96,43 @@ class ModelCatalogResponse(BaseModel):
 
 class AssetCatalogResponse(BaseModel):
     assets: List[AssetCatalogItem]
+
+
+class EnsembleBlendItem(BaseModel):
+    model: str
+    weight: float
+
+
+class EnsemblePayload(BaseModel):
+    enabled: bool
+    fusedPrediction: PredictionPayload
+    blend: List[EnsembleBlendItem]
+    explanation: str
+    disagreementScore: float
+
+
+class ModelHealthPayload(BaseModel):
+    status: str
+    psi: float
+    coverageDropPct: float
+    reason: str
+
+
+class ModelComparisonItem(BaseModel):
+    model: str
+    directionAccuracy: float
+    brierScore: float
+    ece: float
+    intervalCoverage: float
+    inferenceMs: float
+    trainingMinutes: float
+    latencySource: str
+    trainingTimeSource: str
+
+
+class InsightsResponse(BaseModel):
+    meta: MetaPayload
+    ensemble: EnsemblePayload
+    compatibility: Dict[str, List[str]]
+    health: Dict[str, ModelHealthPayload]
+    comparison: List[ModelComparisonItem]

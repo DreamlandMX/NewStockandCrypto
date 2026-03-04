@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -265,11 +265,14 @@
     }
     
     .explanation-box::before {
-      content: '💡';
+      content: 'Insight';
       position: absolute;
       top: -12px;
       left: 20px;
-      font-size: 1.5rem;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 700;
       background: var(--bg-card);
       padding: 0 0.5rem;
     }
@@ -491,10 +494,237 @@
       color: var(--warning);
     }
 
+    .toolbar-toggle {
+      display: inline-flex;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.6);
+    }
+
+    .toolbar-toggle button {
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      padding: 0.45rem 0.8rem;
+      font-size: 0.76rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .toolbar-toggle button.active {
+      color: var(--primary-accent);
+      background: rgba(0, 229, 255, 0.12);
+    }
+
+    .model-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .compat-tag {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      padding: 0.2rem 0.45rem;
+    }
+
+    .model-health-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 0.2rem 0.45rem;
+      border: 1px solid transparent;
+      color: var(--text-primary);
+      background: rgba(148, 163, 184, 0.12);
+    }
+
+    .model-health-badge.healthy {
+      color: #00ffaa;
+      border-color: rgba(0, 255, 170, 0.45);
+      background: rgba(0, 255, 170, 0.12);
+    }
+
+    .model-health-badge.drift {
+      color: #f59e0b;
+      border-color: rgba(245, 158, 11, 0.45);
+      background: rgba(245, 158, 11, 0.12);
+    }
+
+    .model-health-badge.review {
+      color: #ff4d4f;
+      border-color: rgba(255, 77, 79, 0.45);
+      background: rgba(255, 77, 79, 0.12);
+    }
+
+    .model-card.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      border-color: rgba(255, 255, 255, 0.08) !important;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    .model-card.disabled::before {
+      display: none;
+    }
+
+    .ensemble-card {
+      margin-top: 1rem;
+      border: 1px solid rgba(0, 229, 255, 0.2);
+      border-radius: var(--radius-md);
+      background: rgba(15, 23, 42, 0.55);
+      padding: 1rem 1.1rem;
+    }
+
+    .ensemble-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.8rem;
+      align-items: center;
+    }
+
+    .ensemble-pup {
+      font-family: var(--font-mono);
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: #00ffaa;
+    }
+
+    .ensemble-meta {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      margin-top: 0.35rem;
+      line-height: 1.5;
+    }
+
+    .ensemble-disagreement {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    .xai-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.9rem;
+      margin-bottom: 0.8rem;
+      flex-wrap: wrap;
+    }
+
+    .xai-toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+    }
+
+    .waterfall-wrap {
+      height: 420px;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-md);
+      background: rgba(2, 6, 23, 0.55);
+      overflow: hidden;
+      display: none;
+    }
+
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 1rem;
+    }
+
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0.5rem 0.35rem;
+      text-align: right;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .comparison-table th:first-child,
+    .comparison-table td:first-child {
+      text-align: left;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .whatif-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.1rem;
+    }
+
+    .whatif-panel {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .whatif-value {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-top: 0.35rem;
+    }
+
+    .whatif-slider-wrap {
+      margin-top: 0.75rem;
+    }
+
+    .whatif-slider-wrap input[type="range"] {
+      width: 100%;
+    }
+
+    .polish-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .disclaimer-footer {
+      margin: 1.5rem 0 0.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 0.75rem 0.9rem;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      text-align: center;
+      background: rgba(15, 23, 42, 0.45);
+    }
+
     /* Responsive */
     @media (max-width: 1024px) {
       .metrics-grid {
         grid-template-columns: repeat(2, 1fr);
+      }
+
+      .comparison-grid,
+      .whatif-grid {
+        grid-template-columns: 1fr;
       }
     }
     
@@ -584,7 +814,7 @@
   <main style="padding-top: 100px; min-height: 100vh; position: relative; z-index: 1;">
     <div class="container model-explorer-shell">
       <div id="modelExplorerLoading" class="model-explorer-loading">
-        <span>⚡ Loading Model Output...</span>
+        <span>Loading Model Output...</span>
       </div>
 
       <!-- Header Section -->
@@ -595,7 +825,7 @@
             <span id="loadedModelBadge" class="status-badge success">LSTM+Attention Active</span>
           </div>
           <button id="modelExplorerRefresh" class="btn btn-secondary btn-sm">
-            <span>↻</span> Refresh
+            Refresh Now
           </button>
         </div>
         
@@ -618,26 +848,41 @@
           
           <div class="model-selection-grid">
             <div class="model-card active" data-model="lstm" data-model-btn="lstm" role="button" tabindex="0" aria-pressed="true">
-              <div class="model-card-title">🧠 LSTM+Attention</div>
+              <div class="model-card-title">LSTM+Attention</div>
               <div class="model-card-desc">Direction + intervals (Primary)</div>
+              <div class="model-meta-row">
+                <span class="compat-tag" data-compat-for="lstm">Best: 1H-4H</span>
+                <span class="model-health-badge review" data-health-for="lstm" title="Model health status">IN REVIEW</span>
+              </div>
             </div>
             
             <div class="model-card" data-model="transformer" data-model-btn="transformer" role="button" tabindex="0" aria-pressed="false">
-              <div class="model-card-title">🔮 Transformer</div>
+              <div class="model-card-title">Transformer</div>
               <div class="model-card-desc">Temporal encoder (Enhancement)</div>
+              <div class="model-meta-row">
+                <span class="compat-tag" data-compat-for="transformer">Best: 4H-3D</span>
+                <span class="model-health-badge review" data-health-for="transformer" title="Model health status">IN REVIEW</span>
+              </div>
             </div>
             
             <div class="model-card" data-model="ensemble" data-model-btn="ensemble" role="button" tabindex="0" aria-pressed="false">
-              <div class="model-card-title">🌳 LightGBM Ensemble</div>
+              <div class="model-card-title">LightGBM Ensemble</div>
               <div class="model-card-desc">Direction + quantiles (Primary)</div>
+              <div class="model-meta-row">
+                <span class="compat-tag" data-compat-for="ensemble">Best: All Horizons</span>
+                <span class="model-health-badge review" data-health-for="ensemble" title="Model health status">IN REVIEW</span>
+              </div>
             </div>
             
             <div class="model-card" data-model="tcn" data-model-btn="tcn" role="button" tabindex="0" aria-pressed="false">
-              <div class="model-card-title">📈 TCN</div>
+              <div class="model-card-title">TCN</div>
               <div class="model-card-desc">Temporal convolution (Alternative)</div>
+              <div class="model-meta-row">
+                <span class="compat-tag" data-compat-for="tcn">Best: 1H-4H</span>
+                <span class="model-health-badge review" data-health-for="tcn" title="Model health status">IN REVIEW</span>
+              </div>
             </div>
           </div>
-
           <div style="margin-top: 2rem;">
             <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-secondary); font-weight: 600;">
               Select Asset
@@ -660,6 +905,15 @@
               <button type="button" class="horizon-btn" data-horizon="3D" data-horizon-btn="3D" aria-pressed="false">3D</button>
             </div>
           </div>
+          <div style="margin-top: 1.4rem;">
+            <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-secondary); font-weight: 600;">
+              View Mode
+            </h4>
+            <div class="toolbar-toggle" role="group" aria-label="Prediction view mode">
+              <button type="button" id="viewIndividualBtn" class="active">Show Individual</button>
+              <button type="button" id="viewEnsembleBtn">Show Ensemble</button>
+            </div>
+          </div>
         </div>
 
         <!-- Right Content - Prediction Output -->
@@ -668,7 +922,7 @@
             <div>
               <h3 class="card-title" style="font-size: 1.25rem;">Prediction Output</h3>
               <div id="predictionContext" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-                BTC/USDT • 1H Horizon • Model v3.2
+                BTC/USDT | 1H Horizon | Model v3.2
               </div>
             </div>
             <span id="predictionConfidenceTag" class="status-badge success">95% Confidence</span>
@@ -704,6 +958,23 @@
                 <strong>Signal: LONG</strong> with 95% confidence.
               </p>
             </div>
+
+            <div id="ensembleCard" class="ensemble-card">
+              <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.45rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">
+                Ensemble Final Prediction
+              </div>
+              <div class="ensemble-grid">
+                <div>
+                  <div id="ensembleFusedPup" class="ensemble-pup">Fused P(UP): 0.62</div>
+                  <div id="ensembleBlendText" class="ensemble-meta">Blended: 40% LSTM + 30% LightGBM + 20% Transformer + 10% TCN</div>
+                  <div id="ensembleExplanation" class="ensemble-meta">Ensemble boosts confidence by averaging divergent views; Volatility Score remains dominant.</div>
+                </div>
+                <div class="ensemble-disagreement">
+                  <div id="ensembleConfidence">Confidence: 70%</div>
+                  <div id="ensembleDisagreement" style="margin-top: 0.25rem;">Disagreement: 0.11</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -713,12 +984,31 @@
         <div class="card card-enhanced">
           <div class="card-header">
             <h3 class="card-title">Feature Importance Heatmap</h3>
-            <span class="status-badge model-tag">SHAP Analysis</span>
+            <div class="xai-toolbar-group">
+              <div class="toolbar-toggle" role="group" aria-label="SHAP scope toggle">
+                <button type="button" id="scopeLocalBtn" class="active">Local</button>
+                <button type="button" id="scopeGlobalBtn">Global</button>
+              </div>
+              <div class="toolbar-toggle" role="group" aria-label="SHAP chart mode toggle">
+                <button type="button" id="xaiHeatmapBtn" class="active">Heatmap</button>
+                <button type="button" id="xaiWaterfallBtn">Waterfall</button>
+              </div>
+            </div>
           </div>
           <div class="card-body">
+            <div class="xai-toolbar">
+              <span id="xaiModeBadge" class="status-badge model-tag">SHAP Analysis</span>
+              <div class="polish-actions">
+                <button id="copyExplanationBtn" type="button" class="btn btn-secondary btn-sm">Copy Explanation</button>
+                <button id="exportShapBtn" type="button" class="btn btn-secondary btn-sm">Export SHAP Report</button>
+              </div>
+            </div>
             <div class="heatmap-canvas-wrap">
               <div id="heatmapEmptyState" class="heatmap-empty-state">No strong feature contribution detected.</div>
               <canvas id="heatmapChart"></canvas>
+            </div>
+            <div id="waterfallWrap" class="waterfall-wrap">
+              <canvas id="waterfallChart"></canvas>
             </div>
             <div class="heatmap-legend">
               <span class="legend-item"><span class="legend-swatch swatch-positive"></span>Green: Positive impact (increases P(UP))</span>
@@ -767,6 +1057,63 @@
         </div>
       </div>
 
+      <div class="card card-enhanced" style="margin-bottom: 2rem;">
+        <div class="card-header">
+          <h3 class="card-title">Model Comparison</h3>
+          <span class="status-badge info">Accuracy / Calibration / Speed</span>
+        </div>
+        <div class="card-body comparison-grid">
+          <div>
+            <table class="comparison-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Accuracy</th>
+                  <th>Brier</th>
+                  <th>ECE</th>
+                  <th>Coverage</th>
+                  <th>Infer (ms)</th>
+                  <th>Train (min)</th>
+                </tr>
+              </thead>
+              <tbody id="comparisonTableBody">
+                <tr><td colspan="7" style="text-align:left; color: var(--text-muted);">Loading model comparison...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <canvas id="comparisonRadarChart" style="max-height: 260px;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card-enhanced" style="margin-bottom: 2rem;">
+        <div class="card-header">
+          <h3 class="card-title">What-if Simulator</h3>
+          <span class="status-badge warning">Client-side Sensitivity</span>
+        </div>
+        <div class="card-body whatif-grid">
+          <div class="whatif-panel">
+            <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Volatility Score Delta</div>
+            <div id="whatIfDeltaValue" class="whatif-value">+0.00</div>
+            <div class="whatif-slider-wrap">
+              <input id="whatIfVolatilitySlider" type="range" min="-0.30" max="0.30" step="0.01" value="0">
+            </div>
+            <div style="margin-top: 0.8rem;">
+              <button id="whatIfResetBtn" type="button" class="btn btn-secondary btn-sm">Reset</button>
+            </div>
+          </div>
+          <div class="whatif-panel">
+            <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Simulated Impact</div>
+            <div id="whatIfSimPup" class="whatif-value">P(UP): --</div>
+            <div id="whatIfSimConfidence" style="margin-top: 0.35rem; color: var(--text-secondary); font-family: var(--font-mono);">Confidence: --</div>
+            <div id="whatIfSimExplanation" style="margin-top: 0.65rem; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.5;">
+              Adjust the slider to preview how volatility sensitivity changes the model view.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Performance Metrics -->
       <div class="card card-enhanced" style="margin-bottom: 2rem;">
         <div class="card-header">
@@ -781,7 +1128,7 @@
               </div>
               <div id="metricDirectionAccuracy" class="metric-value-large" style="color: var(--success);">98.5%</div>
               <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;" class="mono">
-                Walk-Forward (±1.2%)
+                Walk-Forward (+/-1.2%)
               </div>
             </div>
 
@@ -818,6 +1165,10 @@
         </div>
       </div>
 
+      <div id="modelExplorerDisclaimer" class="disclaimer-footer">
+        Mock-v1 - Simulated Data | Not for Trading
+      </div>
+
     </div>
   </main>
 
@@ -829,4 +1180,5 @@
   <script src="js/ui-enhancements.js"></script>
 </body>
 </html>
+
 

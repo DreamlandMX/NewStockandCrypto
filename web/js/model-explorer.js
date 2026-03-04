@@ -1,6 +1,41 @@
 (function () {
     'use strict';
 
+    const DEFAULT_COMPATIBILITY = {
+        lstm: ['1H', '4H', '1D'],
+        ensemble: ['1H', '4H', '1D', '3D'],
+        transformer: ['4H', '1D', '3D'],
+        tcn: ['1H', '4H'],
+    };
+
+    const MODEL_ORDER = ['lstm', 'ensemble', 'transformer', 'tcn'];
+
+    const MODEL_LABELS = {
+        lstm: 'LSTM+Attention',
+        ensemble: 'LightGBM Ensemble',
+        transformer: 'Transformer',
+        tcn: 'TCN',
+    };
+
+    const HEALTH_CLASS_MAP = {
+        HEALTHY: 'healthy',
+        DRIFT_DETECTED: 'drift',
+        IN_REVIEW: 'review',
+    };
+
+    const HEALTH_LABEL_MAP = {
+        HEALTHY: 'Healthy',
+        DRIFT_DETECTED: 'Drift Detected',
+        IN_REVIEW: 'In Review',
+    };
+
+    const COMPARISON_COLORS = {
+        lstm: '#00e5ff',
+        ensemble: '#00ffaa',
+        transformer: '#a78bfa',
+        tcn: '#f59e0b',
+    };
+
     const state = {
         model: 'lstm',
         asset: 'BTCUSDT',
@@ -8,11 +43,27 @@
         mode: 'UNKNOWN',
         modelVersion: '--',
         loading: false,
+        viewMode: 'individual',
+        xaiScope: 'local',
+        xaiChartMode: 'heatmap',
         heatmapChart: null,
+        waterfallChart: null,
+        comparisonRadarChart: null,
         heatmapScale: { min: -1, max: 1 },
         highlightedFeatureKey: null,
         lastTopFeatures: [],
         assetHorizonMap: {},
+        compatibilityByModel: { ...DEFAULT_COMPATIBILITY },
+        healthByModel: {},
+        lastPrediction: null,
+        lastPerformance: null,
+        lastHeatmap: null,
+        lastInsights: null,
+        baselineSnapshot: null,
+        whatIf: {
+            volatilityDelta: 0,
+        },
+        cycleId: 0,
     };
 
     const els = {};
@@ -29,6 +80,10 @@
     function toNumber(value, fallback = NaN) {
         const parsed = Number(value);
         return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     function normalizeFeatureKey(name) {
@@ -112,12 +167,31 @@
         els.loadingMask.style.display = flag ? 'flex' : 'none';
     }
 
-    function notifyError(message) {
-        if (window.showToast && typeof window.showToast.error === 'function') {
-            window.showToast.error(message, 3800);
+    function notify(message, level = 'info', duration = 3500) {
+        if (!window.showToast) {
+            if (level === 'error') {
+                console.error(message);
+            } else {
+                console.log(message);
+            }
             return;
         }
-        console.error(message);
+
+        if (level === 'error' && typeof window.showToast.error === 'function') {
+            window.showToast.error(message, duration);
+            return;
+        }
+        if (level === 'warning' && typeof window.showToast.warning === 'function') {
+            window.showToast.warning(message, duration);
+            return;
+        }
+        if (level === 'success' && typeof window.showToast.success === 'function') {
+            window.showToast.success(message, duration);
+            return;
+        }
+        if (typeof window.showToast.info === 'function') {
+            window.showToast.info(message, duration);
+        }
     }
 
     function collectElements() {
@@ -129,6 +203,12 @@
         els.q50Value = byId('predictionQ50');
         els.intervalWidthValue = byId('predictionIntervalWidth');
         els.explanationSummary = byId('modelExplanationSummary');
+        els.ensembleCard = byId('ensembleCard');
+        els.ensembleFusedPup = byId('ensembleFusedPup');
+        els.ensembleBlendText = byId('ensembleBlendText');
+        els.ensembleExplanation = byId('ensembleExplanation');
+        els.ensembleConfidence = byId('ensembleConfidence');
+        els.ensembleDisagreement = byId('ensembleDisagreement');
 
         els.metricAccuracy = byId('metricDirectionAccuracy');
         els.metricBrier = byId('metricBrierScore');
@@ -142,12 +222,32 @@
 
         els.heatmapCanvas = byId('heatmapChart');
         els.heatmapEmptyState = byId('heatmapEmptyState');
+        els.waterfallWrap = byId('waterfallWrap');
+        els.waterfallCanvas = byId('waterfallChart');
         els.insightPositive = byId('heatmapInsightPositive');
         els.insightNegative = byId('heatmapInsightNegative');
         els.insightNeutral = byId('heatmapInsightNeutral');
+        els.xaiModeBadge = byId('xaiModeBadge');
+        els.scopeLocalBtn = byId('scopeLocalBtn');
+        els.scopeGlobalBtn = byId('scopeGlobalBtn');
+        els.xaiHeatmapBtn = byId('xaiHeatmapBtn');
+        els.xaiWaterfallBtn = byId('xaiWaterfallBtn');
 
         els.loadingMask = byId('modelExplorerLoading');
         els.refreshButton = byId('modelExplorerRefresh');
+        els.viewIndividualBtn = byId('viewIndividualBtn');
+        els.viewEnsembleBtn = byId('viewEnsembleBtn');
+        els.comparisonTableBody = byId('comparisonTableBody');
+        els.comparisonRadarCanvas = byId('comparisonRadarChart');
+        els.whatIfSlider = byId('whatIfVolatilitySlider');
+        els.whatIfDeltaValue = byId('whatIfDeltaValue');
+        els.whatIfResetBtn = byId('whatIfResetBtn');
+        els.whatIfSimPup = byId('whatIfSimPup');
+        els.whatIfSimConfidence = byId('whatIfSimConfidence');
+        els.whatIfSimExplanation = byId('whatIfSimExplanation');
+        els.copyExplanationBtn = byId('copyExplanationBtn');
+        els.exportShapBtn = byId('exportShapBtn');
+        els.disclaimer = byId('modelExplorerDisclaimer');
     }
 
     function getModelFromButton(button) {
@@ -156,6 +256,20 @@
 
     function getHorizonFromButton(button) {
         return button.dataset.horizonBtn || button.dataset.horizon || '';
+    }
+
+    function syncModelCompatibility() {
+        els.modelButtons.forEach((button) => {
+            button.classList.remove('disabled');
+            button.setAttribute('aria-disabled', 'false');
+        });
+    }
+
+    function formatCompatibilityText(modelId) {
+        const compatibility = state.compatibilityByModel || DEFAULT_COMPATIBILITY;
+        const horizons = compatibility[modelId] || [];
+        if (!horizons.length) return 'Best: In Review';
+        return `Best: ${horizons.join('-')}`;
     }
 
     function syncHorizonAvailability() {
@@ -175,7 +289,8 @@
 
     function applyButtonStates() {
         els.modelButtons.forEach((button) => {
-            const active = getModelFromButton(button) === state.model;
+            const modelId = getModelFromButton(button);
+            const active = modelId === state.model;
             button.classList.toggle('active', active);
             button.setAttribute('aria-pressed', active ? 'true' : 'false');
         });
@@ -189,6 +304,31 @@
         if (els.assetSelect) {
             els.assetSelect.value = state.asset;
         }
+
+        if (els.viewIndividualBtn && els.viewEnsembleBtn) {
+            const individual = state.viewMode === 'individual';
+            els.viewIndividualBtn.classList.toggle('active', individual);
+            els.viewEnsembleBtn.classList.toggle('active', !individual);
+        }
+
+        if (els.scopeLocalBtn && els.scopeGlobalBtn) {
+            const local = state.xaiScope === 'local';
+            els.scopeLocalBtn.classList.toggle('active', local);
+            els.scopeGlobalBtn.classList.toggle('active', !local);
+        }
+
+        if (els.xaiHeatmapBtn && els.xaiWaterfallBtn) {
+            const heatmap = state.xaiChartMode === 'heatmap';
+            els.xaiHeatmapBtn.classList.toggle('active', heatmap);
+            els.xaiWaterfallBtn.classList.toggle('active', !heatmap);
+        }
+
+        Array.from(document.querySelectorAll('[data-compat-for]')).forEach((tag) => {
+            const modelId = tag.getAttribute('data-compat-for');
+            if (modelId) {
+                tag.textContent = formatCompatibilityText(modelId);
+            }
+        });
     }
 
     function renderMeta(meta) {
@@ -204,6 +344,14 @@
 
         if (els.loadedModelBadge) {
             els.loadedModelBadge.textContent = `Model ${state.modelVersion}`;
+        }
+
+        if (els.disclaimer) {
+            if (state.mode === 'MOCK') {
+                els.disclaimer.textContent = `${state.modelVersion || 'Mock-v1'} - Simulated Data | Not for Trading`;
+            } else {
+                els.disclaimer.textContent = `${state.modelVersion || 'Live'} - ${state.mode} Data | Not for Trading`;
+            }
         }
 
         if (els.predictionContext) {
@@ -226,30 +374,148 @@
         return result;
     }
 
-    function renderPrediction(payload) {
-        if (!payload) return;
+    function getSignalFromProbability(pUp) {
+        if (pUp >= 0.55) return 'LONG';
+        if (pUp <= 0.45) return 'SHORT';
+        return 'FLAT';
+    }
 
-        renderMeta(payload.meta);
+    function getPredictionToneClass(pUp) {
+        if (!Number.isFinite(pUp)) return 'neutral';
+        if (pUp > 0.52) return 'positive';
+        if (pUp < 0.48) return 'negative';
+        return 'neutral';
+    }
 
-        const prediction = payload.prediction || {};
-        if (els.pUpValue) els.pUpValue.textContent = formatRatio(prediction.pUp, 2);
-        if (els.q50Value) els.q50Value.textContent = formatSignedPercent(prediction.q50, 2);
-        if (els.intervalWidthValue) els.intervalWidthValue.textContent = formatSignedPercent(prediction.intervalWidth, 2);
+    function getPrimaryViewPayload() {
+        const ensemblePrediction = state.lastInsights?.ensemble?.fusedPrediction;
+        if (state.viewMode === 'ensemble' && ensemblePrediction) {
+            return {
+                prediction: ensemblePrediction,
+                summary: safeText(state.lastInsights?.ensemble?.explanation, 'Ensemble view is active.'),
+                label: 'ENSEMBLE',
+            };
+        }
+        return {
+            prediction: state.lastPrediction?.prediction || null,
+            summary: normalizeSummary(state.lastPrediction?.explanation?.summary, state.lastPrediction?.explanation?.topFeatures || []),
+            label: MODEL_LABELS[state.model] || state.model.toUpperCase(),
+        };
+    }
+
+    function renderPredictionAndExplanation() {
+        const viewPayload = getPrimaryViewPayload();
+        const prediction = viewPayload.prediction;
+        if (!prediction) return;
+
+        const pUp = toNumber(prediction.pUp);
+        const q50 = toNumber(prediction.q50);
+        const intervalWidth = toNumber(prediction.intervalWidth);
+        const confidence = toNumber(prediction.confidence);
+
+        if (els.pUpValue) {
+            const toneClass = getPredictionToneClass(pUp);
+            els.pUpValue.className = `prediction-value ${toneClass}`;
+            els.pUpValue.textContent = formatRatio(pUp, 2);
+        }
+
+        if (els.q50Value) {
+            const qClass = q50 > 0.0001 ? 'positive' : q50 < -0.0001 ? 'negative' : 'neutral';
+            els.q50Value.className = `prediction-value ${qClass}`;
+            els.q50Value.textContent = formatSignedPercent(q50, 2);
+        }
+
+        if (els.intervalWidthValue) {
+            els.intervalWidthValue.className = 'prediction-value neutral';
+            els.intervalWidthValue.textContent = formatSignedPercent(intervalWidth, 2);
+        }
 
         if (els.predictionConfidenceTag) {
-            const confidence = toNumber(prediction.confidence);
-            els.predictionConfidenceTag.textContent = Number.isFinite(confidence)
-                ? `${Math.round(confidence * 100)}% Confidence`
-                : 'Confidence --';
+            const signal = safeText(prediction.signal, getSignalFromProbability(pUp));
+            const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% Confidence` : 'Confidence --';
+            els.predictionConfidenceTag.textContent = `${signal} | ${confidenceText}`;
             els.predictionConfidenceTag.className = `status-badge ${confidence >= 0.75 ? 'success' : confidence >= 0.55 ? 'warning' : 'info'}`;
         }
 
-        const explanation = payload.explanation || {};
-        if (els.explanationSummary) {
-            els.explanationSummary.textContent = normalizeSummary(explanation.summary, explanation.topFeatures || []);
+        if (els.predictionContext) {
+            els.predictionContext.textContent = `${state.asset} | ${state.horizon} Horizon | ${viewPayload.label} | ${state.modelVersion}`;
         }
 
-        renderTopFeatures(explanation.topFeatures || []);
+        if (els.explanationSummary) {
+            els.explanationSummary.textContent = viewPayload.summary;
+        }
+
+        state.baselineSnapshot = {
+            pUp: Number.isFinite(pUp) ? pUp : 0.5,
+            confidence: Number.isFinite(confidence) ? confidence : 0.5,
+            summary: viewPayload.summary,
+        };
+
+        renderWhatIfPreview();
+    }
+
+    function mapModelNameForBlend(modelId) {
+        if (modelId === 'ensemble') return 'LightGBM';
+        if (modelId === 'lstm') return 'LSTM';
+        if (modelId === 'transformer') return 'Transformer';
+        if (modelId === 'tcn') return 'TCN';
+        return String(modelId || '').toUpperCase();
+    }
+
+    function renderEnsembleCard() {
+        const ensemble = state.lastInsights?.ensemble;
+        if (!ensemble || !els.ensembleCard) {
+            if (els.ensembleCard) els.ensembleCard.style.display = 'none';
+            return;
+        }
+
+        els.ensembleCard.style.display = '';
+        const fused = ensemble.fusedPrediction || {};
+        const fusedPup = toNumber(fused.pUp);
+        const confidence = toNumber(fused.confidence);
+
+        if (els.ensembleFusedPup) {
+            els.ensembleFusedPup.textContent = `Fused P(UP): ${formatRatio(fusedPup, 2)}`;
+            els.ensembleFusedPup.style.color = fusedPup > 0.5 ? '#00FFAA' : fusedPup < 0.5 ? '#FF4D4F' : '#facc15';
+        }
+
+        if (els.ensembleBlendText) {
+            const blend = Array.isArray(ensemble.blend) ? ensemble.blend : [];
+            if (blend.length) {
+                const blendText = blend
+                    .map((part) => `${Math.round(toNumber(part.weight, 0) * 100)}% ${mapModelNameForBlend(part.model)}`)
+                    .join(' + ');
+                els.ensembleBlendText.textContent = `Blended: ${blendText}`;
+            } else {
+                els.ensembleBlendText.textContent = 'Blended: --';
+            }
+        }
+
+        if (els.ensembleExplanation) {
+            els.ensembleExplanation.textContent = safeText(ensemble.explanation, 'Ensemble explanation unavailable.');
+        }
+        if (els.ensembleConfidence) {
+            els.ensembleConfidence.textContent = `Confidence: ${Number.isFinite(confidence) ? Math.round(confidence * 100) : '--'}%`;
+        }
+        if (els.ensembleDisagreement) {
+            const disagreement = toNumber(ensemble.disagreementScore);
+            els.ensembleDisagreement.textContent = `Disagreement: ${Number.isFinite(disagreement) ? disagreement.toFixed(3) : '--'}`;
+        }
+    }
+
+    function updateHealthBadges() {
+        Array.from(document.querySelectorAll('[data-health-for]')).forEach((node) => {
+            const modelId = node.getAttribute('data-health-for');
+            const payload = state.healthByModel?.[modelId] || null;
+            const status = safeText(payload?.status, 'IN_REVIEW').toUpperCase();
+            const cssClass = HEALTH_CLASS_MAP[status] || 'review';
+            node.className = `model-health-badge ${cssClass}`;
+            node.textContent = HEALTH_LABEL_MAP[status] || 'In Review';
+            const psi = toNumber(payload?.psi);
+            const drop = toNumber(payload?.coverageDropPct);
+            const reason = safeText(payload?.reason, 'No health details available.');
+            node.title = `Status: ${HEALTH_LABEL_MAP[status] || status} | PSI: ${Number.isFinite(psi) ? psi.toFixed(3) : '--'} | Coverage Drop: ${Number.isFinite(drop) ? drop.toFixed(2) : '--'}% | ${reason}`;
+        });
     }
 
     function setHighlightedFeature(featureKey) {
@@ -315,7 +581,7 @@
                     <div class="feature-name">${formatFeatureName(item.name)}</div>
                     <div class="feature-impact ${valueClass}">${sign}${rawValue.toFixed(3)}</div>
                     <div class="progress-bar" style="margin-left: 0.7rem; width: 34%;">
-                        <div class="progress-fill" style="width:${width}%; background:${rawValue > 0 ? '#22c55e' : rawValue < 0 ? '#ef4444' : '#facc15'};"></div>
+                        <div class="progress-fill" style="width:${width}%; background:${rawValue > 0 ? '#00FFAA' : rawValue < 0 ? '#FF4D4F' : '#facc15'};"></div>
                     </div>
                 </div>
             `;
@@ -403,9 +669,9 @@
         const max = state.heatmapScale.max;
         const neutralBand = Math.max((max - min) * 0.03, 0.01);
 
-        const red = [239, 68, 68];
+        const red = [255, 77, 79];
         const yellow = [250, 204, 21];
-        const green = [34, 197, 94];
+        const green = [0, 255, 170];
 
         let rgb;
         if (Math.abs(value) <= neutralBand) {
@@ -438,11 +704,29 @@
             return xLabels.map((__, columnIndex) => toNumber(row[columnIndex], 0));
         });
 
+        const rawStateMatrix = Array.isArray(payload.stateMatrix) ? payload.stateMatrix : [];
+        const normalizedStateMatrix = yLabels.map((_, rowIndex) => {
+            const row = Array.isArray(rawStateMatrix[rowIndex]) ? rawStateMatrix[rowIndex] : [];
+            return xLabels.map((__, columnIndex) => {
+                const rawValue = row[columnIndex];
+                const parsed = toNumber(rawValue, NaN);
+                if (Number.isFinite(parsed)) return parsed;
+                return clamp(normalizedMatrix[rowIndex][columnIndex] * 1.4, -1, 1);
+            });
+        });
+
         const allValues = normalizedMatrix.flat();
         const allNeutral = allValues.length === 0 || allValues.every((value) => Math.abs(value) < 1e-8);
         toggleHeatmapEmpty(allNeutral, allNeutral ? 'No strong feature contribution detected.' : '');
 
         state.heatmapScale = computeHeatmapScale(allValues, payload.meta);
+        state.lastHeatmap = {
+            ...payload,
+            xLabels,
+            yLabels,
+            matrix: normalizedMatrix,
+            stateMatrix: normalizedStateMatrix,
+        };
 
         const points = [];
         for (let row = 0; row < yLabels.length; row += 1) {
@@ -455,6 +739,7 @@
                     featureKey: normalizeFeatureKey(yLabels[row]),
                     featureName: formatFeatureName(yLabels[row]),
                     window: xLabels[col],
+                    stateValue: normalizedStateMatrix[row][col],
                 });
             }
         }
@@ -495,14 +780,20 @@
                         callbacks: {
                             title: (items) => {
                                 const raw = items[0]?.raw;
-                                return `${raw?.featureName || ''} | ${raw?.window || ''}`;
+                                return `${raw?.featureName || ''} @ ${raw?.window || ''}`;
                             },
                             label: (item) => {
                                 const value = toNumber(item.raw?.v, 0);
+                                const stateValue = toNumber(item.raw?.stateValue, 0);
                                 const neutralBand = Math.max((state.heatmapScale.max - state.heatmapScale.min) * 0.03, 0.01);
                                 const impact = describeImpact(value, neutralBand);
-                                const sign = value >= 0 ? '+' : '';
-                                return [`Impact: ${sign}${value.toFixed(3)}`, `Direction: ${impact.direction}`, `Meaning: ${impact.meaning}`];
+                                const stateText = `${stateValue >= 0 ? '+' : ''}${stateValue.toFixed(3)}`;
+                                const contributionText = `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+                                return [
+                                    `State: ${stateText}`,
+                                    `Contribution: ${contributionText} to P(UP)`,
+                                    `${impact.direction}: ${impact.meaning}`,
+                                ];
                             },
                         },
                     },
@@ -572,38 +863,357 @@
         return derived.sort((a, b) => Math.abs(toNumber(b.value, 0)) - Math.abs(toNumber(a.value, 0)));
     }
 
-    async function refreshAll() {
-        if (!window.api) {
-            notifyError('API client is not available on this page.');
+    function renderComparison(insights) {
+        const rows = Array.isArray(insights?.comparison) ? insights.comparison : [];
+
+        if (els.comparisonTableBody) {
+            if (!rows.length) {
+                els.comparisonTableBody.innerHTML = '<tr><td colspan="7" style="text-align:left; color: var(--text-muted);">No comparison metrics available.</td></tr>';
+            } else {
+                els.comparisonTableBody.innerHTML = rows.map((row) => `
+                    <tr>
+                        <td>${safeText(MODEL_LABELS[row.model], row.model)}</td>
+                        <td>${formatPercentNoSign(row.directionAccuracy, 1)}</td>
+                        <td>${formatRatio(row.brierScore, 3)}</td>
+                        <td>${formatRatio(row.ece, 3)}</td>
+                        <td>${formatPercentNoSign(row.intervalCoverage, 1)}</td>
+                        <td>${formatRatio(row.inferenceMs, 1)}</td>
+                        <td>${formatRatio(row.trainingMinutes, 1)}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        if (!els.comparisonRadarCanvas || !window.Chart) return;
+
+        if (state.comparisonRadarChart) {
+            state.comparisonRadarChart.destroy();
+            state.comparisonRadarChart = null;
+        }
+        if (!rows.length) return;
+
+        const maxInference = Math.max(...rows.map((row) => toNumber(row.inferenceMs, 0)), 1);
+        const maxTraining = Math.max(...rows.map((row) => toNumber(row.trainingMinutes, 0)), 1);
+        const maxBrier = Math.max(...rows.map((row) => toNumber(row.brierScore, 0)), 0.001);
+
+        const datasets = rows.map((row) => {
+            const accuracy = clamp(toNumber(row.directionAccuracy, 0), 0, 1);
+            const coverage = clamp(toNumber(row.intervalCoverage, 0), 0, 1);
+            const calibration = clamp(1 - toNumber(row.ece, 1), 0, 1);
+            const brier = clamp(1 - (toNumber(row.brierScore, maxBrier) / maxBrier), 0, 1);
+            const latency = clamp(1 - (toNumber(row.inferenceMs, maxInference) / maxInference), 0, 1);
+            const training = clamp(1 - (toNumber(row.trainingMinutes, maxTraining) / maxTraining), 0, 1);
+            const color = COMPARISON_COLORS[row.model] || '#00e5ff';
+
+            return {
+                label: MODEL_LABELS[row.model] || String(row.model).toUpperCase(),
+                data: [accuracy, coverage, calibration, brier, latency, training],
+                borderColor: color,
+                backgroundColor: `${color}22`,
+                pointBackgroundColor: color,
+                borderWidth: 2,
+            };
+        });
+
+        state.comparisonRadarChart = new Chart(els.comparisonRadarCanvas, {
+            type: 'radar',
+            data: {
+                labels: ['Accuracy', 'Coverage', 'Calibration', 'Brier', 'Latency', 'Train Cost'],
+                datasets,
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    r: {
+                        min: 0,
+                        max: 1,
+                        ticks: {
+                            stepSize: 0.2,
+                            display: false,
+                        },
+                        angleLines: { color: 'rgba(255,255,255,0.12)' },
+                        grid: { color: 'rgba(255,255,255,0.08)' },
+                        pointLabels: { color: '#8b9bb4' },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#8b9bb4', boxWidth: 10 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label(context) {
+                                return `${context.dataset.label}: ${formatRatio(context.parsed.r, 2)}`;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function clearComparisonRadar() {
+        if (state.comparisonRadarChart) {
+            state.comparisonRadarChart.destroy();
+            state.comparisonRadarChart = null;
+        }
+    }
+
+    function renderComparisonUnavailable(message, fallbackFromPerformance) {
+        if (els.comparisonTableBody) {
+            if (fallbackFromPerformance) {
+                const perf = fallbackFromPerformance.performance || {};
+                els.comparisonTableBody.innerHTML = `
+                    <tr>
+                        <td>${safeText(MODEL_LABELS[state.model], state.model)}</td>
+                        <td>${formatPercentNoSign(perf.directionAccuracy, 1)}</td>
+                        <td>${formatRatio(perf.brierScore, 3)}</td>
+                        <td>${formatRatio(perf.ece, 3)}</td>
+                        <td>${formatPercentNoSign(perf.intervalCoverage, 1)}</td>
+                        <td>--</td>
+                        <td>--</td>
+                    </tr>
+                `;
+            } else {
+                els.comparisonTableBody.innerHTML = `<tr><td colspan="7" style="text-align:left; color: var(--danger);">${safeText(message, 'Comparison unavailable (insights endpoint error).')}</td></tr>`;
+            }
+        }
+
+        clearComparisonRadar();
+    }
+
+    function renderWhatIfPreview() {
+        const baseline = state.baselineSnapshot;
+        if (!baseline) {
+            if (els.whatIfSimPup) els.whatIfSimPup.textContent = 'P(UP): --';
+            if (els.whatIfSimConfidence) els.whatIfSimConfidence.textContent = 'Confidence: --';
+            if (els.whatIfSimExplanation) {
+                els.whatIfSimExplanation.textContent = 'Adjust the slider to preview how volatility sensitivity changes the model view.';
+            }
             return;
         }
 
+        const delta = toNumber(state.whatIf.volatilityDelta, 0);
+        const adjustedPup = clamp(baseline.pUp - delta * 0.28, 0.01, 0.99);
+        const adjustedConfidence = clamp(baseline.confidence - Math.abs(delta) * 0.35, 0.05, 0.99);
+        const signal = getSignalFromProbability(adjustedPup);
+
+        if (els.whatIfDeltaValue) {
+            const signed = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
+            els.whatIfDeltaValue.textContent = signed;
+            els.whatIfDeltaValue.style.color = delta > 0 ? '#f59e0b' : delta < 0 ? '#00FFAA' : 'var(--text-primary)';
+        }
+        if (els.whatIfSimPup) {
+            els.whatIfSimPup.textContent = `P(UP): ${formatRatio(adjustedPup, 3)} (${signal})`;
+            els.whatIfSimPup.style.color = adjustedPup > 0.5 ? '#00FFAA' : '#FF4D4F';
+        }
+        if (els.whatIfSimConfidence) {
+            els.whatIfSimConfidence.textContent = `Confidence: ${Math.round(adjustedConfidence * 100)}%`;
+        }
+        if (els.whatIfSimExplanation) {
+            const text = delta > 0
+                ? 'Higher volatility increases downside risk and softens bullish confidence.'
+                : delta < 0
+                    ? 'Lower volatility supports directional confidence and tighter uncertainty.'
+                    : 'No volatility adjustment applied. Baseline model view is active.';
+            els.whatIfSimExplanation.textContent = `${text} This layer is a client-side sensitivity simulation.`;
+        }
+    }
+
+    function setXaiChartMode(mode) {
+        state.xaiChartMode = mode === 'waterfall' ? 'waterfall' : 'heatmap';
+        applyButtonStates();
+
+        if (els.waterfallWrap) {
+            els.waterfallWrap.style.display = state.xaiChartMode === 'waterfall' ? 'block' : 'none';
+        }
+        if (els.heatmapCanvas?.parentElement) {
+            els.heatmapCanvas.parentElement.style.display = state.xaiChartMode === 'heatmap' ? 'block' : 'none';
+        }
+
+        if (state.xaiChartMode === 'waterfall') {
+            if (!els.waterfallCanvas || !window.Chart) return;
+            if (state.waterfallChart) {
+                state.waterfallChart.destroy();
+            }
+            const rows = state.lastTopFeatures.slice(0, 8);
+            const labels = rows.map((row) => formatFeatureName(row.name));
+            const deltas = rows.map((row) => toNumber(row.value, 0));
+            let running = 0.5;
+            const cumulative = deltas.map((delta) => {
+                running += delta * 0.15;
+                return clamp(running, 0, 1);
+            });
+
+            state.waterfallChart = new Chart(els.waterfallCanvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Contribution',
+                            data: deltas,
+                            backgroundColor: deltas.map((value) => (value > 0 ? 'rgba(0,255,170,0.45)' : value < 0 ? 'rgba(255,77,79,0.45)' : 'rgba(250,204,21,0.45)')),
+                            borderColor: deltas.map((value) => (value > 0 ? '#00FFAA' : value < 0 ? '#FF4D4F' : '#facc15')),
+                            borderWidth: 1,
+                            yAxisID: 'y',
+                        },
+                        {
+                            type: 'line',
+                            label: 'Cumulative P(UP)',
+                            data: cumulative,
+                            borderColor: '#00e5ff',
+                            borderWidth: 2,
+                            tension: 0.25,
+                            pointRadius: 2,
+                            yAxisID: 'y1',
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#8b9bb4' } },
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#8b9bb4', maxRotation: 0, autoSkip: true },
+                            grid: { color: 'rgba(255,255,255,0.06)' },
+                        },
+                        y: {
+                            position: 'left',
+                            ticks: { color: '#8b9bb4' },
+                            grid: { color: 'rgba(255,255,255,0.06)' },
+                        },
+                        y1: {
+                            position: 'right',
+                            min: 0,
+                            max: 1,
+                            grid: { drawOnChartArea: false },
+                            ticks: {
+                                color: '#8b9bb4',
+                                callback(value) {
+                                    return `${(value * 100).toFixed(0)}%`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        if (els.xaiModeBadge) {
+            els.xaiModeBadge.textContent = state.xaiChartMode === 'waterfall'
+                ? `${state.xaiScope.toUpperCase()} WATERFALL`
+                : `${state.xaiScope.toUpperCase()} SHAP ANALYSIS`;
+        }
+    }
+
+    function renderInsightsPayload(insights) {
+        if (!insights) return;
+        renderMeta(insights.meta);
+        state.compatibilityByModel = insights.compatibility || { ...DEFAULT_COMPATIBILITY };
+        state.healthByModel = insights.health || {};
+        syncModelCompatibility();
+        applyButtonStates();
+        updateHealthBadges();
+        renderEnsembleCard();
+        renderComparison(insights);
+    }
+
+    function reconcileTopFeaturesWithScope() {
+        if (state.xaiScope === 'global') {
+            renderTopFeatures(deriveTopFeaturesFromHeatmap(state.lastHeatmap));
+            return;
+        }
+
+        const list = state.lastPrediction?.explanation?.topFeatures;
+        if (Array.isArray(list) && list.length) {
+            renderTopFeatures(list);
+            return;
+        }
+        renderTopFeatures(deriveTopFeaturesFromHeatmap(state.lastHeatmap));
+    }
+
+    async function refreshAll(triggerSource = 'auto') {
+        if (!window.api) {
+            notify('API client is not available on this page.', 'error', 3800);
+            return;
+        }
+
+        const cycleId = ++state.cycleId;
         setLoading(true);
+        const payload = selectedPayload();
+
         try {
-            const payload = selectedPayload();
-            const [prediction, heatmap, performance] = await Promise.all([
+            const [predictionRes, heatmapRes, performanceRes, insightsRes] = await Promise.allSettled([
                 api.getModelExplorerPrediction(payload),
-                api.getModelExplorerHeatmap(payload),
+                api.getModelExplorerHeatmap({ ...payload, scope: state.xaiScope }),
                 api.getModelExplorerPerformance(payload),
+                api.getModelExplorerInsights({ asset: state.asset, horizon: state.horizon }),
             ]);
 
-            const predictionTopFeatures = prediction?.explanation?.topFeatures;
-            const fallbackTopFeatures = deriveTopFeaturesFromHeatmap(heatmap);
-            const normalizedPrediction = { ...(prediction || {}) };
-            if (!Array.isArray(predictionTopFeatures) || predictionTopFeatures.length === 0) {
-                normalizedPrediction.explanation = {
-                    ...(prediction?.explanation || {}),
-                    topFeatures: fallbackTopFeatures,
-                };
+            if (cycleId !== state.cycleId) return;
+
+            if (predictionRes.status === 'fulfilled') {
+                state.lastPrediction = predictionRes.value;
+                renderMeta(predictionRes.value.meta);
+            } else {
+                notify(`Prediction request failed: ${predictionRes.reason?.message || predictionRes.reason}`, 'error', 3600);
             }
 
-            renderPrediction(normalizedPrediction);
-            renderHeatmap(heatmap);
-            renderPerformance(performance);
-        } catch (error) {
-            notifyError(`Model explorer refresh failed: ${error.message || error}`);
+            if (performanceRes.status === 'fulfilled') {
+                state.lastPerformance = performanceRes.value;
+                renderMeta(performanceRes.value.meta);
+            } else {
+                notify(`Performance request failed: ${performanceRes.reason?.message || performanceRes.reason}`, 'warning', 3200);
+            }
+
+            if (insightsRes.status === 'fulfilled') {
+                state.lastInsights = insightsRes.value;
+                renderInsightsPayload(insightsRes.value);
+            } else {
+                notify(`Insights request failed: ${insightsRes.reason?.message || insightsRes.reason}`, 'warning', 3400);
+                if (state.lastInsights) {
+                    renderInsightsPayload(state.lastInsights);
+                } else if (state.lastPerformance) {
+                    renderComparisonUnavailable('Comparison unavailable (insights endpoint error). Showing selected model fallback.', state.lastPerformance);
+                } else {
+                    renderComparisonUnavailable('Comparison unavailable (insights endpoint error).');
+                }
+            }
+
+            if (heatmapRes.status === 'fulfilled') {
+                renderHeatmap(heatmapRes.value);
+            } else if (state.xaiScope === 'global') {
+                notify(`Global heatmap failed: ${heatmapRes.reason?.message || heatmapRes.reason}. Using local scope.`, 'warning', 3400);
+                state.xaiScope = 'local';
+                applyButtonStates();
+                try {
+                    const fallback = await api.getModelExplorerHeatmap({ ...payload, scope: 'local' });
+                    renderHeatmap(fallback);
+                } catch (fallbackError) {
+                    notify(`Local heatmap fallback failed: ${fallbackError.message || fallbackError}`, 'error', 3600);
+                }
+            } else {
+                notify(`Heatmap request failed: ${heatmapRes.reason?.message || heatmapRes.reason}`, 'error', 3600);
+            }
+
+            reconcileTopFeaturesWithScope();
+            renderPredictionAndExplanation();
+            renderPerformance(state.lastPerformance);
+            setXaiChartMode(state.xaiChartMode);
+
+            if (triggerSource === 'manual') {
+                notify('Model explorer refreshed.', 'success', 1800);
+            }
         } finally {
-            setLoading(false);
+            if (cycleId === state.cycleId) {
+                setLoading(false);
+            }
         }
     }
 
@@ -643,9 +1253,86 @@
             }
 
             syncHorizonAvailability();
+            syncModelCompatibility();
         } catch (error) {
-            notifyError(`Catalog load failed: ${error.message || error}`);
+            notify(`Catalog load failed: ${error.message || error}`, 'error', 3600);
         }
+    }
+
+    async function copyExplanationToClipboard() {
+        const primary = getPrimaryViewPayload();
+        const prediction = primary.prediction || {};
+        const lines = [
+            'Model Explorer Summary',
+            `Mode: ${state.mode}`,
+            `Model Version: ${state.modelVersion}`,
+            `Asset: ${state.asset}`,
+            `Horizon: ${state.horizon}`,
+            `View: ${state.viewMode.toUpperCase()}`,
+            `P(UP): ${formatRatio(prediction.pUp, 3)}`,
+            `Signal: ${safeText(prediction.signal, getSignalFromProbability(toNumber(prediction.pUp, 0.5)))}`,
+            `Confidence: ${formatPercentNoSign(prediction.confidence, 1)}`,
+            `Explanation: ${safeText(primary.summary, '--')}`,
+            `Top Features: ${(state.lastTopFeatures || []).slice(0, 5).map((item) => `${formatFeatureName(item.name)} ${item.value >= 0 ? '+' : ''}${toNumber(item.value, 0).toFixed(3)}`).join(' | ')}`,
+        ].join('\n');
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(lines);
+            } else {
+                const textArea = document.createElement('textarea');
+                textArea.value = lines;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }
+            notify('Explanation copied to clipboard.', 'success', 2200);
+        } catch (error) {
+            notify(`Copy failed: ${error.message || error}`, 'error', 3200);
+        }
+    }
+
+    function exportShapReport() {
+        if (!state.lastHeatmap) {
+            notify('No heatmap data available for export.', 'warning', 2500);
+            return;
+        }
+
+        const report = {
+            generatedAt: new Date().toISOString(),
+            context: {
+                model: state.model,
+                asset: state.asset,
+                horizon: state.horizon,
+                viewMode: state.viewMode,
+                xaiScope: state.xaiScope,
+                xaiChartMode: state.xaiChartMode,
+                mode: state.mode,
+                modelVersion: state.modelVersion,
+            },
+            prediction: state.lastPrediction,
+            performance: state.lastPerformance,
+            insights: state.lastInsights,
+            heatmap: state.lastHeatmap,
+            topFeatures: state.lastTopFeatures,
+            whatIf: {
+                volatilityDelta: state.whatIf.volatilityDelta,
+            },
+        };
+
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shap-report-${state.asset}-${state.horizon}-${timestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        notify('SHAP report exported.', 'success', 2200);
     }
 
     function bindEvents() {
@@ -655,7 +1342,7 @@
                 if (!selected || selected === state.model) return;
                 state.model = selected;
                 applyButtonStates();
-                refreshAll();
+                refreshAll('manual');
             };
 
             button.addEventListener('click', selectModel);
@@ -675,8 +1362,9 @@
                 const selected = getHorizonFromButton(button);
                 if (!selected || selected === state.horizon) return;
                 state.horizon = selected;
+                syncModelCompatibility();
                 applyButtonStates();
-                refreshAll();
+                refreshAll('manual');
             });
         });
 
@@ -684,14 +1372,84 @@
             els.assetSelect.addEventListener('change', (event) => {
                 state.asset = event.target.value;
                 syncHorizonAvailability();
+                syncModelCompatibility();
                 applyButtonStates();
-                refreshAll();
+                refreshAll('manual');
             });
         }
 
         if (els.refreshButton) {
-            els.refreshButton.addEventListener('click', () => {
-                refreshAll();
+            els.refreshButton.addEventListener('click', () => refreshAll('manual'));
+        }
+
+        if (els.viewIndividualBtn) {
+            els.viewIndividualBtn.addEventListener('click', () => {
+                if (state.viewMode === 'individual') return;
+                state.viewMode = 'individual';
+                applyButtonStates();
+                renderPredictionAndExplanation();
+            });
+        }
+
+        if (els.viewEnsembleBtn) {
+            els.viewEnsembleBtn.addEventListener('click', () => {
+                if (state.viewMode === 'ensemble') return;
+                state.viewMode = 'ensemble';
+                applyButtonStates();
+                renderPredictionAndExplanation();
+            });
+        }
+
+        if (els.scopeLocalBtn) {
+            els.scopeLocalBtn.addEventListener('click', () => {
+                if (state.xaiScope === 'local') return;
+                state.xaiScope = 'local';
+                applyButtonStates();
+                refreshAll('manual');
+            });
+        }
+
+        if (els.scopeGlobalBtn) {
+            els.scopeGlobalBtn.addEventListener('click', () => {
+                if (state.xaiScope === 'global') return;
+                state.xaiScope = 'global';
+                applyButtonStates();
+                refreshAll('manual');
+            });
+        }
+
+        if (els.xaiHeatmapBtn) {
+            els.xaiHeatmapBtn.addEventListener('click', () => setXaiChartMode('heatmap'));
+        }
+        if (els.xaiWaterfallBtn) {
+            els.xaiWaterfallBtn.addEventListener('click', () => setXaiChartMode('waterfall'));
+        }
+
+        if (els.whatIfSlider) {
+            els.whatIfSlider.addEventListener('input', (event) => {
+                state.whatIf.volatilityDelta = toNumber(event.target.value, 0);
+                renderWhatIfPreview();
+            });
+        }
+
+        if (els.whatIfResetBtn) {
+            els.whatIfResetBtn.addEventListener('click', () => {
+                state.whatIf.volatilityDelta = 0;
+                if (els.whatIfSlider) {
+                    els.whatIfSlider.value = '0';
+                }
+                renderWhatIfPreview();
+            });
+        }
+
+        if (els.copyExplanationBtn) {
+            els.copyExplanationBtn.addEventListener('click', () => {
+                copyExplanationToClipboard();
+            });
+        }
+        if (els.exportShapBtn) {
+            els.exportShapBtn.addEventListener('click', () => {
+                exportShapReport();
             });
         }
     }

@@ -199,6 +199,10 @@ const api = {
         return this.get(`/model-explorer/v1/performance${buildQueryString(params)}`);
     },
 
+    async getModelExplorerInsights(params = {}) {
+        return this.get(`/model-explorer/v1/insights${buildQueryString(params)}`);
+    },
+
     // ==================== Session Forecast ====================
     
     // Get crypto session forecast

@@ -8,6 +8,7 @@ from app.schemas import (
     AssetCatalogResponse,
     AssetCatalogItem,
     HealthResponse,
+    InsightsResponse,
     ModelCatalogItem,
     ModelCatalogResponse,
     PerformanceResponse,
@@ -83,6 +84,7 @@ def explain_heatmap(
     model: str = Query(...),
     asset: str = Query(...),
     horizon: str = Query(...),
+    scope: str = Query('local'),
 ) -> HeatmapResponse:
     try:
         normalized_model = normalize_model(model)
@@ -91,9 +93,20 @@ def explain_heatmap(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    normalized_scope = str(scope or 'local').strip().lower()
+    if normalized_scope not in {'local', 'global'}:
+        raise HTTPException(status_code=400, detail='Unsupported scope. Use local or global.')
+
     ctx = provider_factory.get()
     try:
-        return ctx.provider.heatmap(normalized_model, normalized_asset, normalized_horizon)
+        if hasattr(ctx.provider, 'heatmap_scoped'):
+            return ctx.provider.heatmap_scoped(
+                normalized_model,
+                normalized_asset,
+                normalized_horizon,
+                normalized_scope,
+            )
+        return ctx.provider.heatmap(normalized_model, normalized_asset, normalized_horizon, normalized_scope)
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=502, detail=f'Heatmap request failed: {exc}') from exc
 
@@ -127,3 +140,21 @@ def service_meta() -> dict:
         'modelVersion': ctx.model_version,
         'timestamp': datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get('/v1/insights', response_model=InsightsResponse)
+def insights(
+    asset: str = Query(...),
+    horizon: str = Query(...),
+) -> InsightsResponse:
+    try:
+        normalized_asset = normalize_asset(asset)
+        normalized_horizon = normalize_horizon(horizon)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    ctx = provider_factory.get()
+    try:
+        return ctx.provider.insights(normalized_asset, normalized_horizon)
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=502, detail=f'Insights request failed: {exc}') from exc
