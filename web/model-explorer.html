@@ -354,7 +354,94 @@
       box-shadow: 0 0 12px rgba(0, 229, 255, 0.3);
     }
     
-    /* Feature Importance Bar */
+        /* Feature Importance + Explainability */
+    .heatmap-canvas-wrap {
+      height: 420px;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-md);
+      background: rgba(2, 6, 23, 0.55);
+      overflow: hidden;
+    }
+
+    .heatmap-empty-state {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 1rem;
+      color: var(--text-muted);
+      background: rgba(2, 6, 23, 0.55);
+      font-size: 0.9rem;
+      z-index: 1;
+    }
+
+    .heatmap-legend {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: 0.85rem;
+      margin-bottom: 0.85rem;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .legend-swatch {
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+    }
+
+    .swatch-positive { background: #22c55e; }
+    .swatch-neutral { background: #facc15; }
+    .swatch-negative { background: #ef4444; }
+
+    .heatmap-explain-grid {
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .heatmap-explain-card {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      background: rgba(15, 23, 42, 0.55);
+      padding: 0.8rem;
+    }
+
+    .heatmap-explain-card h4 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 0.55rem;
+    }
+
+    .heatmap-explain-card ul {
+      margin: 0;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.35rem;
+      color: var(--text-secondary);
+      font-size: 0.82rem;
+    }
+
+    .feature-list-note {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      margin-bottom: 0.85rem;
+    }
+
     .feature-bar {
       display: flex;
       align-items: center;
@@ -363,19 +450,27 @@
       padding: 0.75rem;
       background: rgba(255, 255, 255, 0.02);
       border-radius: var(--radius-sm);
-      transition: background 0.2s ease;
+      border: 1px solid transparent;
+      transition: background 0.2s ease, border-color 0.2s ease;
+      cursor: pointer;
     }
-    
+
     .feature-bar:hover {
       background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(0, 229, 255, 0.25);
     }
-    
+
+    .feature-bar.active {
+      border-color: rgba(0, 229, 255, 0.48);
+      box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.18);
+    }
+
     .feature-name {
       flex: 1;
       font-size: 0.85rem;
       color: var(--text-secondary);
     }
-    
+
     .feature-impact {
       width: 120px;
       text-align: right;
@@ -383,15 +478,19 @@
       font-weight: 600;
       font-size: 0.9rem;
     }
-    
+
     .feature-impact.positive {
       color: var(--success);
     }
-    
+
     .feature-impact.negative {
       color: var(--danger);
     }
-    
+
+    .feature-impact.neutral {
+      color: var(--warning);
+    }
+
     /* Responsive */
     @media (max-width: 1024px) {
       .metrics-grid {
@@ -401,6 +500,10 @@
     
     @media (max-width: 768px) {
       .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .heatmap-explain-grid {
         grid-template-columns: 1fr;
       }
       
@@ -514,22 +617,22 @@
           </h3>
           
           <div class="model-selection-grid">
-            <div class="model-card active" data-model="lstm">
+            <div class="model-card active" data-model="lstm" data-model-btn="lstm" role="button" tabindex="0" aria-pressed="true">
               <div class="model-card-title">🧠 LSTM+Attention</div>
               <div class="model-card-desc">Direction + intervals (Primary)</div>
             </div>
             
-            <div class="model-card" data-model="transformer">
+            <div class="model-card" data-model="transformer" data-model-btn="transformer" role="button" tabindex="0" aria-pressed="false">
               <div class="model-card-title">🔮 Transformer</div>
               <div class="model-card-desc">Temporal encoder (Enhancement)</div>
             </div>
             
-            <div class="model-card" data-model="ensemble">
+            <div class="model-card" data-model="ensemble" data-model-btn="ensemble" role="button" tabindex="0" aria-pressed="false">
               <div class="model-card-title">🌳 LightGBM Ensemble</div>
               <div class="model-card-desc">Direction + quantiles (Primary)</div>
             </div>
             
-            <div class="model-card" data-model="tcn">
+            <div class="model-card" data-model="tcn" data-model-btn="tcn" role="button" tabindex="0" aria-pressed="false">
               <div class="model-card-title">📈 TCN</div>
               <div class="model-card-desc">Temporal convolution (Alternative)</div>
             </div>
@@ -551,10 +654,10 @@
               Prediction Horizon
             </h4>
             <div class="horizon-btn-group">
-              <button class="horizon-btn active" data-horizon="1H">1H</button>
-              <button class="horizon-btn" data-horizon="4H">4H</button>
-              <button class="horizon-btn" data-horizon="1D">1D</button>
-              <button class="horizon-btn" data-horizon="3D">3D</button>
+              <button type="button" class="horizon-btn active" data-horizon="1H" data-horizon-btn="1H" aria-pressed="true">1H</button>
+              <button type="button" class="horizon-btn" data-horizon="4H" data-horizon-btn="4H" aria-pressed="false">4H</button>
+              <button type="button" class="horizon-btn" data-horizon="1D" data-horizon-btn="1D" aria-pressed="false">1D</button>
+              <button type="button" class="horizon-btn" data-horizon="3D" data-horizon-btn="3D" aria-pressed="false">3D</button>
             </div>
           </div>
         </div>
@@ -613,8 +716,41 @@
             <span class="status-badge model-tag">SHAP Analysis</span>
           </div>
           <div class="card-body">
-            <div style="height: 420px; position: relative;">
+            <div class="heatmap-canvas-wrap">
+              <div id="heatmapEmptyState" class="heatmap-empty-state">No strong feature contribution detected.</div>
               <canvas id="heatmapChart"></canvas>
+            </div>
+            <div class="heatmap-legend">
+              <span class="legend-item"><span class="legend-swatch swatch-positive"></span>Green: Positive impact (increases P(UP))</span>
+              <span class="legend-item"><span class="legend-swatch swatch-neutral"></span>Yellow: Neutral impact</span>
+              <span class="legend-item"><span class="legend-swatch swatch-negative"></span>Red: Negative impact (decreases P(UP))</span>
+            </div>
+            <div class="heatmap-explain-grid">
+              <div class="heatmap-explain-card">
+                <h4>What It Shows</h4>
+                <ul>
+                  <li>Rows represent features (Momentum, Volatility, RSI, and others).</li>
+                  <li>Columns represent recent time windows.</li>
+                  <li>Cell color shows impact intensity on model direction.</li>
+                </ul>
+              </div>
+              <div class="heatmap-explain-card">
+                <h4>Why It Matters</h4>
+                <ul>
+                  <li>Explainability: understand why the model made a call.</li>
+                  <li>Debugging: catch weak or noisy feature dependence.</li>
+                  <li>Feature engineering: prioritize what to improve next.</li>
+                  <li>Trust: align signal confidence with interpretable drivers.</li>
+                </ul>
+              </div>
+              <div class="heatmap-explain-card">
+                <h4>Example Interpretation</h4>
+                <ul>
+                  <li id="heatmapInsightPositive">If Momentum (20d) is bright green, the model reads a bullish push.</li>
+                  <li id="heatmapInsightNegative">If Volume Ratio is red, the model reads bearish pressure.</li>
+                  <li id="heatmapInsightNeutral">Yellow cells mean neutral impact and lower directional influence.</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -625,26 +761,8 @@
             <span class="status-badge info">Sorted by Impact</span>
           </div>
           <div class="card-body" id="topFeaturesList">
-            <div class="feature-bar">
-              <div class="feature-name">Momentum (20d)</div>
-              <div class="feature-impact positive">+0.342</div>
-            </div>
-            <div class="feature-bar">
-              <div class="feature-name">Volatility Score</div>
-              <div class="feature-impact positive">+0.287</div>
-            </div>
-            <div class="feature-bar">
-              <div class="feature-name">US Correlation</div>
-              <div class="feature-impact positive">+0.231</div>
-            </div>
-            <div class="feature-bar">
-              <div class="feature-name">Size Factor</div>
-              <div class="feature-impact positive">+0.198</div>
-            </div>
-            <div class="feature-bar">
-              <div class="feature-name">Volume Ratio</div>
-              <div class="feature-impact negative">-0.145</div>
-            </div>
+            <div class="feature-list-note">Hover a feature to highlight its row in the heatmap.</div>
+            <div style="color: var(--text-muted);">Loading feature contributions...</div>
           </div>
         </div>
       </div>
@@ -704,71 +822,11 @@
   </main>
 
   <script src="js/nav.js"></script>
-    <script src="js/utils.js"></script>
+  <script src="js/utils.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/model-explorer.js"></script>
   <script src="js/toast.js"></script>
   <script src="js/ui-enhancements.js"></script>
-  <script>
-    // Model Selection Logic
-    document.querySelectorAll('.model-card').forEach(card => {
-      card.addEventListener('click', function() {
-        // Remove active class from all
-        document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
-        // Add active to clicked
-        this.classList.add('active');
-        
-        // Update badge
-        const modelName = this.querySelector('.model-card-title').textContent;
-        document.getElementById('loadedModelBadge').textContent = modelName + ' Active';
-      });
-    });
-
-    // Horizon Selection Logic
-    document.querySelectorAll('.horizon-btn').forEach(btn => {
-      btn.addEventListener('click', function() {
-        // Remove active class from all
-        document.querySelectorAll('.horizon-btn').forEach(b => b.classList.remove('active'));
-        // Add active to clicked
-        this.classList.add('active');
-      });
-    });
-
-    // Smooth number animation
-    function animateValue(element, start, end, duration) {
-      const startTime = performance.now();
-      const isPercentage = end.toString().includes('%');
-      const isDecimal = end.toString().includes('.');
-      
-      function update(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        const easeOutQuad = 1 - Math.pow(1 - progress, 2);
-        const current = start + (end - start) * easeOutQuad;
-        
-        if (isPercentage) {
-          element.textContent = current.toFixed(1) + '%';
-        } else if (isDecimal) {
-          element.textContent = current.toFixed(2);
-        } else {
-          element.textContent = Math.round(current);
-        }
-        
-        if (progress < 1) {
-          requestAnimationFrame(update);
-        }
-      }
-      
-      requestAnimationFrame(update);
-    }
-
-    // Initialize animations
-    document.addEventListener('DOMContentLoaded', function() {
-      // Animate metrics on load
-      animateValue(document.getElementById('predictionPUp'), 0, 0.67, 1000);
-      animateValue(document.getElementById('metricDirectionAccuracy'), 0, 98.5, 1500);
-      animateValue(document.getElementById('metricCoverage'), 0, 81.2, 1500);
-    });
-  </script>
 </body>
 </html>
+
