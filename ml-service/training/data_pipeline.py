@@ -188,7 +188,18 @@ def _request_json(
         try:
             if _REQUEST_RATE_LIMITER is not None:
                 _REQUEST_RATE_LIMITER.wait()
-            response = requests.get(url, params=params, timeout=timeout)
+            response = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/122.0.0.0 Safari/537.36"
+                    )
+                },
+            )
             response.raise_for_status()
             payload = response.json()
             if cache_path is not None:
@@ -493,6 +504,30 @@ def _fetch_job_frame(
     warnings: List[str] = []
     if job.provider == "binance":
         frame = fetch_binance_klines_range(job.candidates[0], interval=interval, start_ts=start_ts, end_ts=end_ts)
+        if not frame.empty:
+            return frame, warnings
+
+        # Binance can be region-restricted in some environments (HTTP 451).
+        # Fallback to Yahoo crypto proxies to preserve coverage.
+        yahoo_candidates: List[str] = []
+        canonical = job.candidates[0].upper()
+        if canonical == "BTCUSDT":
+            yahoo_candidates = ["BTC-USD"]
+        elif canonical == "ETHUSDT":
+            yahoo_candidates = ["ETH-USD"]
+        elif canonical == "SOLUSDT":
+            yahoo_candidates = ["SOL-USD"]
+
+        if yahoo_candidates:
+            fallback_frame, used_symbol = fetch_yahoo_chart_range(
+                yahoo_candidates,
+                interval=interval,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
+            if not fallback_frame.empty:
+                warnings.append(f"{job.canonical}: Binance unavailable, fallback to Yahoo symbol {used_symbol}")
+                return fallback_frame, warnings
         return frame, warnings
 
     frame, used_symbol = fetch_yahoo_chart_range(job.candidates, interval=interval, start_ts=start_ts, end_ts=end_ts)

@@ -53,6 +53,41 @@ class EvaluationBacktestResult:
     backtest_inputs: pd.DataFrame
 
 
+def _adaptive_eval_config(config: EvaluationBacktestConfig, n_samples: int) -> Optional[EvaluationBacktestConfig]:
+    """Build a single-split fallback config for sparse horizons."""
+    total = int(n_samples)
+    if total < 24:
+        return None
+
+    train_target = max(16, min(int(config.train_size), int(total * 0.7)))
+    test_target = max(8, min(int(config.test_size), int(total * 0.2)))
+    purge_target = max(0, min(int(config.purge_size), max(0, total // 25)))
+
+    if train_target + purge_target + test_target > total:
+        overflow = train_target + purge_target + test_target - total
+        train_target = max(16, train_target - overflow)
+    if train_target + purge_target + test_target > total:
+        test_target = max(8, total - train_target - purge_target)
+
+    if train_target < 16 or test_target < 8 or (train_target + purge_target + test_target > total):
+        return None
+
+    return EvaluationBacktestConfig(
+        n_splits=1,
+        train_size=int(train_target),
+        test_size=int(test_target),
+        purge_size=int(purge_target),
+        embargo_size=0,
+        expanding=bool(config.expanding),
+        sequence_length=int(config.sequence_length),
+        gpu_id=int(config.gpu_id),
+        gpu_platform_id=config.gpu_platform_id,
+        gpu_device_id=int(config.gpu_device_id),
+        epochs=int(config.epochs),
+        backtest_defaults=dict(config.backtest_defaults),
+    )
+
+
 def _bars_per_year(horizon: str) -> int:
     h = str(horizon).upper()
     if h in {"1H", "4H"}:
@@ -474,7 +509,7 @@ def _run_backtests(
 
         equity_df = pd.DataFrame(
             {
-                "timestamp": prices.index.astype("datetime64[ns]").astype(str),
+                "timestamp": [pd.Timestamp(ts).isoformat() for ts in prices.index],
                 "equity": result.equity_curve[: len(prices)],
                 "drawdown": result.drawdown_curve[: len(prices)],
             }
@@ -508,28 +543,44 @@ def run_evaluation_and_backtest(
 ) -> EvaluationBacktestResult:
     dataset = build_training_dataset(frames, horizon_steps=horizon_steps)
     table = dataset.table.reset_index(drop=True)
+    if table.empty:
+        raise RuntimeError(f"No tabular rows generated for evaluation/backtest at horizon {horizon}.")
     return_lookup = _build_return_lookup(table)
     price_lookup = _build_price_lookup(frames)
+    effective_config = config
 
-    ensemble_folds, ensemble_preds = _evaluate_tabular_ensemble(
-        table=table,
-        feature_columns=dataset.feature_columns,
-        horizon=horizon,
-        config=config,
-    )
-    deep_folds, deep_preds = _evaluate_deep_models(
-        frames=frames,
-        return_lookup=return_lookup,
-        price_lookup=price_lookup,
-        horizon=horizon,
-        horizon_steps=horizon_steps,
-        config=config,
-    )
+    def _run_once(active_config: EvaluationBacktestConfig) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+        ensemble_folds, ensemble_preds = _evaluate_tabular_ensemble(
+            table=table,
+            feature_columns=dataset.feature_columns,
+            horizon=horizon,
+            config=active_config,
+        )
+        deep_folds, deep_preds = _evaluate_deep_models(
+            frames=frames,
+            return_lookup=return_lookup,
+            price_lookup=price_lookup,
+            horizon=horizon,
+            horizon_steps=horizon_steps,
+            config=active_config,
+        )
+        return ensemble_folds + deep_folds, ensemble_preds + deep_preds
 
-    fold_df = fold_records_to_dataframe(ensemble_folds + deep_folds)
-    pred_df = pd.DataFrame(ensemble_preds + deep_preds)
+    fold_rows, prediction_rows = _run_once(config)
+    if not prediction_rows:
+        adaptive_cfg = _adaptive_eval_config(config, n_samples=len(table))
+        if adaptive_cfg is not None:
+            effective_config = adaptive_cfg
+            fold_rows, prediction_rows = _run_once(adaptive_cfg)
+
+    fold_df = fold_records_to_dataframe(fold_rows)
+    pred_df = pd.DataFrame(prediction_rows)
     if pred_df.empty:
-        raise RuntimeError(f"No prediction rows generated for evaluation/backtest at horizon {horizon}.")
+        raise RuntimeError(
+            f"No prediction rows generated for evaluation/backtest at horizon {horizon}. "
+            f"rows={len(table)}, train_size={config.train_size}, test_size={config.test_size}, "
+            f"purge_size={config.purge_size}, embargo_size={config.embargo_size}."
+        )
 
     summary_records: List[Dict[str, object]] = []
     for model in sorted(set(pred_df["model"].astype(str).tolist())):
@@ -551,13 +602,14 @@ def run_evaluation_and_backtest(
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "horizon": horizon,
         "config": {
-            "n_splits": config.n_splits,
-            "train_size": config.train_size,
-            "test_size": config.test_size,
-            "purge_size": config.purge_size,
-            "embargo_size": config.embargo_size,
-            "expanding": config.expanding,
-            "sequence_length": config.sequence_length,
+            "n_splits": effective_config.n_splits,
+            "train_size": effective_config.train_size,
+            "test_size": effective_config.test_size,
+            "purge_size": effective_config.purge_size,
+            "embargo_size": effective_config.embargo_size,
+            "expanding": effective_config.expanding,
+            "sequence_length": effective_config.sequence_length,
+            "usedAdaptiveFallback": bool(effective_config is not config),
         },
         "models": summary_records,
     }

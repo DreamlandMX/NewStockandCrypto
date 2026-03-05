@@ -758,7 +758,7 @@ class LiveProvider:
         trades = [self._clean_numeric_payload(record) for record in result.trades_frame().to_dict(orient="records")] if result.trades else []
         equity_df = pd.DataFrame(
             {
-                "timestamp": prices.index.astype("datetime64[ns]").astype(str),
+                "timestamp": [pd.Timestamp(ts).isoformat() for ts in prices.index],
                 "equity": result.equity_curve[: len(prices)],
                 "drawdown": result.drawdown_curve[: len(prices)],
             }
