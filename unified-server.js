@@ -51,6 +51,7 @@ const CRYPTO_HISTORY_RANGE_CONFIG = {
     '7d': { interval: '1h', limit: 168, ttlMs: 120000 }
 };
 const CRYPTO_SESSION_CACHE_TTL_MS = Number(process.env.CRYPTO_SESSION_CACHE_TTL_MS || 9000);
+const CRYPTO_SESSION_REFRESH_SEC = Number(process.env.CRYPTO_SESSION_REFRESH_SEC || 5);
 const CRYPTO_SESSION_ORDER = ['asia', 'europe', 'us'];
 const CRYPTO_SESSION_META = {
     asia: { code: 'asia', label: 'Asia Session', hoursBjt: '08:00-15:59', startMinute: 8 * 60, endMinute: 16 * 60 },
@@ -1205,17 +1206,9 @@ function buildHourlyRows(symbol, history7d, history24h, sessions, predictionPayl
                         : 'FLAT';
 
         const hourPrices = history24hByHour.get(hour) || [];
-        let sparkline = hourPrices.slice(-4);
-        if (sparkline.length < 4) {
-            const base = Number.isFinite(currentPrice) ? currentPrice : (hourRows[hourRows.length - 1]?.close || 0);
-            const p1 = base * (1 + q10 * 0.35);
-            const p2 = base * (1 + q50 * 0.5);
-            const p3 = base * (1 + q50 * 0.8);
-            const p4 = base * (1 + q90 * 0.95);
-            sparkline = [p1, p2, p3, p4].map((value) => Number(value.toFixed(2)));
-        } else {
-            sparkline = sparkline.map((value) => Number(value.toFixed(2)));
-        }
+        const sparkline = hourPrices.length >= 2
+            ? hourPrices.slice(-8).map((value) => Number(value.toFixed(2)))
+            : [];
 
         hourly.push({
             hourLabel: `${String(hour).padStart(2, '0')}:00`,
@@ -1308,7 +1301,7 @@ function buildSessionTradeLog(sessions) {
         const predictedEdgePct = Number((session.q50 * 100 - clamp(session.volatilityPct * 0.14, 0.18, 1.2)).toFixed(2));
         const realizedEdgePct = Number((session.meanReturn * 100 - clamp(session.volatilityPct * 0.1, 0.1, 1)).toFixed(2));
         const edgeDeltaPct = Number((realizedEdgePct - predictedEdgePct).toFixed(2));
-        const outcome = realizedEdgePct > 0.25 ? 'WIN' : realizedEdgePct < -0.25 ? 'LOSS' : 'BREAKEVEN';
+        const outcome = realizedEdgePct > 0.25 ? 'ACHIEVED' : realizedEdgePct < -0.25 ? 'MISSED' : 'NEUTRAL';
         rows.push({
             sessionLabel: session.label,
             predictedEdgePct,
@@ -1319,6 +1312,24 @@ function buildSessionTradeLog(sessions) {
         });
     }
     return rows;
+}
+
+function buildSessionTradeStats(tradeLogRows) {
+    const rows = Array.isArray(tradeLogRows) ? tradeLogRows.slice(-10) : [];
+    if (!rows.length) {
+        return {
+            last10WinRate: null,
+            avgRealizedEdgePct: null,
+            sampleSize: 0
+        };
+    }
+    const achievedCount = rows.filter((row) => String(row.outcome).toUpperCase() === 'ACHIEVED').length;
+    const avgRealized = mean(rows.map((row) => Number(row.realizedEdgePct) || 0));
+    return {
+        last10WinRate: Number(((achievedCount / rows.length) * 100).toFixed(2)),
+        avgRealizedEdgePct: Number(avgRealized.toFixed(2)),
+        sampleSize: rows.length
+    };
 }
 
 function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7dPayload, history24hPayload, stale = false, staleReason = null) {
@@ -1338,6 +1349,12 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
 
     const sessions = CRYPTO_SESSION_ORDER.map((code) => buildSessionStat(code, buckets[code], basePrediction, changePct, currentSession.minuteOfDay));
     const activeSession = sessions.find((row) => row.code === currentSession.code) || sessions[0];
+    const nextSessionCode = currentSession.code === 'asia'
+        ? 'europe'
+        : currentSession.code === 'europe'
+            ? 'us'
+            : 'asia';
+    const nextSession = sessions.find((row) => row.code === nextSessionCode) || sessions[0];
     const costPct = Number(clamp(activeSession.volatilityPct * 0.16, 0.18, 1.5).toFixed(2));
     const grossReturnPct = Number((basePrediction.q50 * 100).toFixed(2));
     const action = String(predictionPayload?.signal?.action || prediction.signal || 'FLAT').toUpperCase();
@@ -1358,12 +1375,16 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
         reason: predictionPayload?.explanation?.summary || 'Generated from live model session engine.'
     };
 
+    const tradeLog = buildSessionTradeLog(sessions);
+    const tradeStats = buildSessionTradeStats(tradeLog);
     const payload = {
         meta: {
             source: 'model_session_engine',
             timestamp: new Date().toISOString(),
             stale: Boolean(stale),
-            symbol
+            symbol,
+            mode: stale ? 'stale' : 'live_model',
+            refreshSec: CRYPTO_SESSION_REFRESH_SEC
         },
         currentSession: {
             code: currentSession.code,
@@ -1372,7 +1393,11 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
             remainingSec: currentSession.remainingSec,
             elapsedRatio: Number(currentSession.elapsedRatio.toFixed(4)),
             transitionSoon: currentSession.transitionSoon,
-            transitionText: currentSession.transitionText
+            transitionText: currentSession.transitionText,
+            nextSessionCode,
+            nextSessionLabel: CRYPTO_SESSION_META[nextSessionCode].label,
+            nextSessionStartsInSec: currentSession.remainingSec,
+            nextSessionPreviewPUp: Number.isFinite(nextSession?.pUp) ? Number(nextSession.pUp.toFixed(4)) : null
         },
         currentPrice: {
             symbol,
@@ -1391,7 +1416,8 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
             predictionPayload,
             Number(quoteRow.price)
         ),
-        tradeLog: buildSessionTradeLog(sessions),
+        tradeLog,
+        tradeStats,
         health: predictionPayload?.health || null
     };
 

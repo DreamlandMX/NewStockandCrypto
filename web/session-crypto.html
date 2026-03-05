@@ -72,6 +72,20 @@
             font-family: var(--font-mono);
             font-size: 0.86rem;
         }
+        .current-session-meta .live-tick {
+            animation: subtleTick 1s ease-in-out infinite;
+        }
+        @keyframes subtleTick {
+            0% { opacity: 0.65; }
+            50% { opacity: 1; }
+            100% { opacity: 0.65; }
+        }
+        .next-session-preview {
+            margin-top: 0.65rem;
+            font-size: 0.78rem;
+            color: var(--primary-accent);
+            font-family: var(--font-mono);
+        }
         .transition-alert {
             margin-top: 0.65rem;
             font-size: 0.78rem;
@@ -107,6 +121,12 @@
             border-color: rgba(0, 255, 136, 0.55);
             box-shadow: 0 0 26px rgba(0, 255, 136, 0.22);
             background: rgba(16, 185, 129, 0.07);
+            animation: activeGlow 2.2s ease-in-out infinite;
+        }
+        @keyframes activeGlow {
+            0% { box-shadow: 0 0 20px rgba(0, 255, 136, 0.18); }
+            50% { box-shadow: 0 0 28px rgba(0, 255, 136, 0.3); }
+            100% { box-shadow: 0 0 20px rgba(0, 255, 136, 0.18); }
         }
         .session-hours {
             color: var(--text-secondary);
@@ -161,6 +181,7 @@
             font-size: 0.82rem;
             color: #f8fafc;
             transition: transform var(--transition-fast);
+            cursor: pointer;
         }
         .heatmap-cell:hover {
             transform: translateY(-1px);
@@ -253,6 +274,17 @@
             gap: 0.65rem;
             flex-wrap: wrap;
         }
+        .toolbar-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            font-family: var(--font-mono);
+        }
+        .toolbar-toggle input {
+            accent-color: #00e5ff;
+        }
         .sortable {
             cursor: pointer;
             user-select: none;
@@ -297,6 +329,24 @@
             fill: none;
             stroke: #00e5ff;
             stroke-width: 2;
+        }
+        .sparkline-line.up { stroke: #00ff88; }
+        .sparkline-line.down { stroke: #ff4d4f; }
+        .sparkline-line.flat { stroke: #94a3b8; }
+        .sparkline-unavailable {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+        }
+        .trade-stats-strip {
+            margin-bottom: 0.7rem;
+            font-size: 0.78rem;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-default);
+            border-radius: 8px;
+            padding: 0.5rem 0.7rem;
+            background: rgba(255, 255, 255, 0.02);
         }
         .scope-toggle {
             min-width: 165px;
@@ -465,11 +515,16 @@
                 <div class="session-toolbar">
                     <div class="session-controls">
                         <label for="symbolSelector" style="color: var(--text-secondary); font-size: 0.86rem;">Symbol</label>
-                        <select id="symbolSelector" class="form-select" style="width: 150px;">
-                            <option value="BTCUSDT">BTCUSDT</option>
-                            <option value="ETHUSDT">ETHUSDT</option>
-                            <option value="SOLUSDT">SOLUSDT</option>
-                        </select>
+                        <input id="symbolSelector" list="symbolOptions" class="form-select" style="width: 190px;" placeholder="Search BTC/ETH/SOL..." value="BTCUSDT" autocomplete="off">
+                        <datalist id="symbolOptions">
+                            <option value="BTCUSDT"></option>
+                            <option value="ETHUSDT"></option>
+                            <option value="SOLUSDT"></option>
+                        </datalist>
+                        <label class="toolbar-toggle" for="autoRefreshToggle">
+                            <input id="autoRefreshToggle" type="checkbox" checked>
+                            Auto Refresh (5s)
+                        </label>
                         <button id="refreshSessionBtn" class="btn btn-secondary btn-sm" type="button">Refresh</button>
                     </div>
                     <div id="sessionSourceNote" class="session-note">Loading source...</div>
@@ -482,11 +537,12 @@
                     <span id="currentSignalBadge" class="status-badge info">--</span>
                 </div>
                 <div class="current-session-meta">
-                    <span id="currentSessionRemaining">Time Remaining: --</span>
+                    <span id="currentSessionRemaining" class="live-tick">Time Remaining: --</span>
                     <span id="currentSessionPup">P(UP): --</span>
                     <span id="currentSessionVolatility">Volatility: --</span>
                 </div>
                 <div id="sessionTransitionAlert" class="transition-alert"></div>
+                <div id="nextSessionPreview" class="next-session-preview">Next: --</div>
                 <div class="dual-progress" style="margin-top: 0.85rem;">
                     <div id="sessionProgressElapsed" class="dual-progress-elapsed" style="width: 0%;"></div>
                     <div id="sessionProgressRemaining" class="dual-progress-remaining" style="width: 100%;"></div>
@@ -548,7 +604,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">Session Radar</h3>
-                        <span class="status-badge model-tag">Comparative profile</span>
+                        <span class="status-badge model-tag" title="Green = stronger directional confidence, Red = higher risk concentration">Comparative profile</span>
                     </div>
                     <div class="card-body">
                         <div style="height: 280px;"><canvas id="sessionRadarChart"></canvas></div>
@@ -598,9 +654,12 @@
                     </div>
                     <div class="card-body">
                         <div class="leverage-toggle" id="leverageToggle">
-                            <button type="button" class="leverage-btn active" data-leverage="1">1x</button>
-                            <button type="button" class="leverage-btn" data-leverage="5">5x</button>
-                            <button type="button" class="leverage-btn" data-leverage="10">10x</button>
+                            <label for="leverageSelector" style="color: var(--text-secondary); font-size: 0.84rem;">Leverage</label>
+                            <select id="leverageSelector" class="form-select" style="width: 120px;">
+                                <option value="1">1x</option>
+                                <option value="5">5x</option>
+                                <option value="10">10x</option>
+                            </select>
                         </div>
                         <div style="margin-bottom:1rem;">
                             <div class="risk-breakdown-row"><span>Gross Expected Return</span><strong id="grossReturnValue">--</strong></div>
@@ -687,6 +746,7 @@
                     <h3 style="font-size:1.1rem; font-weight:700;">Session Trade Log (Live Proxy)</h3>
                     <span class="status-badge model-tag">Last 3 sessions</span>
                 </div>
+                <div id="tradeStatsStrip" class="trade-stats-strip">Win Rate (Last 10 Sessions): -- | Avg. Realized Edge: --</div>
                 <table class="data-table trade-log-table">
                     <thead>
                         <tr>
@@ -725,6 +785,7 @@
             <div id="executeModalTitle" class="mock-modal-title">Mock Execution Confirmation</div>
             <div id="executeModalBody" class="mock-modal-body">Preparing simulated execution...</div>
             <div class="mock-modal-actions">
+                <button type="button" id="executeViewTradeLog" class="btn btn-primary btn-sm">View in Trade Log</button>
                 <button type="button" id="executeModalClose" class="btn btn-secondary btn-sm">Close</button>
             </div>
         </div>

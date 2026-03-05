@@ -4,6 +4,7 @@
 
 (() => {
   const SESSION_ORDER = ['asia', 'europe', 'us'];
+  const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
   const SESSION_META = {
     asia: { code: 'asia', label: 'Asia Session', hoursBjt: '08:00-15:59', startMinute: 8 * 60, endMinute: 16 * 60 },
     europe: { code: 'europe', label: 'Europe Session', hoursBjt: '16:00-23:59', startMinute: 16 * 60, endMinute: 24 * 60 },
@@ -22,8 +23,38 @@
     lastGood: null,
     radar: null,
     preview: null,
-    loading: false
+    loading: false,
+    autoRefresh: true,
+    refreshSec: 5,
+    refreshTimer: null,
+    countdownTimer: null
   };
+
+  const radarValueLabelsPlugin = {
+    id: 'radarValueLabels',
+    afterDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      const confidenceDatasetIndex = chart.data.datasets.findIndex((row) => row.label === 'Confidence');
+      if (confidenceDatasetIndex < 0) return;
+      const meta = chart.getDatasetMeta(confidenceDatasetIndex);
+      const values = chart.data.datasets[confidenceDatasetIndex].data || [];
+      ctx.save();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '10px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      meta.data.forEach((point, index) => {
+        if (!point) return;
+        const raw = Number(values[index]);
+        if (!Number.isFinite(raw)) return;
+        ctx.fillText(`${raw.toFixed(1)}%`, point.x, point.y - 12);
+      });
+      ctx.restore();
+    }
+  };
+  if (typeof Chart !== 'undefined') {
+    Chart.register(radarValueLabelsPlugin);
+  }
 
   document.addEventListener('DOMContentLoaded', init);
 
@@ -31,16 +62,31 @@
     bind();
     renderSortState();
     refresh(true);
-    setInterval(() => refresh(false), 10000);
-    setInterval(updateCountdownOnly, 1000);
+    setRefreshTimer();
+    state.countdownTimer = setInterval(updateCountdownOnly, 1000);
   }
 
   function bind() {
     const symbolSelector = document.getElementById('symbolSelector');
     symbolSelector.value = state.symbol;
     symbolSelector.addEventListener('change', () => {
-      state.symbol = symbolSelector.value;
+      state.symbol = normalizeSymbolInput(symbolSelector.value);
+      symbolSelector.value = state.symbol;
       refresh(true);
+    });
+    symbolSelector.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      state.symbol = normalizeSymbolInput(symbolSelector.value);
+      symbolSelector.value = state.symbol;
+      refresh(true);
+    });
+
+    const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+    autoRefreshToggle.checked = state.autoRefresh;
+    autoRefreshToggle.addEventListener('change', () => {
+      state.autoRefresh = Boolean(autoRefreshToggle.checked);
+      setRefreshTimer();
     });
 
     document.getElementById('refreshSessionBtn').addEventListener('click', () => refresh(true));
@@ -57,13 +103,11 @@
       renderHourly(state.vm);
     });
 
-    document.querySelectorAll('.leverage-btn').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.leverage = Number(button.dataset.leverage || 1);
-        document.querySelectorAll('.leverage-btn').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-        renderDecisionRisk(state.vm);
-      });
+    const leverageSelector = document.getElementById('leverageSelector');
+    leverageSelector.value = String(state.leverage);
+    leverageSelector.addEventListener('change', () => {
+      state.leverage = Number(leverageSelector.value || 1);
+      renderDecisionRisk(state.vm);
     });
 
     document.querySelectorAll('th.sortable').forEach((header) => {
@@ -88,7 +132,7 @@
       const modalBody = document.getElementById('executeModalBody');
       const entry = Number.isFinite(decision.entry) ? utils.formatCurrency(decision.entry) : '--';
       const expected = fmtPct(decision.netEdgePct);
-      modalBody.textContent = `Simulated ${action} at ${entry} | Expected PNL: ${expected} | Leverage ${state.leverage}x`;
+      modalBody.textContent = `Simulated ${action} executed at ${entry} | Leverage ${state.leverage}x | Est. PNL: ${expected} (Net Edge)`;
       openModal();
 
       const hint = document.getElementById('executeHint');
@@ -98,9 +142,25 @@
 
     const modal = document.getElementById('executeModal');
     document.getElementById('executeModalClose').addEventListener('click', closeModal);
+    document.getElementById('executeViewTradeLog').addEventListener('click', () => {
+      closeModal();
+      const tradeLog = document.getElementById('tradeLogBody');
+      if (tradeLog) {
+        tradeLog.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
     modal.addEventListener('click', (event) => {
       if (event.target.id === 'executeModal') closeModal();
     });
+  }
+
+  function setRefreshTimer() {
+    if (state.refreshTimer) {
+      clearInterval(state.refreshTimer);
+      state.refreshTimer = null;
+    }
+    if (!state.autoRefresh) return;
+    state.refreshTimer = setInterval(() => refresh(false), state.refreshSec * 1000);
   }
 
   function openModal() {
@@ -161,14 +221,18 @@
     sessionsRaw.forEach((row) => {
       const code = normSessionCode(row.code);
       if (!code) return;
+      const pUpRaw = num(row.pUp, NaN);
+      const confidenceRaw = num(row.confidence, NaN);
+      const volatilityRaw = num(row.volatilityPct, NaN);
+      if (!Number.isFinite(pUpRaw) || !Number.isFinite(confidenceRaw) || !Number.isFinite(volatilityRaw)) return;
       sessionMap.set(code, {
         code,
         label: row.label || SESSION_META[code].label,
         hoursBjt: row.hoursBjt || SESSION_META[code].hoursBjt,
-        pUp: clamp(num(row.pUp, 0.5), 0, 1),
-        pDown: clamp(1 - clamp(num(row.pUp, 0.5), 0, 1), 0, 1),
-        confidence: clamp(num(row.confidence, 0.5), 0, 1),
-        volatilityPct: Math.max(0, num(row.volatilityPct, 0)),
+        pUp: clamp(pUpRaw, 0, 1),
+        pDown: clamp(1 - clamp(pUpRaw, 0, 1), 0, 1),
+        confidence: clamp(confidenceRaw, 0, 1),
+        volatilityPct: Math.max(0, volatilityRaw),
         riskLevel: normRisk(row.riskLevel),
         status: normStatus(row.status)
       });
@@ -203,7 +267,13 @@
       transitionSoon,
       transitionText,
       pUp: currentSessionRow.pUp,
-      volatility: currentSessionRow.volatilityPct
+      volatility: currentSessionRow.volatilityPct,
+      nextSessionCode: normSessionCode(currentRaw.nextSessionCode) || nextSessionCode(currentCode),
+      nextSessionLabel: String(currentRaw.nextSessionLabel || SESSION_META[nextSessionCode(currentCode)].label),
+      nextSessionStartsInSec: Number.isFinite(Number(currentRaw.nextSessionStartsInSec)) ? Number(currentRaw.nextSessionStartsInSec) : remainingSec,
+      nextSessionPreviewPUp: Number.isFinite(Number(currentRaw.nextSessionPreviewPUp))
+        ? clamp(Number(currentRaw.nextSessionPreviewPUp), 0, 1)
+        : NaN
     };
 
     const decisionRaw = payload?.decision;
@@ -232,8 +302,11 @@
     if (!hourlyRaw.length) throw new Error('Session payload missing hourly forecast rows.');
     const hourlyRows = hourlyRaw.map((row) => {
       const code = normSessionCode(row.sessionCode) || sessionFromHour(parseHour(row.hourLabel));
-      const pUp = clamp(num(row.pUp, 0.5), 0, 1);
-      const confidence = clamp(num(row.confidence, currentSessionRow.confidence), 0, 1);
+      const pUpRaw = num(row.pUp, NaN);
+      if (!Number.isFinite(pUpRaw)) return null;
+      const confidenceRaw = num(row.confidence, currentSessionRow.confidence);
+      const pUp = clamp(pUpRaw, 0, 1);
+      const confidence = clamp(confidenceRaw, 0, 1);
       const volatilityForecast = Math.max(0, num(row.volatilityForecastPct, 0));
       return {
         hour: parseHour(row.hourLabel),
@@ -248,9 +321,10 @@
         confidence,
         confidenceAdj: confidenceAdjusted(confidence, volatilityForecast),
         signal: normAction(row.signal || signalFrom(pUp, confidence)),
-        sparkline: normalizeSparkline(row.sparkline, decision.entry)
+        sparkline: normalizeSparkline(row.sparkline)
       };
-    });
+    }).filter(Boolean);
+    if (!hourlyRows.length) throw new Error('Session payload missing valid hourly forecast rows.');
 
     const tradeRaw = Array.isArray(payload?.tradeLog) ? payload.tradeLog : [];
     const tradeLog = tradeRaw.map((row) => ({
@@ -261,6 +335,12 @@
       deltaReason: String(row.deltaReason || 'No reason available.'),
       outcome: normOutcome(row.outcome)
     }));
+    const tradeStatsRaw = payload?.tradeStats || {};
+    const tradeStats = {
+      last10WinRate: Number.isFinite(Number(tradeStatsRaw.last10WinRate)) ? Number(tradeStatsRaw.last10WinRate) : null,
+      avgRealizedEdgePct: Number.isFinite(Number(tradeStatsRaw.avgRealizedEdgePct)) ? Number(tradeStatsRaw.avgRealizedEdgePct) : null,
+      sampleSize: Number.isFinite(Number(tradeStatsRaw.sampleSize)) ? Number(tradeStatsRaw.sampleSize) : 0
+    };
 
     const healthRaw = payload?.health || {};
     const health = {
@@ -279,7 +359,9 @@
         timestamp: String(payload?.meta?.timestamp || new Date().toISOString()),
         stale: Boolean(payload?.meta?.stale),
         warning: String(payload?.meta?.warning || ''),
-        symbol
+        symbol,
+        mode: String(payload?.meta?.mode || 'live_model'),
+        refreshSec: Number.isFinite(Number(payload?.meta?.refreshSec)) ? Number(payload.meta.refreshSec) : 5
       },
       current,
       sessions: withStatuses(sessions, current.sessionCode),
@@ -287,7 +369,8 @@
       decisionByLeverage,
       health,
       hourlyRows,
-      tradeLog
+      tradeLog,
+      tradeStats
     };
   }
 
@@ -316,8 +399,12 @@
     renderDecisionRisk(vm);
     renderHealth(vm.health);
     renderHourly(vm);
-    renderTradeLog(vm.tradeLog);
+    renderTradeLog(vm.tradeLog, vm.tradeStats);
     renderFooter(vm.meta);
+    if (Number.isFinite(vm.meta.refreshSec) && vm.meta.refreshSec > 0 && vm.meta.refreshSec !== state.refreshSec) {
+      state.refreshSec = vm.meta.refreshSec;
+      setRefreshTimer();
+    }
   }
 
   function renderSource(meta) {
@@ -325,7 +412,7 @@
     note.className = 'session-note';
     if (meta.stale) note.classList.add('stale');
     if (meta.unavailable) note.classList.add('unavailable');
-    note.textContent = `Source: ${meta.source} | Updated: ${fmtStamp(meta.timestamp)}${meta.stale ? ' | STALE' : ''}`;
+    note.textContent = `Source: ${meta.source} | Updated: ${fmtStamp(meta.timestamp)}${meta.stale ? ' | STALE' : ''} | Refresh: ${state.refreshSec}s`;
     note.title = meta.warning || '';
   }
 
@@ -343,6 +430,10 @@
       transition.classList.remove('active');
       transition.textContent = '';
     }
+    const nextPreview = document.getElementById('nextSessionPreview');
+    const previewStarts = fmtRemainingSec(current.nextSessionStartsInSec || current.remainingSec, false);
+    const previewPup = Number.isFinite(current.nextSessionPreviewPUp) ? `${(current.nextSessionPreviewPUp * 100).toFixed(1)}%` : '--';
+    nextPreview.textContent = `Next: ${current.nextSessionLabel} starts in ${previewStarts} | Predicted P(UP): ${previewPup}`;
 
     const elapsed = clamp(current.elapsedRatio * 100, 0, 100);
     document.getElementById('sessionProgressElapsed').style.width = `${elapsed.toFixed(2)}%`;
@@ -381,7 +472,7 @@
     const changeNode = document.getElementById('currentPriceChange');
     changeNode.textContent = Number.isFinite(current.priceChangePct) ? fmtPctFromDecimal(current.priceChangePct) : '--';
     changeNode.className = `metric-change ${current.priceChangePct >= 0 ? 'positive' : 'negative'}`;
-    document.getElementById('modeLabel').textContent = `Mode: ${meta.source}`;
+    document.getElementById('modeLabel').textContent = `Mode: ${String(meta.mode || meta.source)}`;
     badge(document.getElementById('liveDataStatus'), meta.stale ? 'warning' : 'success', meta.stale ? 'STALE' : 'LIVE');
   }
 
@@ -422,6 +513,14 @@
         const cell = heatCell('heatmap-cell', metric.value(row));
         cell.style.background = heatColor(metric.score(row));
         cell.title = `${SESSION_META[code].label} P(UP) ${(row.pUp * 100).toFixed(1)}% | Volatility ${fmtPct(row.volatilityPct)} | Risk ${row.riskLevel}`;
+        cell.dataset.session = code;
+        cell.addEventListener('click', () => {
+          state.scope = 'all';
+          state.sessionFilter = code;
+          document.getElementById('hourlyScope').value = 'all';
+          document.getElementById('sessionFilter').value = code;
+          renderHourly(state.vm);
+        });
         root.appendChild(cell);
       });
     });
@@ -498,6 +597,10 @@
     const decision = vm?.decision;
     if (!decision) return;
 
+    const leverageSelector = document.getElementById('leverageSelector');
+    if (leverageSelector) {
+      leverageSelector.value = String(state.leverage);
+    }
     applyLeverage(decision, vm.decisionByLeverage, state.leverage);
 
     const action = String(decision.action || 'WAIT').toUpperCase();
@@ -509,7 +612,7 @@
     const confidencePct = clamp(decision.confidence * 100, 0, 100);
     const ring = document.getElementById('decisionConfidenceRing');
     ring.style.background = `conic-gradient(#00ff88 0deg, #00ff88 ${(confidencePct / 100) * 360}deg, rgba(255,255,255,0.12) ${(confidencePct / 100) * 360}deg)`;
-    document.getElementById('decisionConfidenceText').textContent = `${confidencePct.toFixed(0)}%`;
+    document.getElementById('decisionConfidenceText').textContent = `${confidencePct.toFixed(1)}%`;
 
     document.getElementById('decisionEntry').textContent = Number.isFinite(decision.entry) ? utils.formatCurrency(decision.entry) : '--';
     document.getElementById('decisionStopLoss').textContent = Number.isFinite(decision.stopLoss) ? utils.formatCurrency(decision.stopLoss) : '--';
@@ -523,6 +626,7 @@
     executeButton.disabled = blocked;
     executeButton.style.opacity = blocked ? '0.58' : '1';
     executeButton.style.cursor = blocked ? 'not-allowed' : 'pointer';
+    executeButton.title = blocked ? 'Directional signal neutral - awaiting stronger confirmation' : '';
 
     const disclaimer = document.getElementById('executeDisclaimer');
     disclaimer.textContent = 'Simulation only. Not investment advice. Execute action does not place real trades.';
@@ -530,7 +634,7 @@
     disclaimer.style.color = 'var(--text-secondary)';
 
     const hint = document.getElementById('executeHint');
-    const advisory = blocked ? ' | Advisory: WAIT signal - execution paused.' : '';
+    const advisory = blocked ? ' | Advisory: WAIT signal - awaiting stronger confirmation.' : '';
     hint.textContent = `Leverage ${decision.leverage}x | R:R(TP1/TP2): ${fmtRatio(decision.rr1)} / ${fmtRatio(decision.rr2)}${advisory}`;
     hint.className = blocked ? 'warning-inline text-neutral' : 'warning-inline';
 
@@ -605,7 +709,10 @@
       const signalType = row.signal.includes('LONG') ? 'success' : row.signal.includes('SHORT') ? 'danger' : 'warning';
       const pClass = row.pUp >= 0.55 ? 'text-positive' : row.pUp <= 0.45 ? 'text-negative' : 'text-neutral';
       const vClass = row.volatilityForecast >= 2.5 ? 'text-negative' : row.volatilityForecast >= 1.5 ? 'text-neutral' : 'text-positive';
-      const sparkline = sparklineSvg(row.sparkline);
+      const sparkline = sparklineSvg(row.sparkline, row.q50);
+      const pathPct = fmtPctFromDecimal(row.q50);
+      const confidenceBandPct = (Math.max(Math.abs(row.q90 - row.q50), Math.abs(row.q50 - row.q10)) * 100).toFixed(1);
+      const sparklineTooltip = `Predicted path: ${pathPct} over next hour | Confidence band: ±${confidenceBandPct}%`;
       return `<tr class="hourly-row" data-hour="${row.hour}" data-session="${row.sessionCode}">
         <td><strong>${row.hourLabel}</strong></td>
         <td>${row.sessionLabel}</td>
@@ -614,7 +721,7 @@
         <td>${fmtPctFromDecimal(row.q50)}</td>
         <td>${fmtPctFromDecimal(row.q90)}</td>
         <td class="${vClass}">${fmtPct(row.volatilityForecast)}</td>
-        <td>${sparkline}</td>
+        <td title="${escapeHtml(sparklineTooltip)}">${sparkline}</td>
         <td><span class="status-badge ${signalType}">${row.signal}</span></td>
       </tr>`;
     }).join('');
@@ -622,8 +729,9 @@
     bindPreview(filtered);
   }
 
-  function renderTradeLog(rows) {
+  function renderTradeLog(rows, stats) {
     const body = document.getElementById('tradeLogBody');
+    renderTradeStats(stats);
     if (!rows?.length) {
       body.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No trade log available.</td></tr>';
       return;
@@ -631,23 +739,32 @@
 
     body.innerHTML = rows.map((row) => {
       const deltaClass = row.edgeDeltaPct >= 0 ? 'text-positive' : 'text-negative';
-      const outcomeClass = row.outcome === 'WIN' ? 'success' : row.outcome === 'LOSS' ? 'danger' : 'info';
+      const outcomeClass = row.outcome === 'ACHIEVED' ? 'success' : row.outcome === 'MISSED' ? 'danger' : 'info';
       return `<tr>
         <td>${row.sessionLabel}</td>
         <td>${fmtPct(row.predictedEdgePct)}</td>
         <td>${fmtPct(row.realizedEdgePct)}</td>
         <td class="${deltaClass}">${fmtPct(row.edgeDeltaPct)}</td>
-        <td>${escapeHtml(row.deltaReason)}</td>
+        <td title="${escapeHtml(row.deltaReason)}">${escapeHtml(row.deltaReason)}</td>
         <td><span class="status-badge ${outcomeClass}">${row.outcome}</span></td>
       </tr>`;
     }).join('');
   }
 
+  function renderTradeStats(stats) {
+    const strip = document.getElementById('tradeStatsStrip');
+    if (!stats || !Number.isFinite(stats.last10WinRate)) {
+      strip.textContent = 'Win Rate (Last 10 Sessions): -- | Avg. Realized Edge: --';
+      return;
+    }
+    strip.textContent = `Win Rate (Last ${stats.sampleSize || 10} Sessions): ${stats.last10WinRate.toFixed(1)}% | Avg. Realized Edge: ${fmtPct(stats.avgRealizedEdgePct)}`;
+  }
+
   function renderFooter(meta) {
     const footer = document.getElementById('sessionFooterDisclaimer');
-    const source = String(meta.source || '').toLowerCase();
+    const source = String(meta.mode || meta.source || '').toLowerCase();
     const mode = source.includes('mock') ? 'Mock Mode' : 'Live Mode';
-    footer.textContent = `${mode} | Model-Derived Data | For Educational Use Only`;
+    footer.textContent = `${mode} | Simulated Data Only | Educational & Demonstration Purposes | Not Financial Advice`;
   }
 
   function bindPreview(rows) {
@@ -665,10 +782,19 @@
     const tooltip = document.getElementById('hourlyPreview');
     const title = document.getElementById('hourlyPreviewTitle');
     const ctx = document.getElementById('hourlyPreviewCanvas').getContext('2d');
-    title.textContent = `${row.hourLabel} ${row.sessionLabel} | P(UP) ${(row.pUp * 100).toFixed(1)}%`;
+    const pathPct = fmtPctFromDecimal(row.q50);
+    const bandPct = (Math.max(Math.abs(row.q90 - row.q50), Math.abs(row.q50 - row.q10)) * 100).toFixed(1);
+    title.textContent = `${row.hourLabel} ${row.sessionLabel} | Predicted path: ${pathPct} | Band: ±${bandPct}%`;
     if (state.preview) state.preview.destroy();
 
-    const baseSeries = row.sparkline.length >= 2 ? row.sparkline : [row.sparkline[0] || 0, row.sparkline[0] || 0];
+    const baseSeries = row.sparkline.length >= 2 ? row.sparkline : [];
+    if (!baseSeries.length) {
+      title.textContent = `${row.hourLabel} ${row.sessionLabel} | Sparkline unavailable`;
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      tooltip.style.display = 'block';
+      placePreview(tooltip, x, y);
+      return;
+    }
     const bandUpper = baseSeries.map((value) => value * (1 + Math.max(0, row.q90) * 0.25));
     const bandLower = baseSeries.map((value) => value * (1 + Math.min(0, row.q10) * 0.25));
     const labels = baseSeries.map((_, index) => `T+${index}`);
@@ -740,6 +866,12 @@
     state.vm.current.transitionText = state.vm.current.transitionSoon ? transitionTextFor(timing.code) : '';
     state.vm.current.pUp = activeSession.pUp;
     state.vm.current.volatility = activeSession.volatilityPct;
+    const nextCode = nextSessionCode(timing.code);
+    const nextRow = state.vm.sessions.find((row) => row.code === nextCode) || state.vm.sessions[0];
+    state.vm.current.nextSessionCode = nextCode;
+    state.vm.current.nextSessionLabel = SESSION_META[nextCode].label;
+    state.vm.current.nextSessionStartsInSec = timing.remainingSec;
+    state.vm.current.nextSessionPreviewPUp = Number.isFinite(nextRow?.pUp) ? nextRow.pUp : NaN;
     state.vm.sessions = withStatuses(state.vm.sessions, timing.code);
     renderCurrent(state.vm.current);
     renderSessionCards(state.vm.sessions);
@@ -758,6 +890,7 @@
     document.getElementById('currentSessionRemaining').textContent = 'Time Remaining: --';
     document.getElementById('currentSessionPup').textContent = 'P(UP): --';
     document.getElementById('currentSessionVolatility').textContent = 'Volatility: --';
+    document.getElementById('nextSessionPreview').textContent = 'Next: Unavailable';
     const transition = document.getElementById('sessionTransitionAlert');
     transition.classList.remove('active');
     transition.textContent = '';
@@ -787,6 +920,7 @@
 
     document.getElementById('hourlyTableBody').innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--danger);">Live forecast unavailable.</td></tr>';
     document.getElementById('tradeLogBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--danger);">Trade log unavailable.</td></tr>';
+    document.getElementById('tradeStatsStrip').textContent = 'Win Rate (Last 10 Sessions): -- | Avg. Realized Edge: --';
   }
 
   function withStatuses(rows, currentCode) {
@@ -858,6 +992,12 @@
     return 'us';
   }
 
+  function nextSessionCode(code) {
+    if (code === 'asia') return 'europe';
+    if (code === 'europe') return 'us';
+    return 'asia';
+  }
+
   function transitionTextFor(code) {
     const next = code === 'asia' ? 'Europe Session' : code === 'europe' ? 'US Session' : 'Asia Session';
     return `${SESSION_META[code].label} Ending Soon - Prepare for ${next}`;
@@ -914,8 +1054,8 @@
     return factor * ((leftValue > rightValue) - (leftValue < rightValue));
   }
 
-  function sparklineSvg(points) {
-    if (!Array.isArray(points) || points.length < 2) return '--';
+  function sparklineSvg(points, directionalBias = 0) {
+    if (!Array.isArray(points) || points.length < 2) return '<span class="sparkline-unavailable">Unavailable</span>';
     const width = 96;
     const height = 28;
     const padding = 2;
@@ -927,19 +1067,23 @@
       const y = height - padding - ((value - minValue) / span) * (height - padding * 2);
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     }).join(' ');
-    return `<svg class="sparkline-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><polyline class="sparkline-line" points="${coords}"></polyline></svg>`;
+    const slope = points[points.length - 1] - points[0];
+    const directionClass = slope > 0.000001 || directionalBias > 0.000001
+      ? 'up'
+      : slope < -0.000001 || directionalBias < -0.000001
+        ? 'down'
+        : 'flat';
+    return `<svg class="sparkline-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><polyline class="sparkline-line ${directionClass}" points="${coords}"></polyline></svg>`;
   }
 
-  function normalizeSparkline(values, anchor) {
+  function normalizeSparkline(values) {
     if (Array.isArray(values) && values.length >= 2) {
       return values
         .map((value) => Number(value))
         .filter((value) => Number.isFinite(value))
         .slice(-8);
     }
-    const base = Number.isFinite(anchor) ? Number(anchor) : 0;
-    if (!base) return [];
-    return [base * 0.998, base * 1.001, base * 1.002, base * 1.003].map((value) => Number(value.toFixed(2)));
+    return [];
   }
 
   function normalizeFeatureName(value) {
@@ -1050,9 +1194,9 @@
 
   function normOutcome(value) {
     const text = String(value || '').toUpperCase();
-    if (text.includes('WIN')) return 'WIN';
-    if (text.includes('LOSS')) return 'LOSS';
-    return 'BREAKEVEN';
+    if (text.includes('WIN') || text.includes('ACHIEVED')) return 'ACHIEVED';
+    if (text.includes('LOSS') || text.includes('MISSED')) return 'MISSED';
+    return 'NEUTRAL';
   }
 
   function normStatus(value) {
@@ -1086,11 +1230,14 @@
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   }
 
-  function fmtRemainingSec(totalSec) {
+  function fmtRemainingSec(totalSec, withSeconds = true) {
     if (!Number.isFinite(totalSec) || totalSec < 0) return '--';
     const hours = Math.floor(totalSec / 3600);
     const minutes = Math.floor((totalSec % 3600) / 60);
     const seconds = Math.floor(totalSec % 60);
+    if (!withSeconds) {
+      return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+    }
     return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
   }
 
@@ -1115,6 +1262,15 @@
   function num(value, fallback = 0) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function normalizeSymbolInput(raw) {
+    const normalized = String(raw || '').trim().toUpperCase();
+    if (normalized === 'BTC') return 'BTCUSDT';
+    if (normalized === 'ETH') return 'ETHUSDT';
+    if (normalized === 'SOL') return 'SOLUSDT';
+    if (SUPPORTED_SYMBOLS.includes(normalized)) return normalized;
+    return state.symbol;
   }
 
   function clamp(value, min, max) {
