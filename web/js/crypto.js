@@ -2,7 +2,7 @@
 // StockandCrypto - Crypto Page Full-Pack Logic
 // ========================================
 
-const CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+const BENCHMARK_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 const SIGNAL_FILTERS = ['ALL', 'LONG', 'SHORT', 'FLAT'];
 const ALERT_STORAGE_KEY = 'crypto_alerts_v1';
 const PRESET_STORAGE_KEY = 'crypto_ui_preset_v1';
@@ -52,6 +52,7 @@ const state = {
     tickCount: 0,
     lastTickAt: null,
     prices: {},
+    universeFeedRows: [],
     prediction: null,
     symbolPredictions: {},
     performance: null,
@@ -621,7 +622,7 @@ function initializeCharts() {
 }
 
 async function refreshData(loadFullPrediction = false, manual = false) {
-    await loadPrices();
+    await loadUniverse();
     syncSelectedSymbolWithLivePrices();
     if (loadFullPrediction || !state.prediction || state.tickCount % 3 === 0 || manual) {
         await loadPredictionAndPerformance(loadFullPrediction);
@@ -655,6 +656,9 @@ function syncSelectedSymbolWithLivePrices() {
     if (els.symbolSelect) {
         els.symbolSelect.value = state.selectedSymbol;
     }
+    if (els.alertSymbol && !els.alertSymbol.value) {
+        els.alertSymbol.value = state.selectedSymbol;
+    }
 }
 
 function startAutoRefresh() {
@@ -672,18 +676,24 @@ function startAutoRefresh() {
     }, POLL_INTERVAL_MS);
 }
 
-async function loadPrices() {
+async function loadUniverse() {
     try {
-        const payload = await api.getCryptoPrices();
-        const normalized = normalizePrices(payload);
+        const payload = await api.getCryptoUniverse();
+        const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+        const normalized = normalizePrices(rows);
         if (Object.keys(normalized).length === 0) {
             throw new Error('No price rows');
         }
         state.prices = normalized;
+        state.universeFeedRows = rows;
         state.dataMode = payload?.meta?.stale ? 'Stale Feed' : 'Live Feed';
+        renderDynamicSymbolOptions();
     } catch (error) {
         if (Object.keys(state.prices).length === 0) {
             state.prices = {};
+        }
+        if (!state.universeFeedRows.length) {
+            state.universeFeedRows = [];
         }
         state.dataMode = 'Unavailable';
     }
@@ -717,7 +727,7 @@ async function loadPredictionAndPerformance(loadAllSymbols = false) {
     state.health = prediction?.health || deriveHealthFromPrediction(prediction, state.performance, state.dataMode);
 
     if (loadAllSymbols) {
-        const missingSymbols = CRYPTO_SYMBOLS.filter((symbol) => symbol !== selectedSymbol);
+        const missingSymbols = BENCHMARK_SYMBOLS.filter((symbol) => symbol !== selectedSymbol);
         const results = await Promise.allSettled(missingSymbols.map((symbol) => fetchPrediction(symbol)));
         results.forEach((result, index) => {
             if (result.status === 'fulfilled' && result.value) {
@@ -1144,6 +1154,30 @@ function syncControlState() {
         els.filterBtn.textContent = formatSignalFilterLabel(state.signalFilter);
     }
     updateAutoRefreshButton();
+}
+
+function renderDynamicSymbolOptions() {
+    const rows = state.universeFeedRows;
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const selectedValue = state.selectedSymbol;
+    const alertValue = els.alertSymbol?.value || state.selectedSymbol;
+    const options = rows.map((row) => {
+        const display = toDisplaySymbol(row.symbol);
+        const rankText = Number.isFinite(row.marketCapRank) ? `#${row.marketCapRank} ` : '';
+        const nameText = row.name ? ` - ${escapeHtml(row.name)}` : '';
+        return `<option value="${row.symbol}">${rankText}${display}${nameText}</option>`;
+    }).join('');
+
+    if (els.symbolSelect) {
+        els.symbolSelect.innerHTML = options;
+        els.symbolSelect.value = rows.some((row) => row.symbol === selectedValue) ? selectedValue : rows[0].symbol;
+    }
+
+    if (els.alertSymbol) {
+        els.alertSymbol.innerHTML = options;
+        els.alertSymbol.value = rows.some((row) => row.symbol === alertValue) ? alertValue : rows[0].symbol;
+    }
 }
 
 function renderPriceCards() {
@@ -1583,33 +1617,36 @@ function setPredictionDependentControlsEnabled(enabled) {
 }
 
 function buildUniverseRows() {
-    const liveRows = Object.values(state.prices).filter((row) => Number.isFinite(row?.price));
-    state.universe = liveRows.map((live) => {
-        const symbol = live.symbol;
-        const packet = state.symbolPredictions[symbol] || (symbol === state.selectedSymbol ? state.prediction : null);
-        const pUp = Number.isFinite(packet?.direction?.pUp) ? packet.direction.pUp : 0.5;
-        const confidence = Number.isFinite(packet?.direction?.confidence) ? packet.direction.confidence : 0.5;
-        const signal = packet?.signal?.action || packet?.direction?.signal || resolveTradeSignal(pUp, confidence);
-        return {
-            symbol,
-            price: live.price,
-            change: live.change,
-            volume: live.volume,
-            pUp,
-            signal,
-            status: state.dataMode === 'Live Feed' ? 'Live' : state.dataMode === 'Stale Feed' ? 'Stale' : 'Unavailable',
-            detail: {
-                summary: packet?.explanation?.summary || 'Live explanation unavailable.',
-                topFeatures: packet?.explanation?.topFeatures || [],
-                reasonCodes: packet?.explanation?.reasonCodes || []
-            }
-        };
-    });
+    const feedRows = Array.isArray(state.universeFeedRows) ? state.universeFeedRows : [];
+    state.universe = feedRows
+        .filter((row) => Number.isFinite(asNumber(row?.price, null)))
+        .map((live) => {
+            const symbol = live.symbol;
+            const packet = state.symbolPredictions[symbol] || (symbol === state.selectedSymbol ? state.prediction : null);
+            const pUp = Number.isFinite(packet?.direction?.pUp) ? packet.direction.pUp : asNumber(live.pUp, 0.5);
+            const signal = packet?.signal?.action || packet?.direction?.signal || String(live.signal || resolveTradeSignal(pUp, asNumber(live.confidence, 0.5))).toUpperCase();
+            const status = String(live.status || (state.dataMode === 'Live Feed' ? 'Live' : state.dataMode === 'Stale Feed' ? 'Stale' : 'Unavailable'));
+            return {
+                symbol,
+                name: String(live.name || ''),
+                price: asNumber(live.price, 0),
+                change: asNumber(live.change, 0),
+                volume: asNumber(live.volume, 0),
+                pUp,
+                signal,
+                status,
+                detail: {
+                    summary: packet?.explanation?.summary || live.detail?.summary || 'Live explanation unavailable.',
+                    topFeatures: packet?.explanation?.topFeatures || live.detail?.topFeatures || [],
+                    reasonCodes: packet?.explanation?.reasonCodes || live.detail?.reasonCodes || []
+                }
+            };
+        });
 
     const selected = state.universe.find((row) => row.symbol === state.selectedSymbol);
     if (selected && state.prediction) {
         selected.pUp = state.prediction.direction.pUp;
-        selected.signal = state.prediction.direction.signal;
+        selected.signal = state.prediction.signal.action || state.prediction.direction.signal;
         selected.detail = {
             summary: state.prediction.explanation.summary,
             topFeatures: state.prediction.explanation.topFeatures,
@@ -1701,7 +1738,7 @@ function renderUniverseTable() {
 
 function getSortedFilteredRows() {
     const filtered = state.universe.filter((row) => {
-        const queryMatch = row.symbol.toLowerCase().includes(state.query);
+        const queryMatch = row.symbol.toLowerCase().includes(state.query) || String(row.name || '').toLowerCase().includes(state.query);
         const signalMatch = state.signalFilter === 'ALL' || row.signal === state.signalFilter;
         return queryMatch && signalMatch;
     });
@@ -1770,12 +1807,13 @@ function renderChartSourceNote() {
     if (!els.chartSourceNote) return;
     const bucket = state.chartSeries[state.selectedSymbol]?.[state.timeframe];
     if (!bucket || bucket.values.length === 0) {
-        els.chartSourceNote.textContent = 'Live history unavailable. Waiting for Binance US candles.';
+        els.chartSourceNote.textContent = 'Live history unavailable. Waiting for benchmark or top-50 universe history.';
         return;
     }
 
     const freshness = bucket.stale ? 'Stale history cache.' : 'Live history.';
-    els.chartSourceNote.textContent = `${freshness} Actual: Binance US candles | Projection: live prediction q10/q50/q90.`;
+    const sourceLabel = bucket.source === 'coingecko_market_chart' ? 'CoinGecko market chart' : 'Binance US candles';
+    els.chartSourceNote.textContent = `${freshness} Actual: ${sourceLabel} | Projection: live prediction q10/q50/q90.`;
 }
 
 function buildProjection(values) {
@@ -1889,6 +1927,7 @@ function createEmptyChartBucket() {
         values: [],
         timestamps: [],
         stale: false,
+        source: null,
         lastSeedAt: 0,
         lastAppendAt: 0
     };
@@ -1975,6 +2014,7 @@ async function loadChartHistory(symbol, timeframe, force = false) {
         bucket.labels = points.map((point) => formatChartLabelFromTs(point.ts, timeframe));
         bucket.lastSeedAt = now;
         bucket.stale = Boolean(payload?.meta?.stale);
+        bucket.source = payload?.meta?.source || null;
         pruneChartBucket(bucket, timeframe);
         return true;
     } catch (error) {

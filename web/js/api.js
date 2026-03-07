@@ -83,6 +83,11 @@ const api = {
         return this.get('/crypto/prices');
     },
 
+    // Get top-50 ex-stablecoins crypto universe
+    async getCryptoUniverse() {
+        return this.get('/crypto/universe');
+    },
+
     // Get crypto predictions
     async getCryptoPredictions(symbol = 'BTC') {
         return this.get(`/crypto/predictions?symbol=${symbol}`);

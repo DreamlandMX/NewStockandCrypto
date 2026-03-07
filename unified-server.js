@@ -47,9 +47,9 @@ const US_ENABLE_ALPHA_FALLBACK = String(process.env.US_ENABLE_ALPHA_FALLBACK || 
 const CSI300_SNAPSHOT_PATH = path.join(WEB_ROOT, 'assets', 'csi300-constituents.json');
 const CRYPTO_SUPPORTED_SYMBOLS = new Set(['BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
 const CRYPTO_HISTORY_RANGE_CONFIG = {
-    '1h': { interval: '1m', limit: 60, ttlMs: 30000 },
-    '24h': { interval: '5m', limit: 288, ttlMs: 60000 },
-    '7d': { interval: '1h', limit: 168, ttlMs: 120000 }
+    '1h': { interval: '1m', limit: 60, ttlMs: 30000, coingeckoDays: 1, windowMs: 60 * 60 * 1000 },
+    '24h': { interval: '5m', limit: 288, ttlMs: 60000, coingeckoDays: 1, windowMs: 24 * 60 * 60 * 1000 },
+    '7d': { interval: '1h', limit: 168, ttlMs: 120000, coingeckoDays: 7, windowMs: 7 * 24 * 60 * 60 * 1000 }
 };
 const CRYPTO_SESSION_CACHE_TTL_MS = Number(process.env.CRYPTO_SESSION_CACHE_TTL_MS || 9000);
 const CRYPTO_SESSION_REFRESH_SEC = Number(process.env.CRYPTO_SESSION_REFRESH_SEC || 5);
@@ -111,6 +111,7 @@ const CN_MIN_CONSTITUENT_COVERAGE_PCT = Number(process.env.CN_MIN_CONSTITUENT_CO
 const CN_LIVE_FETCH_TIMEOUT_MS = Number(process.env.CN_LIVE_FETCH_TIMEOUT_MS || 6000);
 const CN_FAILURE_BACKOFF_MS = Number(process.env.CN_FAILURE_BACKOFF_MS || 60000);
 const COINGECKO_MARKETS_BASE = 'https://api.coingecko.com/api/v3/coins/markets';
+const COINGECKO_MARKET_CHART_BASE = 'https://api.coingecko.com/api/v3/coins';
 const TRACKING_CACHE_DIR = path.join(__dirname, 'output', 'tracking-cache');
 const TRACKING_FACTOR_WEIGHTS = Object.freeze({
     momentum: 0.30,
@@ -125,15 +126,16 @@ const TRACKING_TOTAL_SCORE_WEIGHTS = Object.freeze({
     confidence: 0.20
 });
 const TRACKING_STABLECOIN_SYMBOLS = new Set([
-    'USDT', 'USDC', 'DAI', 'FDUSD', 'TUSD', 'USDE', 'USDD', 'USDP', 'BUSD', 'PYUSD', 'LUSD', 'FRAX', 'GUSD', 'RLUSD', 'EURC'
+    'USDT', 'USDC', 'DAI', 'FDUSD', 'TUSD', 'USDE', 'USDD', 'USDP', 'USDS', 'USYC', 'BUSD', 'PYUSD', 'LUSD', 'FRAX', 'GUSD', 'RLUSD', 'EURC'
 ]);
 const TRACKING_STABLECOIN_IDS = new Set([
-    'tether', 'usd-coin', 'dai', 'first-digital-usd', 'true-usd', 'ethena-usde', 'usdd', 'pax-dollar',
+    'tether', 'usd-coin', 'dai', 'first-digital-usd', 'true-usd', 'ethena-usde', 'usdd', 'usds', 'circle-usyc', 'pax-dollar',
     'binance-usd', 'paypal-usd', 'liquity-usd', 'frax', 'gemini-dollar', 'ripple-usd', 'euro-coin'
 ]);
 const TRACKING_STABLECOIN_NAME_KEYWORDS = [
-    'stablecoin', 'usd coin', 'us dollar', 'digital usd', 'dollar', 'pax dollar', 'paypal usd', 'gemini dollar'
+    'stablecoin', 'usd coin', 'us dollar', 'digital usd', 'dollar', 'pax dollar', 'paypal usd', 'gemini dollar', 'circle usyc'
 ];
+const CRYPTO_UNIVERSE_LIMIT = 50;
 const LIMIT_STATUS_ORDER = {
     LIMIT_UP: 3,
     LIMIT_DOWN: 2,
@@ -805,6 +807,27 @@ function buildBinanceKlinesUrl(symbol, interval, limit) {
     return `${BINANCE_US_KLINES_BASE}?${query.toString()}`;
 }
 
+function normalizeCryptoSymbol(rawSymbol) {
+    const normalized = String(rawSymbol || '').trim().toUpperCase().replace(/\//g, '');
+    if (!normalized) return null;
+    if (normalized.endsWith('USDT')) return normalized;
+    return `${normalized}USDT`;
+}
+
+function cryptoBaseSymbol(symbol) {
+    const normalized = normalizeCryptoSymbol(symbol);
+    if (!normalized) return null;
+    return normalized.endsWith('USDT') ? normalized.slice(0, -4) : normalized;
+}
+
+function buildCoinGeckoMarketChartUrl(coinId, days) {
+    const query = new URLSearchParams({
+        vs_currency: 'usd',
+        days: String(days)
+    });
+    return `${COINGECKO_MARKET_CHART_BASE}/${encodeURIComponent(coinId)}/market_chart?${query.toString()}`;
+}
+
 function normalizeKlineRows(rows) {
     if (!Array.isArray(rows)) {
         throw new Error('Unexpected Binance US kline payload');
@@ -851,6 +874,43 @@ function normalizeKlineRows(rows) {
     return series;
 }
 
+function normalizeCoinGeckoMarketChartRows(payload, windowMs = null, limit = 240) {
+    const prices = Array.isArray(payload?.prices) ? payload.prices : [];
+    const volumes = Array.isArray(payload?.total_volumes) ? payload.total_volumes : [];
+    const floorTs = Number.isFinite(windowMs) && windowMs > 0 ? Date.now() - windowMs : 0;
+
+    const series = prices.map((point, index) => {
+        const openTime = parseNumber(point?.[0]);
+        const price = parseNumber(point?.[1]);
+        const volumePoint = Array.isArray(volumes[index]) ? volumes[index] : null;
+        const volume = parseNumber(volumePoint?.[1]) ?? 0;
+        if (!Number.isFinite(openTime) || !Number.isFinite(price)) {
+            return null;
+        }
+        if (floorTs && openTime < floorTs) {
+            return null;
+        }
+        return {
+            ts: new Date(openTime).toISOString(),
+            open: price,
+            high: price,
+            low: price,
+            close: price,
+            volume
+        };
+    }).filter((row) => row !== null);
+
+    if (!series.length) {
+        throw new Error('No valid CoinGecko market chart points');
+    }
+
+    const normalized = series.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+    if (normalized.length <= limit) {
+        return normalized;
+    }
+    return normalized.slice(normalized.length - limit);
+}
+
 async function getCryptoHistoryWithCache(symbol, range) {
     const config = CRYPTO_HISTORY_RANGE_CONFIG[range];
     if (!config) {
@@ -865,20 +925,42 @@ async function getCryptoHistoryWithCache(symbol, range) {
     }
 
     try {
-        const endpoint = buildBinanceKlinesUrl(symbol, config.interval, config.limit);
-        const rawRows = await fetchJsonFromHttps(endpoint, 7000);
-        const series = normalizeKlineRows(rawRows);
-        const payload = {
-            meta: {
-                source: 'binance_us_klines',
-                timestamp: new Date().toISOString(),
-                stale: false,
-                range,
-                interval: config.interval
-            },
-            symbol,
-            series
-        };
+        let payload;
+        if (CRYPTO_SUPPORTED_SYMBOLS.has(symbol)) {
+            const endpoint = buildBinanceKlinesUrl(symbol, config.interval, config.limit);
+            const rawRows = await fetchJsonFromHttps(endpoint, 7000);
+            const series = normalizeKlineRows(rawRows);
+            payload = {
+                meta: {
+                    source: 'binance_us_klines',
+                    timestamp: new Date().toISOString(),
+                    stale: false,
+                    range,
+                    interval: config.interval
+                },
+                symbol,
+                series
+            };
+        } else {
+            const resolved = await findCryptoUniverseRowBySymbol(symbol);
+            if (!resolved?.row?.coingeckoId) {
+                throw new Error(`Crypto universe history unavailable for ${symbol}`);
+            }
+            const endpoint = buildCoinGeckoMarketChartUrl(resolved.row.coingeckoId, config.coingeckoDays);
+            const rawPayload = await fetchJsonFromHttps(endpoint, 9000);
+            const series = normalizeCoinGeckoMarketChartRows(rawPayload, config.windowMs, config.limit);
+            payload = {
+                meta: {
+                    source: 'coingecko_market_chart',
+                    timestamp: new Date().toISOString(),
+                    stale: false,
+                    range,
+                    interval: config.interval
+                },
+                symbol: resolved.symbol,
+                series
+            };
+        }
         cryptoHistoryCache.set(cacheKey, { payload, at: Date.now() });
         return deepCopy(payload);
     } catch (error) {
@@ -897,8 +979,7 @@ async function getCryptoHistoryWithCache(symbol, range) {
 }
 
 function resolveCryptoSymbol(rawSymbol) {
-    const normalized = String(rawSymbol || '').trim().toUpperCase();
-    return CRYPTO_SUPPORTED_SYMBOLS.has(normalized) ? normalized : null;
+    return normalizeCryptoSymbol(rawSymbol);
 }
 
 function listCryptoRows(payload) {
@@ -949,6 +1030,215 @@ async function getCryptoPricesWithCache() {
         }
         throw error;
     }
+}
+
+function buildCryptoTopFeaturesFromTrackingRow(row) {
+    return Object.entries(row?.factors || {})
+        .sort((a, b) => (row?.contribution?.[b[0]] ?? 0) - (row?.contribution?.[a[0]] ?? 0))
+        .map(([key, value]) => ({
+            feature: `${key.charAt(0).toUpperCase()}${key.slice(1)} Factor`,
+            shap_value: signedTrackingFactor(value),
+            contribution: row?.factorExplanations?.[key] || 'Live contribution signal.'
+        }));
+}
+
+function buildCryptoPredictionPayloadFromTrackingRow(symbol, trackingRow, stale = false, staleReason = null) {
+    const price = parseNumber(trackingRow?.price);
+    if (!Number.isFinite(price) || price <= 0) {
+        throw new Error(`Quote unavailable for ${symbol}`);
+    }
+
+    const pUp = clamp(parseNumber(trackingRow?.pUp) ?? 0.5, 0.05, 0.95);
+    const confidence = clamp(parseNumber(trackingRow?.confidence) ?? 0.5, 0.05, 0.98);
+    const pDown = clamp(1 - pUp, 0.05, 0.95);
+    const rawChangePct = parseNumber(trackingRow?.rawChangePct) ?? ((parseNumber(trackingRow?.changePct) ?? 0) * 100);
+    let q10 = clamp(parseNumber(trackingRow?.q10) ?? -0.01, -0.1, 0.1);
+    let q50 = clamp(parseNumber(trackingRow?.q50) ?? 0, -0.09, 0.09);
+    let q90 = clamp(parseNumber(trackingRow?.q90) ?? 0.01, -0.1, 0.1);
+    [q10, q50, q90] = [q10, q50, q90].sort((a, b) => a - b);
+
+    const trendComponent = clamp(rawChangePct / 8, -1, 1);
+    const w0Raw = clamp(0.22 + trendComponent * 0.06 + (1 - confidence) * 0.05, 0.05, 0.55);
+    const w1Raw = clamp(0.30 + trendComponent * 0.09 + confidence * 0.16, 0.08, 0.64);
+    const w2Raw = clamp(0.28 - trendComponent * 0.04 + (1 - confidence) * 0.08, 0.08, 0.5);
+    const w3Raw = Math.max(0.05, 1 - (w0Raw + w1Raw + w2Raw));
+    const window = normalizeWindow(w0Raw, w1Raw, w2Raw, w3Raw);
+
+    const mostLikely = Object.entries({
+        W0: window.w0,
+        W1: window.w1,
+        W2: window.w2,
+        W3: window.w3
+    }).sort((a, b) => b[1] - a[1])[0][0];
+    const expectedStart = mostLikely === 'W0'
+        ? 'Immediate'
+        : mostLikely === 'W1'
+            ? 'Within 1 hour'
+            : mostLikely === 'W2'
+                ? 'Within 2 hours'
+                : 'Within 3 hours';
+
+    const action = resolveCryptoTradeSignal(pUp, confidence);
+    const actionable = action !== 'FLAT';
+    const positionSize = actionable
+        ? clamp((confidence - CRYPTO_MIN_ACTIONABLE_CONFIDENCE) / (1 - CRYPTO_MIN_ACTIONABLE_CONFIDENCE), 0, 1) * 2
+        : 0;
+    const stopLoss = actionable
+        ? action === 'LONG'
+            ? price * (1 + q10 * 0.8)
+            : price * (1 + Math.abs(q90) * 0.8)
+        : null;
+    const takeProfit1 = actionable
+        ? action === 'LONG'
+            ? price * (1 + q50 * 0.8)
+            : price * (1 - Math.abs(q50) * 0.8)
+        : null;
+    const takeProfit2 = actionable
+        ? action === 'LONG'
+            ? price * (1 + q90 * 0.8)
+            : price * (1 - Math.abs(q10) * 0.8)
+        : null;
+    const rr1 = actionable ? Number(calculateRiskReward(price, stopLoss, takeProfit1).toFixed(4)) : null;
+    const rr2 = actionable ? Number(calculateRiskReward(price, stopLoss, takeProfit2).toFixed(4)) : null;
+    const bandWidth = Math.max(q90 - q10, 0.0001);
+    const sharpeRatio = clamp((q50 / bandWidth) * 0.9, -2.5, 2.5);
+    const driftAlerts = Math.max(0, Math.round((0.65 - confidence) * 40));
+    const healthStatus = stale ? 'IN REVIEW' : (driftAlerts > 12 ? 'IN REVIEW' : 'MONITORED');
+    const reasonCodes = resolveCryptoReasonCodes(action, pUp, confidence);
+    const topFeatures = buildCryptoTopFeaturesFromTrackingRow(trackingRow).slice(0, 5);
+    const summary = trackingRow?.actionTooltip
+        ? `${trackingRow.actionTooltip}. Live top-50 ex-stablecoins universe context applied.`
+        : 'Generated from live top-50 ex-stablecoins market regime.';
+
+    const payload = {
+        meta: {
+            source: 'coingecko_top50_derived',
+            timestamp: new Date().toISOString(),
+            stale: Boolean(stale)
+        },
+        prediction: {
+            symbol,
+            p_up: Number(pUp.toFixed(4)),
+            p_down: Number(pDown.toFixed(4)),
+            confidence: Number(confidence.toFixed(4)),
+            signal: action,
+            start_window: {
+                w0: Number(window.w0.toFixed(4)),
+                w1: Number(window.w1.toFixed(4)),
+                w2: Number(window.w2.toFixed(4)),
+                w3: Number(window.w3.toFixed(4)),
+                most_likely: mostLikely,
+                expected_start: expectedStart
+            },
+            magnitude: {
+                q10: Number(q10.toFixed(4)),
+                q50: Number(q50.toFixed(4)),
+                q90: Number(q90.toFixed(4))
+            }
+        },
+        signal: {
+            action,
+            actionable,
+            presentation: actionable ? 'TRADE' : 'NO_TRADE',
+            position_size: Number(positionSize.toFixed(4)),
+            entry_price: Number(price.toFixed(4)),
+            reference_price: Number(price.toFixed(4)),
+            long_trigger_p_up: CRYPTO_LONG_TRIGGER_P_UP,
+            short_trigger_p_up: CRYPTO_SHORT_TRIGGER_P_UP,
+            stop_loss: actionable ? Number(stopLoss.toFixed(4)) : null,
+            take_profit_1: actionable ? Number(takeProfit1.toFixed(4)) : null,
+            take_profit_2: actionable ? Number(takeProfit2.toFixed(4)) : null,
+            rr_1: rr1,
+            rr_2: rr2
+        },
+        explanation: {
+            summary,
+            top_features: topFeatures,
+            reason_codes: reasonCodes
+        },
+        health: {
+            status: healthStatus,
+            drift_alerts: driftAlerts,
+            sharpe_ratio: Number(sharpeRatio.toFixed(4)),
+            sharpe_stability: Number((bandWidth * 100).toFixed(4)),
+            data_freshness: stale ? 'stale cache' : 'live',
+            last_training: 'N/A (live derived)'
+        },
+        symbol,
+        timestamp: new Date().toISOString()
+    };
+
+    if (staleReason) {
+        payload.meta.stale_reason = staleReason;
+    }
+    return payload;
+}
+
+function buildCryptoUniverseRowFromTrackingRow(trackingRow, staleReason = null) {
+    const symbol = normalizeCryptoSymbol(trackingRow?.symbol);
+    const price = parseNumber(trackingRow?.price);
+    if (!symbol || !Number.isFinite(price) || price <= 0) {
+        return null;
+    }
+    const predictionPayload = buildCryptoPredictionPayloadFromTrackingRow(
+        symbol,
+        trackingRow,
+        Boolean(trackingRow?.stale),
+        staleReason || trackingRow?.staleReason || null
+    );
+    return {
+        symbol,
+        baseSymbol: cryptoBaseSymbol(symbol),
+        name: trackingRow?.name || cryptoBaseSymbol(symbol),
+        price,
+        change: parseNumber(trackingRow?.rawChangePct) ?? ((parseNumber(trackingRow?.changePct) ?? 0) * 100),
+        volume: parseNumber(trackingRow?.meta?.totalVolume) ?? parseNumber(trackingRow?.liquidityProxy) ?? 0,
+        marketCap: parseNumber(trackingRow?.meta?.marketCap) ?? 0,
+        marketCapRank: parseInteger(trackingRow?.meta?.marketCapRank, null),
+        pUp: parseNumber(trackingRow?.pUp) ?? 0.5,
+        confidence: parseNumber(trackingRow?.confidence) ?? 0.5,
+        q10: parseNumber(trackingRow?.q10) ?? -0.01,
+        q50: parseNumber(trackingRow?.q50) ?? 0,
+        q90: parseNumber(trackingRow?.q90) ?? 0.01,
+        signal: predictionPayload.signal.action,
+        status: trackingRow?.status === 'STALE' ? 'Stale' : trackingRow?.status === 'LIVE' ? 'Live' : 'Unavailable',
+        stale: Boolean(trackingRow?.stale),
+        staleReason: staleReason || trackingRow?.staleReason || null,
+        timestamp: trackingRow?.timestamp || new Date().toISOString(),
+        coingeckoId: trackingRow?.meta?.id || null,
+        detail: {
+            summary: predictionPayload.explanation.summary,
+            topFeatures: predictionPayload.explanation.top_features,
+            reasonCodes: predictionPayload.explanation.reason_codes
+        }
+    };
+}
+
+async function getCryptoUniverseWithCache() {
+    const payload = await getTrackingCryptoUniverseWithCache();
+    const rows = (payload?.rows || [])
+        .slice(0, CRYPTO_UNIVERSE_LIMIT)
+        .map((row) => buildCryptoUniverseRowFromTrackingRow(row, payload?.meta?.staleReason || null))
+        .filter((row) => row !== null);
+    return {
+        meta: {
+            source: payload?.meta?.source || 'tracking_crypto_universe',
+            timestamp: payload?.meta?.timestamp || new Date().toISOString(),
+            stale: Boolean(payload?.meta?.stale),
+            stale_reason: payload?.meta?.staleReason || null
+        },
+        total: rows.length,
+        rows
+    };
+}
+
+async function findCryptoUniverseRowBySymbol(rawSymbol) {
+    const symbol = normalizeCryptoSymbol(rawSymbol);
+    if (!symbol) return null;
+    const payload = await getCryptoUniverseWithCache();
+    const row = payload.rows.find((item) => item.symbol === symbol || item.baseSymbol === cryptoBaseSymbol(symbol)) || null;
+    if (!row) return null;
+    return { symbol: row.symbol, row, payload };
 }
 
 function normalizeWindow(w0, w1, w2, w3) {
@@ -2142,6 +2432,27 @@ async function handleCryptoPrices(req, res) {
     }
 }
 
+async function handleCryptoUniverse(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+
+    try {
+        const payload = await getCryptoUniverseWithCache();
+        sendJson(res, 200, payload);
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build crypto top-50 universe',
+            detail: error.message
+        });
+    }
+}
+
 async function handleCryptoHistory(req, res, parsedUrl, rawSymbol) {
     if (req.method === 'OPTIONS') {
         sendJson(res, 200, { ok: true });
@@ -2152,11 +2463,12 @@ async function handleCryptoHistory(req, res, parsedUrl, rawSymbol) {
         return;
     }
 
-    const symbol = resolveCryptoSymbol(rawSymbol);
-    if (!symbol) {
+    const resolved = await findCryptoUniverseRowBySymbol(rawSymbol);
+    if (!resolved) {
         sendJson(res, 404, { error: `Unsupported crypto symbol: ${rawSymbol}` });
         return;
     }
+    const symbol = resolved.symbol;
 
     const range = resolveCryptoHistoryRange(parsedUrl.searchParams.get('range') || '24h');
     if (!range) {
@@ -2185,11 +2497,13 @@ async function handleCryptoPrediction(req, res, rawSymbol) {
         return;
     }
 
-    const symbol = resolveCryptoSymbol(rawSymbol);
-    if (!symbol) {
+    const resolved = await findCryptoUniverseRowBySymbol(rawSymbol);
+    if (!resolved) {
         sendJson(res, 404, { error: `Unsupported crypto symbol: ${rawSymbol}` });
         return;
     }
+    const symbol = resolved.symbol;
+    const universeRow = resolved.row;
 
     const cacheEntry = cryptoPredictionCache.get(symbol);
     const now = Date.now();
@@ -2199,18 +2513,28 @@ async function handleCryptoPrediction(req, res, rawSymbol) {
     }
 
     try {
-        const pricePayload = await getCryptoPricesWithCache();
-        const quote = getCryptoRowBySymbol(pricePayload, symbol);
-        if (!quote) {
-            sendJson(res, 404, { error: `Quote unavailable for ${symbol}` });
-            return;
+        let predictionSourceRow = universeRow;
+        if (CRYPTO_SUPPORTED_SYMBOLS.has(symbol)) {
+            const pricePayload = await getCryptoPricesWithCache();
+            const quote = getCryptoRowBySymbol(pricePayload, symbol);
+            if (quote) {
+                predictionSourceRow = {
+                    ...universeRow,
+                    price: quote.price,
+                    rawChangePct: quote.change,
+                    changePct: (quote.change || 0) / 100,
+                    meta: {
+                        ...(universeRow.meta || {}),
+                        totalVolume: quote.volume
+                    }
+                };
+            }
         }
-
-        const payload = buildCryptoPredictionPayload(
+        const payload = buildCryptoPredictionPayloadFromTrackingRow(
             symbol,
-            quote,
-            Boolean(pricePayload?.meta?.stale),
-            pricePayload?.meta?.stale_reason || null
+            predictionSourceRow,
+            Boolean(predictionSourceRow?.stale),
+            predictionSourceRow?.staleReason || resolved.payload?.meta?.stale_reason || null
         );
         cryptoPredictionCache.set(symbol, { payload, at: Date.now() });
         sendJson(res, 200, payload);
@@ -2243,11 +2567,13 @@ async function handleCryptoPerformance(req, res, rawSymbol) {
         return;
     }
 
-    const symbol = resolveCryptoSymbol(rawSymbol);
-    if (!symbol) {
+    const resolved = await findCryptoUniverseRowBySymbol(rawSymbol);
+    if (!resolved) {
         sendJson(res, 404, { error: `Unsupported crypto symbol: ${rawSymbol}` });
         return;
     }
+    const symbol = resolved.symbol;
+    const universeRow = resolved.row;
 
     const cacheEntry = cryptoPerformanceCache.get(symbol);
     const now = Date.now();
@@ -2257,24 +2583,34 @@ async function handleCryptoPerformance(req, res, rawSymbol) {
     }
 
     try {
-        const pricePayload = await getCryptoPricesWithCache();
-        const quote = getCryptoRowBySymbol(pricePayload, symbol);
-        if (!quote) {
-            sendJson(res, 404, { error: `Quote unavailable for ${symbol}` });
-            return;
+        let predictionSourceRow = universeRow;
+        if (CRYPTO_SUPPORTED_SYMBOLS.has(symbol)) {
+            const pricePayload = await getCryptoPricesWithCache();
+            const quote = getCryptoRowBySymbol(pricePayload, symbol);
+            if (quote) {
+                predictionSourceRow = {
+                    ...universeRow,
+                    price: quote.price,
+                    rawChangePct: quote.change,
+                    changePct: (quote.change || 0) / 100,
+                    meta: {
+                        ...(universeRow.meta || {}),
+                        totalVolume: quote.volume
+                    }
+                };
+            }
         }
-
-        const predictionPayload = buildCryptoPredictionPayload(
+        const predictionPayload = buildCryptoPredictionPayloadFromTrackingRow(
             symbol,
-            quote,
-            Boolean(pricePayload?.meta?.stale),
-            pricePayload?.meta?.stale_reason || null
+            predictionSourceRow,
+            Boolean(predictionSourceRow?.stale),
+            predictionSourceRow?.staleReason || resolved.payload?.meta?.stale_reason || null
         );
         const payload = buildCryptoPerformancePayload(
             symbol,
             predictionPayload,
-            Boolean(pricePayload?.meta?.stale),
-            pricePayload?.meta?.stale_reason || null
+            Boolean(predictionSourceRow?.stale),
+            predictionSourceRow?.staleReason || resolved.payload?.meta?.stale_reason || null
         );
         cryptoPerformanceCache.set(symbol, { payload, at: Date.now() });
         sendJson(res, 200, payload);
@@ -4685,6 +5021,17 @@ function roundTrackingNumber(value, digits = 4) {
     return Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
 }
 
+function roundTrackingPrice(value, market = 'all') {
+    if (!Number.isFinite(value)) return null;
+    const abs = Math.abs(value);
+    if (market === 'crypto') {
+        if (abs < 0.001) return Number(value.toFixed(10));
+        if (abs < 0.01) return Number(value.toFixed(8));
+        if (abs < 1) return Number(value.toFixed(6));
+    }
+    return Number(value.toFixed(4));
+}
+
 function signedTrackingFactor(value) {
     return roundTrackingNumber((clamp(Number.isFinite(value) ? value : 0.5, 0, 1) - 0.5) * 2, 2);
 }
@@ -4762,7 +5109,7 @@ function isStablecoinCoinGeckoRow(row) {
     if (TRACKING_STABLECOIN_NAME_KEYWORDS.some((keyword) => combined.includes(keyword))) return true;
     if (Number.isFinite(price) && price > 0.75 && price < 1.25) {
         if (symbol.endsWith('USD')) return true;
-        if (/(^|[^a-z])(usd|usdt|usdc|usde|usdd|usdp|fdusd|tusd|dai|pyusd|rlusd|lusd|frax|gusd)([^a-z]|$)/.test(combined)) {
+        if (/(^|[^a-z])(usd|usdt|usdc|usde|usdd|usdp|usds|usyc|fdusd|tusd|dai|pyusd|rlusd|lusd|frax|gusd)([^a-z]|$)/.test(combined)) {
             return true;
         }
     }
@@ -4876,7 +5223,7 @@ function buildTrackingRow(base) {
         name: base.name,
         market: base.market,
         marketLabel: base.marketLabel,
-        price: roundTrackingNumber(base.price, 4),
+        price: roundTrackingPrice(base.price, base.market),
         changePct: roundTrackingNumber((base.changePct || 0) / 100, 4),
         rawChangePct: roundTrackingNumber(base.changePct || 0, 2),
         pUp: roundTrackingNumber(base.pUp, 4),
@@ -5020,6 +5367,8 @@ async function getTrackingCryptoUniverseWithCache() {
         return deepCopy(trackingCryptoUniverseCache);
     }
 
+    const diskSnapshot = readTrackingSnapshot('crypto');
+
     try {
         const timestamp = new Date().toISOString();
         const rawRows = await fetchTrackingCryptoUniverse();
@@ -5034,6 +5383,7 @@ async function getTrackingCryptoUniverseWithCache() {
         };
         trackingCryptoUniverseCache = payload;
         trackingCryptoUniverseCacheAt = Date.now();
+        writeTrackingSnapshot('crypto', payload);
         return deepCopy(payload);
     } catch (error) {
         if (trackingCryptoUniverseCache) {
@@ -5050,6 +5400,24 @@ async function getTrackingCryptoUniverseWithCache() {
                 staleReason: error.message,
                 status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
             }));
+            return stalePayload;
+        }
+        if (diskSnapshot?.rows?.length) {
+            const stalePayload = deepCopy(diskSnapshot);
+            stalePayload.meta = {
+                ...stalePayload.meta,
+                stale: true,
+                staleReason: error.message,
+                timestamp: new Date().toISOString()
+            };
+            stalePayload.rows = stalePayload.rows.map((row) => ({
+                ...row,
+                stale: true,
+                staleReason: error.message,
+                status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
+            }));
+            trackingCryptoUniverseCache = stalePayload;
+            trackingCryptoUniverseCacheAt = Date.now();
             return stalePayload;
         }
         throw error;
@@ -6203,6 +6571,10 @@ const server = http.createServer((req, res) => {
 
     if (parsedUrl.pathname === '/api/crypto/prices') {
         handleCryptoPrices(req, res);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/crypto/universe') {
+        handleCryptoUniverse(req, res);
         return;
     }
     if (parsedUrl.pathname.startsWith('/api/crypto/history/')) {

@@ -652,7 +652,7 @@
             <div class="section-header" style="text-align: left; margin-bottom: 1.2rem;">
                 <span class="section-tag">Live Data</span>
                 <h1 class="section-title">Crypto Market Analysis</h1>
-                <p>Interactive quantitative demo for BTC, ETH, SOL with execution-ready policy context.</p>
+                <p>Execution-ready crypto workflow across the top 50 by market cap, excluding stablecoins. BTC, ETH, and SOL remain the benchmark strip.</p>
             </div>
 
             <div class="crypto-layout">
@@ -660,9 +660,7 @@
                     <div class="control-group">
                         <span class="control-label">Focus Symbol</span>
                         <select class="control-select" id="symbolSelect">
-                            <option value="BTCUSDT">BTC/USDT</option>
-                            <option value="ETHUSDT">ETH/USDT</option>
-                            <option value="SOLUSDT">SOL/USDT</option>
+                            <option value="BTCUSDT">Loading top 50...</option>
                         </select>
                     </div>
                     <div class="control-group">
@@ -742,7 +740,7 @@
                             </div>
                             <div class="card-body">
                                 <div style="height: 170px;"><canvas id="comparisonChart"></canvas></div>
-                                <p class="comparison-note">Direction probabilities refresh with the same tick cycle. Hover to inspect per-tick deltas.</p>
+                            <p class="comparison-note">BTC, ETH, and SOL stay pinned here as benchmark leaders while the rest of the page can switch across the live top-50 ex-stablecoins universe.</p>
                             </div>
                         </div>
                         <div class="card">
@@ -933,9 +931,7 @@
                                 <div class="input-row">
                                     <label for="alertSymbol">Symbol</label>
                                     <select id="alertSymbol" class="control-select">
-                                        <option value="BTCUSDT">BTC/USDT</option>
-                                        <option value="ETHUSDT">ETH/USDT</option>
-                                        <option value="SOLUSDT">SOL/USDT</option>
+                                        <option value="BTCUSDT">Loading top 50...</option>
                                     </select>
                                 </div>
                                 <div class="input-row"><label for="alertThreshold">24h Move Threshold (%)</label><input id="alertThreshold" class="control-input" type="number" min="0.1" max="50" step="0.1" value="5"></div>
@@ -1012,7 +1008,7 @@
 
                 <div class="table-container">
                     <div class="table-header">
-                        <h3 style="font-size: 1.25rem; font-weight: 600;">Top Cryptocurrencies</h3>
+                            <h3 style="font-size: 1.25rem; font-weight: 600;">Top 50 Ex-Stablecoins</h3>
                         <div class="table-controls">
                             <input type="text" class="search-input" placeholder="Search symbol..." id="searchInput">
                             <button class="filter-btn" id="filterBtn" type="button">Signal: ALL</button>
