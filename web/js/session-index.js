@@ -4,6 +4,9 @@ const LONG_TRIGGER = 0.55;
 const MIN_CONFIDENCE = 0.45;
 const POLICY_LIMIT_PCT = 0.10;
 const ESTIMATED_FEE_PCT = 0.004;
+const TRADE_LOG_STORAGE_KEY = 'a_share_session_trade_log_v1';
+const TRADE_LOG_LIMIT = 25;
+const SOON_OPEN_WINDOW_SEC = 1800;
 const CN_INDEX_CONFIG = {
     SSE: {
         key: 'SSE',
@@ -37,22 +40,29 @@ const SESSION_ROWS = [
 const state = {
     selectedIndex: 'SSE',
     sessionScope: 'all',
+    tableSessionFilter: 'all',
     chartMode: 'direction',
+    mockLeverage: 1,
+    tradeLog: [],
     viewModel: null,
     sessionChart: null,
     magnitudeChart: null,
-    refreshTimer: null
+    refreshTimer: null,
+    countdownTimer: null
 };
 
 const els = {};
 
 window.addEventListener('DOMContentLoaded', async () => {
+    state.tradeLog = loadTradeLog();
     cacheElements();
     bindEvents();
     initializeCharts();
     renderIndexButtons();
+    renderTradeLog();
     await refreshData();
     startAutoRefresh();
+    startCountdownTimer();
 });
 
 function cacheElements() {
@@ -60,20 +70,25 @@ function cacheElements() {
         'statusBannerTitle', 'statusBannerSubtitle', 'marketStatusBadge', 'marketActivityBadge',
         'statusProgressLabel', 'statusProgressValue', 'statusProgressFill', 'currentPhaseText',
         'timeRemainingText', 'nextOpenText', 'preOpenText', 'btnSSE', 'btnCSI', 'indexFilter',
+        'statusBanner', 'nextTradingWindowTag', 'statusSoonNotice',
         'scopeAllBtn', 'scopeNextBtn', 'currentIndexValue', 'currentIndexChange',
         'selectedSessionLabel', 'lastUpdatedLabel', 'marketStructureLabel', 'marketStructureMeta',
         'marketStateInline', 'nextActionInline', 'accuracyPrimary', 'confidenceRing',
         'confidenceRingValue', 'goNoGoBadge', 'tPlusOneBadge', 'accuracyBreakdown',
         'noGoReason', 'quickDecisionPill', 'quickDecisionMode', 'quickEntryLabel',
         'quickStopLabel', 'quickTakeProfitLabel', 'quickNetEdgeLabel', 'quickEntry',
-        'quickStop', 'quickTakeProfit', 'quickNetEdge', 'quickDecisionNote',
+        'quickStop', 'quickTakeProfit', 'quickNetEdge', 'quickDecisionNote', 'quickDecisionCard',
+        'leverageSelector', 'quickExposureText', 'quickTPlusOneNote', 'executeBtnWrap',
+        'executeBtn', 'executeHint',
         'chartModeDirection', 'chartModeVolatility', 'sessionChart', 'sessionChartNote',
         'windowBars', 'windowMostLikely', 'windowConfidenceNote', 'magnitudeQ10',
         'magnitudeQ50', 'magnitudeQ90', 'magnitudeWidth', 'limitAdjustedBox',
         'limitAdjustedText', 'limitAdjustedNote', 'magnitudeSparkChart', 'currentBiasText',
         'currentLimitRiskText', 'tPlusOneText', 'dataSourceText', 'sessionExplanationText',
-        'sessionTableBody', 'hoveredSessionLabel', 'hoveredExplanation', 'hoveredExecutionHint',
-        'hoveredWindowBias', 'hoveredLimitText', 'dataDelayNote', 'mockDisclaimer'
+        'sessionTableBody', 'hoveredSessionLabel', 'hoveredExplanation', 'hoveredSuggestedAction',
+        'hoveredWindowBias', 'hoveredLimitText', 'hoveredExecutionState', 'dataDelayNote', 'mockDisclaimer',
+        'tableSessionFilter', 'tradeLogPanel', 'tradeLogBody', 'executeModal', 'executeModalBody',
+        'executeViewTradeLog', 'executeModalClose'
     ].forEach((id) => {
         els[id] = document.getElementById(id);
     });
@@ -112,6 +127,14 @@ function bindEvents() {
         renderAll();
     });
 
+    els.tableSessionFilter?.addEventListener('change', () => {
+        state.tableSessionFilter = ['all', 'morning', 'afternoon'].includes(els.tableSessionFilter.value)
+            ? els.tableSessionFilter.value
+            : 'all';
+        renderSessionTable();
+        renderHoveredSession(firstRenderableHoverRow());
+    });
+
     els.chartModeDirection?.addEventListener('click', () => {
         state.chartMode = 'direction';
         renderChartButtons();
@@ -123,13 +146,55 @@ function bindEvents() {
         renderChartButtons();
         renderSessionChart();
     });
+
+    els.leverageSelector?.addEventListener('change', () => {
+        const leverage = Number(els.leverageSelector.value || 1);
+        state.mockLeverage = [1, 5, 10].includes(leverage) ? leverage : 1;
+        renderOverview();
+    });
+
+    els.executeBtn?.addEventListener('click', () => {
+        const quickDecision = state.viewModel?.quickDecision;
+        if (!quickDecision?.actionable) return;
+        const trade = createTradeLogEntry();
+        if (!trade) return;
+        appendTradeLog(trade);
+        text(
+            els.executeModalBody,
+            `Simulated LONG at ${formatIndexValue(trade.entry)} | T+1 applies | Est. PNL: ${formatSignedPercent(trade.netEdgePct)} (Net Edge) | View in Trade Log`
+        );
+        openModal();
+    });
+
+    els.executeViewTradeLog?.addEventListener('click', () => {
+        closeModal();
+        els.tradeLogPanel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    els.executeModalClose?.addEventListener('click', closeModal);
+    els.executeModal?.addEventListener('click', (event) => {
+        if (event.target === els.executeModal) closeModal();
+    });
 }
 
 function initializeCharts() {
     if (window.Chart && els.sessionChart) {
         state.sessionChart = new Chart(els.sessionChart.getContext('2d'), {
             type: 'bar',
-            data: { labels: [], datasets: [{ data: [], borderRadius: 10, borderSkipped: false }] },
+            data: {
+                labels: [],
+                datasets: [{
+                    type: 'bar',
+                    data: [],
+                    borderRadius: 10,
+                    borderSkipped: false,
+                    backgroundColor: [],
+                    borderColor: 'rgba(56, 189, 248, 0.8)',
+                    borderWidth: 0,
+                    tension: 0.34,
+                    pointRadius: 0
+                }]
+            },
             options: {
                 maintainAspectRatio: false,
                 animation: { duration: 250 },
@@ -137,7 +202,25 @@ function initializeCharts() {
                     x: { ticks: { color: '#cbd5e1' }, grid: { display: false } },
                     y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.10)' } }
                 },
-                plugins: { legend: { display: false } }
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title(items) {
+                                const row = getChartRows()[items[0]?.dataIndex || 0];
+                                return row?.label || '--';
+                            },
+                            label(context) {
+                                const row = getChartRows()[context.dataIndex];
+                                if (!row) return '--';
+                                if (state.chartMode === 'direction') {
+                                    return `${row.label} P(UP) ${formatPercent(row.pUp)} | Confidence ${formatPercent(row.confidence)} | Volatility ${classifyVolatility(row.volatilityPct)}`;
+                                }
+                                return `${row.label} Volatility ${formatSignedPercent(row.volatilityPct, false)} | Confidence ${formatPercent(row.confidence)} | Limit Risk ${row.limitRisk.toUpperCase()}`;
+                            }
+                        }
+                    }
+                }
             }
         });
     }
@@ -174,6 +257,26 @@ function initializeCharts() {
                         fill: false,
                         tension: 0.3,
                         borderWidth: 2.2
+                    },
+                    {
+                        label: '+10% limit',
+                        data: [],
+                        borderColor: 'rgba(34,197,94,0.95)',
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0,
+                        borderDash: [8, 6],
+                        borderWidth: 1.4
+                    },
+                    {
+                        label: '-10% limit',
+                        data: [],
+                        borderColor: 'rgba(248,113,113,0.95)',
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0,
+                        borderDash: [8, 6],
+                        borderWidth: 1.4
                     }
                 ]
             },
@@ -187,7 +290,43 @@ function initializeCharts() {
                         grid: { color: 'rgba(148,163,184,0.10)' }
                     }
                 },
-                plugins: { legend: { display: false } }
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: { color: '#cbd5e1', boxWidth: 12, boxHeight: 12, usePointStyle: true }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title(items) {
+                                const row = state.viewModel?.rows?.[items[0]?.dataIndex || 0];
+                                return row?.label || '--';
+                            },
+                            beforeBody(items) {
+                                const row = state.viewModel?.rows?.[items[0]?.dataIndex || 0];
+                                if (!row) return [];
+                                return [
+                                    `q10 ${formatSignedPercent(row.q10)}`,
+                                    `q50 ${formatSignedPercent(row.q50)}`,
+                                    `q90 ${formatSignedPercent(row.q90)}`
+                                ];
+                            },
+                            label() {
+                                return '';
+                            },
+                            afterBody(items) {
+                                const row = state.viewModel?.rows?.[items[0]?.dataIndex || 0];
+                                if (!row) return [];
+                                return [
+                                    `Band Width ${formatSignedPercent(row.volatilityPct, false)}`,
+                                    `Dist to +10% ${formatSignedPercent(Math.max(0, POLICY_LIMIT_PCT - row.q90), false)}`,
+                                    `Dist to -10% ${formatSignedPercent(Math.max(0, row.q10 + POLICY_LIMIT_PCT), false)}`
+                                ];
+                            }
+                        }
+                    }
+                }
             }
         });
     }
@@ -198,6 +337,13 @@ function startAutoRefresh() {
         clearInterval(state.refreshTimer);
     }
     state.refreshTimer = setInterval(() => refreshData(), REFRESH_MS);
+}
+
+function startCountdownTimer() {
+    if (state.countdownTimer) {
+        clearInterval(state.countdownTimer);
+    }
+    state.countdownTimer = setInterval(() => updateCountdownOnly(), 1000);
 }
 
 async function refreshData(showToast = false) {
@@ -253,6 +399,7 @@ function buildViewModel(pricesPayload, predictionPayload, historyPayload, indexM
         direction,
         magnitude,
         windowForecast,
+        tpSl: predictionPayload?.tpSl || {},
         phase,
         rows,
         focusRow,
@@ -414,6 +561,7 @@ function buildCurrentPhase(now) {
     const isWeekend = nowParts.weekday === 'Sat' || nowParts.weekday === 'Sun';
 
     if (isWeekend) {
+        const previousDateKey = previousTradingDateKey(makeBjtDate(nowParts.dateKey, '12:00:00'));
         const nextDateKey = nextTradingDateKey(makeBjtDate(nowParts.dateKey, '12:00:00'));
         const nextOpenAt = makeBjtDate(nextDateKey, '09:30:00');
         const preOpenAt = makeBjtDate(nextDateKey, '09:15:00');
@@ -424,8 +572,8 @@ function buildCurrentPhase(now) {
             rangeLabel: 'Weekend',
             tone: 'closed',
             activityLabel: 'CLOSED',
-            start: currentDate,
-            end: currentDate,
+            start: makeBjtDate(previousDateKey, '15:00:00'),
+            end: nextOpenAt,
             nextOpenAt,
             preOpenText: `Pre-open auction: ${formatTimeOnly(preOpenAt)}-09:25 BJT`,
             helperText: 'A-share cash indices are closed on weekends. The next tradable window starts with the 09:15 auction.',
@@ -456,18 +604,29 @@ function buildSsePhases(dateKey) {
 
 function finalizePhase(phase, now) {
     const startMs = phase.start?.getTime?.() || now.getTime();
-    const endMs = phase.end?.getTime?.() || now.getTime();
+    const nextOpenAt = phase.nextOpenAt || phase.end || now;
+    const progressEndAt = phase.tradable ? (phase.end || nextOpenAt || now) : nextOpenAt;
+    const endMs = progressEndAt?.getTime?.() || now.getTime();
     const durationSec = Math.max(1, Math.floor((endMs - startMs) / 1000));
     const elapsedSec = clamp(Math.floor((now.getTime() - startMs) / 1000), 0, durationSec);
-    const remainingSec = Math.max(0, Math.floor((endMs - now.getTime()) / 1000));
-    const nextOpenAt = phase.nextOpenAt || phase.end || now;
+    const remainingSec = phase.tradable
+        ? Math.max(0, Math.floor(((phase.end || nextOpenAt || now).getTime() - now.getTime()) / 1000))
+        : Math.max(0, Math.floor((nextOpenAt.getTime() - now.getTime()) / 1000));
+    const nextTradingWindow = resolveNextTradingWindow(phase, nextOpenAt);
+    const soonOpenNotice = !phase.tradable && remainingSec <= SOON_OPEN_WINDOW_SEC
+        ? phase.key === 'lunch_break'
+            ? 'Afternoon Resume Starting Soon'
+            : 'Pre-Open Auction Starting Soon'
+        : '';
     return {
         ...phase,
         elapsedSec,
         remainingSec,
         progressRatio: durationSec > 0 ? clamp(elapsedSec / durationSec, 0, 1) : 0,
         nextOpenAt,
-        timeToNextOpenSec: Math.max(0, Math.floor((nextOpenAt.getTime() - now.getTime()) / 1000))
+        timeToNextOpenSec: Math.max(0, Math.floor((nextOpenAt.getTime() - now.getTime()) / 1000)),
+        nextTradingWindow,
+        soonOpenNotice
     };
 }
 
@@ -493,6 +652,8 @@ function buildSessionRows({ direction, magnitude, windowForecast, historySeries,
         const signal = resolveSignal(pUp, confidence);
         const limitRisk = classifyLimitRisk(q10, q90);
         const isFocus = segment.key === focusKey;
+        const volatilityLabel = classifyVolatility(spread);
+        const suggestedAction = buildSuggestedAction(signal, segment.key, confidence);
 
         return {
             ...segment,
@@ -503,11 +664,17 @@ function buildSessionRows({ direction, magnitude, windowForecast, historySeries,
             q50: Number(center.toFixed(4)),
             q90: Number(q90.toFixed(4)),
             volatilityPct: Number(spread.toFixed(4)),
+            volatilityLabel,
             signal,
             limitRisk,
             isFocus,
             explanation: buildSessionExplanation(segment, pUp, confidence, spread, phase, limitRisk),
-            executionHint: signal === 'LONG' ? 'LONG setup clears the gate. Respect T+1 for the next exit window.' : `No-GO until P(UP) >= ${LONG_TRIGGER.toFixed(2)} and confidence >= ${MIN_CONFIDENCE.toFixed(2)}.`
+            suggestedAction,
+            executionState: signal === 'LONG'
+                ? `Simulation-ready | ${phase.tradable ? 'live window active' : 'market closed'} | T+1 applies after entry.`
+                : `${phase.tradable ? 'Stand aside' : 'Market closed'} | Confidence gate not cleared yet.`,
+            upperLimitDistance: Number(Math.max(0, POLICY_LIMIT_PCT - q90).toFixed(4)),
+            lowerLimitDistance: Number(Math.max(0, q10 + POLICY_LIMIT_PCT).toFixed(4))
         };
     });
 }
@@ -539,6 +706,9 @@ function buildLimitInfo(magnitude, focusRow, indexMeta) {
     const cappedQ90 = Math.min(q90, POLICY_LIMIT_PCT);
     const cappedQ10 = Math.max(q10, -POLICY_LIMIT_PCT);
     const policyLabel = indexMeta?.policyLabel || 'A-share constituent policy proxy';
+    const tooltip = policyLabel === 'SSE constituent policy band'
+        ? 'Forecast within ±10% SSE limit band -> No capping needed'
+        : 'Forecast within ±10% A-share constituent policy proxy -> No capping needed';
     const note = level === 'high'
         ? `q-band is pressing into the ${policyLabel.toLowerCase()} boundary.`
         : level === 'moderate'
@@ -550,7 +720,8 @@ function buildLimitInfo(magnitude, focusRow, indexMeta) {
         cappedQ90,
         upperBuffer,
         lowerBuffer,
-        note
+        note,
+        tooltip
     };
 }
 
@@ -564,35 +735,52 @@ function renderAll() {
     renderStartWindow();
     renderMagnitude();
     renderSessionTable();
-    renderHoveredSession(state.viewModel.focusRow);
+    renderHoveredSession(firstRenderableHoverRow());
     renderSessionChart();
     renderMagnitudeChart();
+    renderTradeLog();
 }
 
 function renderBanner() {
     const { phase } = state.viewModel;
     text(els.statusBannerTitle, `Current: ${phase.bannerLabel} (${phase.rangeLabel} BJT) | Status: ${phase.activityLabel}`);
     text(els.statusBannerSubtitle, phase.tradable
-        ? `${phase.helperText} Time remaining in the active window: ${formatDuration(phase.remainingSec)}.`
-        : `${phase.helperText} Next open in ${formatDuration(phase.timeToNextOpenSec)}.`);
-    setBadge(els.marketStatusBadge, phase.tradable ? 'Market Open' : 'Market Closed', phase.tradable ? 'success' : 'warning');
+        ? `${phase.helperText} Time remaining in the active window: ${formatDurationDetailed(phase.remainingSec)}.`
+        : `${phase.helperText} Next open in ${formatDurationDetailed(phase.timeToNextOpenSec)}.`);
+    setBadge(els.marketStatusBadge, phase.tradable ? 'Market Open' : 'Market Closed', phase.tradable ? 'success' : 'muted');
     setBadge(els.marketActivityBadge, phase.activityLabel, phase.activityLabel === 'HIGH ACTIVITY' ? 'success' : phase.activityLabel === 'MODERATE' ? 'warning' : 'muted');
-    text(els.statusProgressLabel, phase.tradable || phase.key === 'lunch_break' ? 'Session progress' : 'Time to next open');
+    text(els.statusProgressLabel, phase.tradable ? 'Session progress' : 'Countdown to next open');
     text(els.statusProgressValue, `${Math.round(phase.progressRatio * 100)}%`);
     if (els.statusProgressFill) {
         els.statusProgressFill.style.width = `${Math.max(6, Math.round(phase.progressRatio * 100))}%`;
         els.statusProgressFill.classList.remove('activity-live', 'activity-warning', 'activity-closed');
         els.statusProgressFill.classList.add(phase.activityLabel === 'HIGH ACTIVITY' ? 'activity-live' : phase.activityLabel === 'MODERATE' ? 'activity-warning' : 'activity-closed');
     }
+    els.statusBanner?.classList.toggle('soon', Boolean(phase.soonOpenNotice));
+    if (els.statusSoonNotice) {
+        if (phase.soonOpenNotice) {
+            els.statusSoonNotice.hidden = false;
+            els.statusSoonNotice.className = 'status-inline-tag attention';
+            text(els.statusSoonNotice, phase.soonOpenNotice);
+        } else {
+            els.statusSoonNotice.hidden = true;
+            els.statusSoonNotice.className = 'status-inline-tag muted';
+            text(els.statusSoonNotice, '');
+        }
+    }
+    text(els.nextTradingWindowTag, `Next Trading Window: ${phase.nextTradingWindow}`);
     text(els.currentPhaseText, phase.label);
-    text(els.timeRemainingText, phase.tradable ? formatDuration(phase.remainingSec) : `Reopens in ${formatDuration(phase.timeToNextOpenSec)}`);
-    text(els.nextOpenText, `${formatTimeOnly(phase.nextOpenAt)} in ${formatDuration(phase.timeToNextOpenSec)}`);
+    text(els.timeRemainingText, phase.tradable ? formatDurationDetailed(phase.remainingSec) : `Reopens in ${formatDurationDetailed(phase.timeToNextOpenSec)}`);
+    text(els.nextOpenText, `${formatTimeOnly(phase.nextOpenAt)} in ${formatDurationDetailed(phase.timeToNextOpenSec)}`);
     text(els.preOpenText, phase.preOpenText);
+    animateTick(els.timeRemainingText);
+    animateTick(els.statusProgressValue);
 }
 
 function renderOverview() {
     const viewModel = state.viewModel;
     const { quote, phase, focusRow, quickDecision, accuracy, indexMeta } = viewModel;
+    const displayDecision = materializeQuickDecision(quickDecision, state.mockLeverage);
     text(els.currentIndexValue, formatIndexValue(quote.price));
     text(els.currentIndexChange, `${formatSignedPercent((quote.changePct || 0) / 100)} vs prev close`);
     text(els.selectedSessionLabel, `Session: ${focusRow?.label || '--'} (${focusRow?.timeLabel || '--'})`);
@@ -600,26 +788,41 @@ function renderOverview() {
     text(els.marketStructureLabel, phase.tradable ? 'Tradable Window' : 'Wait State');
     text(els.marketStructureMeta, 'Morning 09:30-11:30 | Afternoon 13:00-15:00 BJT');
     text(els.marketStateInline, `Current phase: ${phase.label}`);
-    text(els.nextActionInline, phase.tradable ? `Active ${indexMeta.displayName} window until ${formatTimeOnly(phase.end)}` : `Next tradable window: ${focusRow?.label || 'Morning Open'} at ${formatTimeOnly(phase.nextOpenAt)}`);
+    text(els.nextActionInline, phase.tradable ? `Active ${indexMeta.displayName} window until ${formatTimeOnly(phase.end)}` : `Next tradable window: ${phase.nextTradingWindow}`);
     text(els.accuracyPrimary, `${Math.round(accuracy.directionAccuracy * 100)}%`);
     renderConfidenceRing(asNumber(viewModel.direction.confidence, 0.5));
     setBadge(els.goNoGoBadge, quickDecision.liveEligible ? 'GO' : 'NO-GO', quickDecision.liveEligible ? 'success' : 'danger');
     els.goNoGoBadge.title = viewModel.noGoReason;
     setBadge(els.tPlusOneBadge, 'T+1', quickDecision.actionable ? 'warning' : 'info');
     els.tPlusOneBadge.title = 'T+1 Holding Rule Applies';
-    text(els.accuracyBreakdown, `Direction: ${Math.round(accuracy.directionAccuracy * 100)}% | Coverage: ${Math.round(accuracy.coverage * 100)}% | Brier Score: ${accuracy.brier.toFixed(3)}`);
+    text(els.accuracyBreakdown, `Direction: ${Math.round(accuracy.directionAccuracy * 100)}% | Coverage: ${Math.round(accuracy.coverage * 100)}% | Brier: ${accuracy.brier.toFixed(3)}`);
     text(els.noGoReason, viewModel.noGoReason);
-    setSignalPill(els.quickDecisionPill, quickDecision.badge, quickDecision.tone);
-    setBadge(els.quickDecisionMode, quickDecision.mode, quickDecision.modeTone);
-    text(els.quickEntryLabel, quickDecision.entryLabel);
-    text(els.quickStopLabel, quickDecision.stopLabel);
-    text(els.quickTakeProfitLabel, quickDecision.takeProfitLabel);
-    text(els.quickNetEdgeLabel, quickDecision.netEdgeLabel);
-    text(els.quickEntry, quickDecision.entryValue);
-    text(els.quickStop, quickDecision.stopValue);
-    text(els.quickTakeProfit, quickDecision.takeProfitValue);
-    text(els.quickNetEdge, quickDecision.netEdgeValue);
-    text(els.quickDecisionNote, quickDecision.note);
+    setSignalPill(els.quickDecisionPill, displayDecision.badge, displayDecision.tone);
+    setBadge(els.quickDecisionMode, displayDecision.mode, displayDecision.modeTone);
+    text(els.quickEntryLabel, displayDecision.entryLabel);
+    text(els.quickStopLabel, displayDecision.stopLabel);
+    text(els.quickTakeProfitLabel, displayDecision.takeProfitLabel);
+    text(els.quickNetEdgeLabel, displayDecision.netEdgeLabel);
+    text(els.quickEntry, displayDecision.entryValue);
+    text(els.quickStop, displayDecision.stopValue);
+    text(els.quickTakeProfit, displayDecision.takeProfitValue);
+    text(els.quickNetEdge, displayDecision.netEdgeValue);
+    text(els.quickDecisionNote, displayDecision.note);
+    text(els.quickExposureText, `Mock exposure: ${state.mockLeverage}x`);
+    text(els.quickTPlusOneNote, displayDecision.tPlusOneNote);
+    if (els.leverageSelector) {
+        els.leverageSelector.value = String(state.mockLeverage);
+    }
+    if (els.executeBtn) {
+        els.executeBtn.disabled = !displayDecision.actionable;
+    }
+    if (els.executeBtnWrap) {
+        els.executeBtnWrap.classList.toggle('is-disabled', !displayDecision.actionable);
+        els.executeBtnWrap.dataset.tooltip = displayDecision.actionable ? '' : buildExecuteDisabledTooltip(phase, focusRow);
+    }
+    text(els.executeHint, displayDecision.actionable
+        ? `Leverage / Position Size (Mock): ${state.mockLeverage}x | SL / TP compressed by mock exposure | Net Edge ${displayDecision.netEdgeValue}`
+        : buildExecuteDisabledTooltip(phase, focusRow));
 }
 
 function renderStartWindow() {
@@ -634,7 +837,7 @@ function renderStartWindow() {
     }
     const mostLikely = String(viewModel.windowForecast.mostLikely || 'W1');
     text(els.windowMostLikely, `${mostLikely} | ${SESSION_ROWS[Math.min(3, Number(mostLikely.replace('W', '')) || 0)]?.label || 'Morning Open'}`);
-    text(els.windowConfidenceNote, `Distribution seeded from the live ${viewModel.indexMeta.displayName} regime. Current confidence: ${Math.round(asNumber(viewModel.direction.confidence, 0.5) * 100)}%.`);
+    text(els.windowConfidenceNote, `Distribution seeded from the live ${viewModel.indexMeta.displayName} regime. Current confidence: ${formatPercent(asNumber(viewModel.direction.confidence, 0.5))}.`);
 }
 
 function renderMagnitude() {
@@ -646,16 +849,19 @@ function renderMagnitude() {
     text(els.magnitudeWidth, formatSignedPercent((focusRow?.volatilityPct || 0), false));
     text(els.limitAdjustedText, `q90 capped at ${formatSignedPercent(limitInfo.cappedQ90)} | q10 floored at ${formatSignedPercent(limitInfo.cappedQ10)}`);
     text(els.limitAdjustedNote, `Limit risk: ${capitalize(limitInfo.level)} | ${limitInfo.note}`);
+    els.limitAdjustedBox.title = limitInfo.level === 'low' ? limitInfo.tooltip : limitInfo.note;
     els.limitAdjustedBox?.classList.toggle('high', limitInfo.level === 'high');
     text(els.currentBiasText, quickDecision.actionable ? `Directional LONG bias into the next ${indexMeta.displayName} window.` : 'No directional edge yet; wait for cleaner domestic flow.');
     text(els.currentLimitRiskText, `${capitalize(limitInfo.level)} | q90 ${formatSignedPercent(focusRow?.q90 || 0)} / q10 ${formatSignedPercent(focusRow?.q10 || 0)}`);
+    els.currentLimitRiskText.title = limitInfo.level === 'low' ? limitInfo.tooltip : limitInfo.note;
     text(els.tPlusOneText, quickDecision.actionable ? 'T+1 applies. Any long initiated today can only exit on the next trading day.' : 'T+1 still applies once a long is opened. No shorting assumption for this page.');
     text(els.dataSourceText, viewModel.dataSourceText);
     text(els.sessionExplanationText, focusRow?.explanation || 'Hover a session row to inspect the rationale.');
     text(els.dataDelayNote, viewModel.dataSourceText);
-    text(els.mockDisclaimer, viewModel.disclaimer);
+    text(els.mockDisclaimer, 'Mock Mode | Simulated for SSE Composite & CSI 300 | Data: EastMoney Level-1 | Educational Use Only');
 }
-function getVisibleRows() {
+
+function getChartRows() {
     const rows = state.viewModel?.rows || [];
     if (state.sessionScope === 'next') {
         return state.viewModel?.focusRow ? [state.viewModel.focusRow] : rows.slice(0, 1);
@@ -663,9 +869,26 @@ function getVisibleRows() {
     return rows;
 }
 
+function getTableRows() {
+    let rows = getChartRows();
+    if (state.tableSessionFilter === 'morning') {
+        rows = rows.filter((row) => row.key.startsWith('morning'));
+    } else if (state.tableSessionFilter === 'afternoon') {
+        rows = rows.filter((row) => row.key.startsWith('afternoon'));
+    }
+    return rows;
+}
+
 function renderSessionTable() {
-    const rows = getVisibleRows();
+    const rows = getTableRows();
     if (!els.sessionTableBody) return;
+    if (els.tableSessionFilter) {
+        els.tableSessionFilter.value = state.tableSessionFilter;
+    }
+    if (!rows.length) {
+        els.sessionTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-secondary); padding: 1.2rem;">No sessions match the current table filter.</td></tr>';
+        return;
+    }
 
     els.sessionTableBody.innerHTML = rows.map((row) => `
         <tr data-row-key="${row.key}" class="${row.isFocus ? 'is-focus' : ''}">
@@ -676,7 +899,7 @@ function renderSessionTable() {
             <td>${formatSignedPercent(row.q50)}</td>
             <td>${formatSignedPercent(row.volatilityPct, false)}</td>
             <td><span class="signal-pill ${row.signal === 'LONG' ? 'long' : 'flat'}">${row.signal}</span></td>
-            <td><span class="row-pill ${row.limitRisk}">${row.limitRisk.toUpperCase()}</span></td>
+            <td><span class="row-pill ${row.limitRisk}" title="${escapeHtml(buildLimitRiskTooltip(row.limitRisk, state.viewModel.indexMeta))}"><span class="row-dot"></span>${row.limitRisk.toUpperCase()}</span></td>
         </tr>
     `).join('');
 
@@ -688,32 +911,44 @@ function renderSessionTable() {
 }
 
 function renderHoveredSession(row) {
-    if (!row) return;
+    if (!row) {
+        text(els.hoveredSessionLabel, 'No session hovered yet.');
+        text(els.hoveredExplanation, 'Move across the session table to inspect the rationale.');
+        text(els.hoveredSuggestedAction, 'LONG if P(UP) >= 55% after open | Confidence boost expected.');
+        text(els.hoveredWindowBias, '--');
+        text(els.hoveredLimitText, '--');
+        text(els.hoveredExecutionState, 'Waiting for the current A-share window.');
+        return;
+    }
     text(els.hoveredSessionLabel, `${row.label} (${row.timeLabel})`);
     text(els.hoveredExplanation, row.explanation);
-    text(els.hoveredExecutionHint, row.executionHint);
-    text(els.hoveredWindowBias, `P(W1): ${Math.round(row.windowWeight * 100)}% | Confidence: ${Math.round(row.confidence * 100)}%`);
-    text(els.hoveredLimitText, `${capitalize(row.limitRisk)} limit risk | T+1 applies after any long entry.`);
+    text(els.hoveredSuggestedAction, row.suggestedAction);
+    text(els.hoveredWindowBias, `P(W1): ${formatPercent(row.windowWeight)} | Confidence: ${formatPercent(row.confidence)}`);
+    text(els.hoveredLimitText, `${capitalize(row.limitRisk)} limit risk | ${buildLimitRiskTooltip(row.limitRisk, state.viewModel?.indexMeta)} | T+1 applies after any long entry.`);
+    text(els.hoveredExecutionState, row.executionState);
 }
 
 function renderSessionChart() {
     if (!state.sessionChart || !state.viewModel) return;
-    const rows = getVisibleRows();
+    const rows = getChartRows();
     const isDirection = state.chartMode === 'direction';
     state.sessionChart.data.labels = rows.map((row) => row.label);
+    state.sessionChart.data.datasets[0].type = isDirection ? 'bar' : 'line';
     state.sessionChart.data.datasets[0].label = isDirection ? 'P(UP)' : 'Volatility';
     state.sessionChart.data.datasets[0].data = rows.map((row) => Number(((isDirection ? row.pUp : row.volatilityPct) * 100).toFixed(2)));
     state.sessionChart.data.datasets[0].backgroundColor = rows.map((row) => {
-        if (!isDirection) {
-            return row.volatilityPct >= 0.08 ? 'rgba(248,113,113,0.82)' : row.volatilityPct >= 0.05 ? 'rgba(250,204,21,0.82)' : 'rgba(56,189,248,0.82)';
-        }
-        return row.signal === 'LONG' ? 'rgba(34,197,94,0.82)' : 'rgba(248,113,113,0.74)';
+        if (!isDirection) return 'rgba(56,189,248,0.20)';
+        return row.signal === 'LONG' ? 'rgba(34,197,94,0.82)' : 'rgba(127,29,29,0.78)';
     });
+    state.sessionChart.data.datasets[0].borderColor = isDirection ? 'rgba(56,189,248,0.2)' : '#38bdf8';
+    state.sessionChart.data.datasets[0].borderWidth = isDirection ? 0 : 2.4;
+    state.sessionChart.data.datasets[0].pointRadius = isDirection ? 0 : 4;
+    state.sessionChart.data.datasets[0].fill = !isDirection;
     state.sessionChart.options.scales.y.ticks.callback = (value) => `${value}%`;
     state.sessionChart.update();
     text(els.sessionChartNote, isDirection
         ? 'Bar chart of session-by-session P(UP). Use this to see where the directional edge is concentrated.'
-        : 'Bar chart of projected session volatility. Higher bars imply more path uncertainty and wider q-bands.');
+        : 'Volatility curve across the active A-share sessions. Higher points imply wider q-bands and lower execution comfort.');
 }
 
 function renderMagnitudeChart() {
@@ -723,6 +958,8 @@ function renderMagnitudeChart() {
     state.magnitudeChart.data.datasets[0].data = rows.map((row) => Number((row.q10 * 100).toFixed(2)));
     state.magnitudeChart.data.datasets[1].data = rows.map((row) => Number((row.q90 * 100).toFixed(2)));
     state.magnitudeChart.data.datasets[2].data = rows.map((row) => Number((row.q50 * 100).toFixed(2)));
+    state.magnitudeChart.data.datasets[3].data = rows.map(() => 10);
+    state.magnitudeChart.data.datasets[4].data = rows.map(() => -10);
     state.magnitudeChart.update();
 }
 
@@ -747,6 +984,182 @@ function renderChartButtons() {
     setButtonState(els.chartModeDirection, state.chartMode === 'direction');
     setButtonState(els.chartModeVolatility, state.chartMode === 'volatility');
 }
+
+function updateCountdownOnly() {
+    if (!state.viewModel) return;
+    const previousPhaseKey = state.viewModel.phase?.key;
+    refreshPhaseDerivedState();
+    if (previousPhaseKey !== state.viewModel.phase?.key) {
+        renderAll();
+        return;
+    }
+    renderBanner();
+    renderOverview();
+}
+
+function refreshPhaseDerivedState() {
+    if (!state.viewModel) return;
+    const phase = buildCurrentPhase(new Date());
+    state.viewModel.phase = phase;
+    state.viewModel.rows = buildSessionRows({
+        direction: state.viewModel.direction,
+        magnitude: state.viewModel.magnitude,
+        windowForecast: state.viewModel.windowForecast,
+        historySeries: state.viewModel.historySeries,
+        phase
+    });
+    state.viewModel.focusRow = resolveFocusRow(state.viewModel.rows, phase);
+    state.viewModel.limitInfo = buildLimitInfo(state.viewModel.magnitude, state.viewModel.focusRow, state.viewModel.indexMeta);
+    state.viewModel.quickDecision = buildQuickDecision(
+        state.viewModel.quote?.price,
+        state.viewModel.direction,
+        state.viewModel.magnitude,
+        state.viewModel.tpSl || {},
+        phase,
+        state.viewModel.focusRow,
+        state.viewModel.indexMeta
+    );
+    state.viewModel.noGoReason = buildNoGoReason(
+        state.viewModel.quickDecision,
+        state.viewModel.direction,
+        state.viewModel.magnitude,
+        phase,
+        state.viewModel.limitInfo,
+        state.viewModel.indexMeta
+    );
+}
+
+function materializeQuickDecision(decision, leverage) {
+    if (!decision) return null;
+    const safeLeverage = [1, 5, 10].includes(Number(leverage)) ? Number(leverage) : 1;
+    if (!decision.actionable) {
+        return {
+            ...decision,
+            badge: 'NO-GO',
+            tone: 'flat',
+            entryValue: formatIndexValue(decision.entryPrice),
+            stopValue: `P(UP) >= ${formatPercent(decision.longTriggerPUp)}`,
+            takeProfitValue: `Confidence >= ${formatPercent(decision.minConfidence)}`,
+            netEdgeValue: decision.waitForLabel || '--',
+            netEdgePct: asNumber(decision.baseNetEdgePct, 0),
+            tPlusOneNote: `Rule preview: ${decision.tPlusOneNote}`
+        };
+    }
+
+    const stopLossPct = asNumber(decision.baseStopLossPct, -0.015) / safeLeverage;
+    const takeProfitPct = asNumber(decision.baseTakeProfitPct, 0.02) / safeLeverage;
+    const netEdgePct = asNumber(decision.baseNetEdgePct, 0) * safeLeverage;
+
+    return {
+        ...decision,
+        entryValue: formatIndexValue(decision.entryPrice),
+        stopValue: formatSignedPercent(stopLossPct),
+        takeProfitValue: formatSignedPercent(takeProfitPct),
+        netEdgeValue: formatSignedPercent(netEdgePct),
+        stopLossPct,
+        takeProfitPct,
+        netEdgePct,
+        tPlusOneNote: decision.tPlusOneNote
+    };
+}
+
+function buildExecuteDisabledTooltip(phase, focusRow) {
+    if (!phase?.tradable) {
+        return phase?.key === 'lunch_break'
+            ? 'Lunch Break + Directional Bias Neutral -> Wait for Afternoon Open'
+            : 'Market Closed + Directional Bias Neutral -> Wait for Morning Open';
+    }
+    return `Directional Bias Neutral -> Wait for ${focusRow?.label || 'the next session'}`;
+}
+
+function buildSuggestedAction(signal, sessionKey, confidence) {
+    if (signal === 'LONG') {
+        return `LONG if P(UP) >= ${Math.round(LONG_TRIGGER * 100)}% after open | Confidence ${formatPercent(confidence)} already clears the gate`;
+    }
+    if (sessionKey.startsWith('afternoon')) {
+        return 'Wait for cleaner afternoon domestic flow | Confidence gate not cleared';
+    }
+    return 'Wait for Afternoon Open | Confidence boost expected';
+}
+
+function firstRenderableHoverRow() {
+    return getTableRows()[0] || state.viewModel?.focusRow || null;
+}
+
+function createTradeLogEntry() {
+    const displayDecision = materializeQuickDecision(state.viewModel?.quickDecision, state.mockLeverage);
+    if (!displayDecision?.actionable) return null;
+    return {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        timestamp: new Date().toISOString(),
+        indexKey: state.viewModel.indexMeta.key,
+        indexName: state.viewModel.indexMeta.displayName,
+        action: 'LONG',
+        leverage: state.mockLeverage,
+        entry: Number(displayDecision.entryPrice),
+        stopLossPct: Number(displayDecision.stopLossPct),
+        takeProfitPct: Number(displayDecision.takeProfitPct),
+        netEdgePct: Number(displayDecision.netEdgePct),
+        phaseKey: state.viewModel.phase.key,
+        tPlusOneNote: displayDecision.tPlusOneNote
+    };
+}
+
+function appendTradeLog(trade) {
+    state.tradeLog = [trade, ...state.tradeLog].slice(0, TRADE_LOG_LIMIT);
+    saveTradeLog();
+    renderTradeLog();
+}
+
+function renderTradeLog() {
+    if (!els.tradeLogBody) return;
+    if (!state.tradeLog.length) {
+        els.tradeLogBody.innerHTML = '<tr><td class="trade-log-empty" colspan="8">No mock trades yet.</td></tr>';
+        return;
+    }
+    els.tradeLogBody.innerHTML = state.tradeLog.map((trade) => `
+        <tr>
+            <td>${escapeHtml(formatDateTime(trade.timestamp))}</td>
+            <td>${escapeHtml(trade.indexName)}</td>
+            <td><span class="signal-pill long">LONG</span></td>
+            <td>${escapeHtml(String(trade.leverage))}x</td>
+            <td>${escapeHtml(formatIndexValue(trade.entry))}</td>
+            <td>${escapeHtml(`${formatSignedPercent(trade.stopLossPct)} / ${formatSignedPercent(trade.takeProfitPct)}`)}</td>
+            <td><strong>${escapeHtml(formatSignedPercent(trade.netEdgePct))}</strong></td>
+            <td>${escapeHtml(trade.tPlusOneNote)}</td>
+        </tr>
+    `).join('');
+}
+
+function loadTradeLog() {
+    try {
+        const raw = window.localStorage.getItem(TRADE_LOG_STORAGE_KEY);
+        const parsed = JSON.parse(raw || '[]');
+        return Array.isArray(parsed) ? parsed.slice(0, TRADE_LOG_LIMIT) : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function saveTradeLog() {
+    try {
+        window.localStorage.setItem(TRADE_LOG_STORAGE_KEY, JSON.stringify(state.tradeLog.slice(0, TRADE_LOG_LIMIT)));
+    } catch (error) {
+        console.warn('Failed to persist A-share trade log', error);
+    }
+}
+
+function openModal() {
+    if (!els.executeModal) return;
+    els.executeModal.classList.add('open');
+    els.executeModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal() {
+    if (!els.executeModal) return;
+    els.executeModal.classList.remove('open');
+    els.executeModal.setAttribute('aria-hidden', 'true');
+}
 function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, indexMeta) {
     const resolvedIndexMeta = indexMeta || currentIndexMeta();
     const pUp = asNumber(direction.pUp, 0.5);
@@ -754,7 +1167,10 @@ function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, 
     const signal = resolveSignal(pUp, confidence);
     const actionable = signal === 'LONG';
     const entryPrice = asNumber(price, tpSl.entryPrice);
-    const netEdge = asNumber(focusRow?.q50, magnitude.q50 ?? 0) - ESTIMATED_FEE_PCT;
+    const baseNetEdgePct = asNumber(focusRow?.q50, magnitude.q50 ?? 0) - ESTIMATED_FEE_PCT;
+    const baseStopLossPct = asNumber(tpSl.stopLossPct, focusRow?.q10 ?? -0.015);
+    const baseTakeProfitPct = asNumber(tpSl.takeProfit2Pct, focusRow?.q90 ?? 0.02);
+    const tPlusOneNote = 'LONG initiated today -> Exit only tomorrow or later';
 
     if (actionable) {
         return {
@@ -768,13 +1184,16 @@ function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, 
             stopLabel: 'Stop Loss',
             takeProfitLabel: 'Take Profit',
             netEdgeLabel: 'Net Edge',
-            entryValue: formatIndexValue(entryPrice),
-            stopValue: formatSignedPercent(asNumber(tpSl.stopLossPct, focusRow?.q10 ?? -0.015)),
-            takeProfitValue: formatSignedPercent(asNumber(tpSl.takeProfit2Pct, focusRow?.q90 ?? 0.02)),
-            netEdgeValue: formatSignedPercent(netEdge),
             note: phase.tradable
                 ? `LONG setup for ${resolvedIndexMeta.displayName} ${focusRow?.label || 'the next session'} clears the policy gate. T+1 holding rule applies after entry.`
-                : `Simulated only. Market reopens at ${formatTimeOnly(phase.nextOpenAt)} BJT.`
+                : `Simulated only. Market reopens at ${formatTimeOnly(phase.nextOpenAt)} BJT.`,
+            entryPrice,
+            baseStopLossPct,
+            baseTakeProfitPct,
+            baseNetEdgePct,
+            tPlusOneNote,
+            longTriggerPUp: LONG_TRIGGER,
+            minConfidence: MIN_CONFIDENCE
         };
     }
 
@@ -787,15 +1206,17 @@ function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, 
         modeTone: phase.tradable ? 'warning' : 'info',
         entryLabel: 'Reference',
         stopLabel: 'Long Trigger',
-        takeProfitLabel: 'Coverage',
+        takeProfitLabel: 'Confidence Gate',
         netEdgeLabel: 'Wait For',
-        entryValue: formatIndexValue(entryPrice),
-        stopValue: `P(UP) >= ${LONG_TRIGGER.toFixed(2)}`,
-        takeProfitValue: `Conf >= ${MIN_CONFIDENCE.toFixed(2)}`,
-        netEdgeValue: phase.tradable ? `${focusRow?.label || 'Next session'} bias` : `${formatTimeOnly(phase.nextOpenAt)} reopen`,
         note: phase.tradable
             ? `No directional edge yet. Wait for the next higher-conviction ${resolvedIndexMeta.displayName} session before opening risk.`
-            : `Simulated only until ${formatTimeOnly(phase.nextOpenAt)} BJT.`
+            : `Simulated only until ${formatTimeOnly(phase.nextOpenAt)} BJT.`,
+        entryPrice,
+        baseNetEdgePct,
+        tPlusOneNote,
+        longTriggerPUp: LONG_TRIGGER,
+        minConfidence: MIN_CONFIDENCE,
+        waitForLabel: phase.tradable ? `${focusRow?.label || 'Next session'} bias` : `${formatTimeOnly(phase.nextOpenAt)} reopen`
     };
 }
 
@@ -849,6 +1270,19 @@ function recommendedWaitTarget(phaseKey) {
     return 'the next higher-confidence A-share session';
 }
 
+function resolveNextTradingWindow(phase, nextOpenAt) {
+    if (phase.key === 'lunch_break') {
+        return `Afternoon Open ${formatTimeOnly(nextOpenAt)} BJT | Continuous trading resumes`;
+    }
+    if (phase.key === 'morning_open' || phase.key === 'morning_mid') {
+        return 'Afternoon Open 13:00 BJT | Lunch Break 11:30-13:00';
+    }
+    if (phase.key === 'afternoon_open' || phase.key === 'afternoon_close' || phase.key === 'close_auction' || phase.key === 'post_market' || phase.key === 'weekend') {
+        return 'Next Morning Open 09:30 BJT | Pre-Auction 09:15-09:25';
+    }
+    return 'Morning Open 09:30 BJT | Pre-Auction 09:15-09:25';
+}
+
 function currentIndexMeta() {
     return CN_INDEX_CONFIG[state.selectedIndex] || CN_INDEX_CONFIG.SSE;
 }
@@ -893,7 +1327,7 @@ function setButtonState(element, active) {
 
 function setBadge(element, label, tone) {
     if (!element) return;
-    const normalizedTone = ['success', 'warning', 'danger', 'info'].includes(tone) ? tone : 'info';
+    const normalizedTone = ['success', 'warning', 'danger', 'info', 'muted'].includes(tone) ? tone : 'info';
     element.textContent = label;
     element.className = `status-badge ${normalizedTone}`;
 }
@@ -911,6 +1345,7 @@ function renderConfidenceRing(value) {
         els.confidenceRing.style.background = `conic-gradient(hsl(${hue} 78% 54%) ${pct * 3.6}deg, rgba(255,255,255,0.14) 0deg)`;
     }
     text(els.confidenceRingValue, `${pct}%`);
+    animateTick(els.confidenceRingValue);
 }
 
 function getBjtParts(input) {
@@ -951,12 +1386,31 @@ function nextTradingDateKey(baseDate) {
     return cursor.toISOString().slice(0, 10);
 }
 
+function previousTradingDateKey(baseDate) {
+    const cursor = new Date(baseDate);
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    while ([0, 6].includes(cursor.getUTCDay())) {
+        cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    return cursor.toISOString().slice(0, 10);
+}
+
 function formatDuration(totalSeconds) {
     const safe = Math.max(0, Math.floor(totalSeconds));
     const hours = Math.floor(safe / 3600);
     const minutes = Math.floor((safe % 3600) / 60);
     if (hours <= 0) return `${minutes}m`;
     return `${hours}h ${minutes}m`;
+}
+
+function formatDurationDetailed(totalSeconds) {
+    const safe = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const seconds = safe % 60;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
 }
 
 function formatTimeOnly(input) {
@@ -986,6 +1440,11 @@ function formatSignedPercent(value, includeSign = true) {
     return `${sign}${numeric.toFixed(2)}%`;
 }
 
+function formatPercent(value) {
+    if (!Number.isFinite(Number(value))) return '--';
+    return `${Math.round(Number(value) * 100)}%`;
+}
+
 function asNumber(value, fallback = 0) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : fallback;
@@ -1010,4 +1469,29 @@ function capitalize(value) {
 
 function pad2(value) {
     return String(value).padStart(2, '0');
+}
+
+function classifyVolatility(volatilityPct) {
+    if (volatilityPct >= 0.06) return 'High';
+    if (volatilityPct >= 0.04) return 'Medium';
+    return 'Low';
+}
+
+function buildLimitRiskTooltip(level, indexMeta) {
+    if (level === 'low') {
+        return indexMeta?.policyLabel === 'SSE constituent policy band'
+            ? 'Forecast within ±10% SSE limit band -> No capping needed'
+            : 'Forecast within ±10% A-share constituent policy proxy -> No capping needed';
+    }
+    if (level === 'moderate') {
+        return 'Forecast is tradable, but watch the policy boundary if momentum accelerates.';
+    }
+    return 'Forecast is close to the policy boundary and may cap extension.';
+}
+
+function animateTick(element) {
+    if (!element) return;
+    element.classList.remove('tick');
+    void element.offsetWidth;
+    element.classList.add('tick');
 }

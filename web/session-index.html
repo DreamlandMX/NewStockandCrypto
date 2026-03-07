@@ -43,6 +43,20 @@
             margin: 0.35rem 0 0.45rem;
         }
 
+        .status-tag-row,
+        .decision-toolbar,
+        .decision-control-row,
+        .decision-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .status-tag-row {
+            margin-top: 0.7rem;
+        }
+
         .status-subtitle,
         .section-note,
         .panel-note,
@@ -80,6 +94,44 @@
             border-radius: inherit;
             background: linear-gradient(90deg, rgba(34, 197, 94, 0.86), rgba(45, 212, 191, 0.96));
             transition: width 0.35s ease, background 0.35s ease;
+        }
+
+        .status-banner.soon {
+            border-color: rgba(250, 204, 21, 0.28);
+            box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35), 0 0 0 1px rgba(250, 204, 21, 0.12);
+            animation: bannerPulse 1.8s ease-in-out infinite;
+        }
+
+        .status-inline-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.28rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.76rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .status-inline-tag.info {
+            color: #7dd3fc;
+            background: rgba(56, 189, 248, 0.12);
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .status-inline-tag.attention {
+            color: #fde68a;
+            background: rgba(250, 204, 21, 0.12);
+            border-color: rgba(250, 204, 21, 0.35);
+            animation: bannerPulse 1.8s ease-in-out infinite;
+        }
+
+        .status-inline-tag.muted {
+            color: #cbd5e1;
+            background: rgba(148, 163, 184, 0.12);
+            border-color: rgba(148, 163, 184, 0.26);
         }
 
         .status-chip-grid,
@@ -134,7 +186,8 @@
         .metric-main,
         .detail-body strong,
         .decision-row strong,
-        .magnitude-strip strong {
+        .magnitude-strip strong,
+        .trade-log-table strong {
             font-size: 1rem;
             color: var(--text-primary);
         }
@@ -243,6 +296,14 @@
             min-width: 220px;
         }
 
+        .metric-main.tick,
+        .status-chip strong.tick,
+        .confidence-ring-value.tick,
+        .status-progress-head span.tick,
+        .status-inline-tag.tick {
+            animation: tickHop 0.32s ease;
+        }
+
         .decision-grid,
         .magnitude-grid,
         .detail-grid {
@@ -258,7 +319,8 @@
         .decision-row,
         .magnitude-strip,
         .detail-cell,
-        .window-summary {
+        .window-summary,
+        .decision-inline-note {
             padding: 0.85rem 0.95rem;
             border-radius: 14px;
             background: rgba(255, 255, 255, 0.03);
@@ -270,6 +332,82 @@
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.9rem;
+        }
+
+        .decision-toolbar {
+            justify-content: space-between;
+            margin-bottom: 0.85rem;
+        }
+
+        .decision-control-row {
+            justify-content: space-between;
+            margin-bottom: 0.85rem;
+        }
+
+        .decision-control-row label,
+        .decision-meta-row,
+        .decision-inline-note {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .decision-select,
+        .table-filter-select {
+            min-width: 140px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            color: var(--text-primary);
+            border-radius: 10px;
+            padding: 0.55rem 0.8rem;
+        }
+
+        .decision-meta-row {
+            justify-content: space-between;
+            margin: 0.9rem 0 0.75rem;
+        }
+
+        .decision-meta-row strong {
+            font-size: 0.88rem;
+        }
+
+        .execute-wrap {
+            position: relative;
+            width: 100%;
+            margin-top: 0.9rem;
+        }
+
+        .execute-wrap[data-tooltip]:hover::after,
+        .execute-wrap[data-tooltip]:focus-within::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 10px);
+            transform: translateX(-50%);
+            width: min(300px, calc(100vw - 48px));
+            padding: 0.7rem 0.85rem;
+            border-radius: 12px;
+            background: rgba(2, 6, 23, 0.98);
+            border: 1px solid rgba(248, 113, 113, 0.24);
+            color: #fecaca;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            text-align: center;
+            box-shadow: 0 18px 48px rgba(2, 6, 23, 0.42);
+            z-index: 8;
+        }
+
+        .execute-wrap[data-tooltip=""]::after,
+        .execute-wrap:not(.is-disabled)::after {
+            display: none;
+        }
+
+        .execute-btn {
+            width: 100%;
+        }
+
+        .execute-btn[disabled] {
+            opacity: 0.58;
+            cursor: not-allowed;
         }
 
         .signal-pill {
@@ -361,6 +499,10 @@
             background: rgba(239, 68, 68, 0.10);
         }
 
+        .limit-adjusted[title] {
+            cursor: help;
+        }
+
         .table-shell {
             overflow: hidden;
         }
@@ -388,12 +530,22 @@
         .row-pill {
             display: inline-flex;
             align-items: center;
+            gap: 0.35rem;
             padding: 0.18rem 0.6rem;
             border-radius: 999px;
             font-size: 0.74rem;
             font-weight: 700;
             letter-spacing: 0.04em;
             border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .row-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            flex: 0 0 auto;
+            background: currentColor;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.05);
         }
 
         .row-pill.low {
@@ -427,6 +579,63 @@
             border-top: 1px solid rgba(255, 255, 255, 0.08);
         }
 
+        .trade-log-shell {
+            margin-top: 1.5rem;
+        }
+
+        .trade-log-table td {
+            vertical-align: middle;
+        }
+
+        .trade-log-empty {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 1.2rem;
+        }
+
+        .mock-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(2, 6, 23, 0.78);
+            padding: 1.2rem;
+            z-index: 120;
+        }
+
+        .mock-modal.open {
+            display: flex;
+        }
+
+        .mock-modal-card {
+            width: min(560px, 100%);
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(10, 14, 28, 0.98));
+            box-shadow: 0 30px 90px rgba(2, 6, 23, 0.5);
+            padding: 1.3rem;
+        }
+
+        .mock-modal-title {
+            font-size: 1.08rem;
+            font-weight: 700;
+            margin-bottom: 0.8rem;
+        }
+
+        .mock-modal-body {
+            color: var(--text-secondary);
+            line-height: 1.65;
+        }
+
+        .mock-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.7rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
         .activity-live {
             background: linear-gradient(90deg, rgba(34, 197, 94, 0.22), rgba(16, 185, 129, 0.22));
         }
@@ -437,6 +646,47 @@
 
         .activity-closed {
             background: rgba(148, 163, 184, 0.14);
+        }
+
+        .status-badge.success {
+            color: #86efac;
+            background: rgba(34, 197, 94, 0.14);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-badge.warning {
+            color: #fde68a;
+            background: rgba(250, 204, 21, 0.14);
+            border: 1px solid rgba(250, 204, 21, 0.32);
+        }
+
+        .status-badge.danger {
+            color: #fca5a5;
+            background: rgba(127, 29, 29, 0.42);
+            border: 1px solid rgba(248, 113, 113, 0.32);
+        }
+
+        .status-badge.muted {
+            color: #cbd5e1;
+            background: rgba(148, 163, 184, 0.12);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+
+        .status-badge.info {
+            color: #7dd3fc;
+            background: rgba(56, 189, 248, 0.14);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        @keyframes tickHop {
+            0% { transform: translateY(0); opacity: 1; }
+            45% { transform: translateY(-4px); opacity: 0.92; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes bannerPulse {
+            0%, 100% { box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35), 0 0 0 1px rgba(250, 204, 21, 0.10); }
+            50% { box-shadow: 0 22px 72px rgba(2, 6, 23, 0.5), 0 0 0 1px rgba(250, 204, 21, 0.22), 0 0 28px rgba(250, 204, 21, 0.12); }
         }
 
         @media (max-width: 980px) {
@@ -463,6 +713,14 @@
             .magnitude-grid,
             .detail-body {
                 grid-template-columns: 1fr;
+            }
+
+            .decision-toolbar,
+            .decision-control-row,
+            .decision-meta-row,
+            .table-controls {
+                align-items: flex-start;
+                flex-direction: column;
             }
         }
     </style>
@@ -524,12 +782,16 @@
                 <p class="section-note">Track the session structure for SSE Composite and CSI 300 with A-share specific timing, T+1, and policy-band context.</p>
             </div>
 
-            <section class="status-banner">
+            <section class="status-banner" id="statusBanner">
                 <div class="status-banner-head">
                     <div>
                         <span class="section-tag">Current Status Banner</span>
                         <h2 class="status-title" id="statusBannerTitle">Current: Loading session status...</h2>
                         <p class="status-subtitle" id="statusBannerSubtitle">Preparing A-share timing, session state, and next tradable window.</p>
+                        <div class="status-tag-row">
+                            <span class="status-inline-tag info" id="nextTradingWindowTag">Next Trading Window: --</span>
+                            <span class="status-inline-tag muted" id="statusSoonNotice" hidden>--</span>
+                        </div>
                     </div>
                     <div class="status-inline">
                         <span class="status-badge info" id="marketStatusBadge">Loading</span>
@@ -624,11 +886,21 @@
                     </div>
                 </div>
 
-                <div class="metric-card-strong">
+                <div class="metric-card-strong" id="quickDecisionCard">
                     <div class="metric-label-strong">Quick Decision</div>
-                    <div class="decision-action">
-                        <span class="signal-pill flat" id="quickDecisionPill">NO-GO</span>
-                        <span class="status-badge info" id="quickDecisionMode">Simulated Only</span>
+                    <div class="decision-toolbar">
+                        <div class="decision-action" style="margin-bottom: 0;">
+                            <span class="signal-pill flat" id="quickDecisionPill">NO-GO</span>
+                            <span class="status-badge info" id="quickDecisionMode">Simulated Only</span>
+                        </div>
+                        <div class="decision-control-row" style="margin-bottom: 0;">
+                            <label for="leverageSelector">Leverage / Position Size (Mock)</label>
+                            <select id="leverageSelector" class="decision-select">
+                                <option value="1">1x</option>
+                                <option value="5">5x</option>
+                                <option value="10">10x</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="decision-grid">
                         <div class="decision-row"><span class="label-text" id="quickEntryLabel">Entry</span><strong id="quickEntry">--</strong></div>
@@ -637,6 +909,14 @@
                         <div class="decision-row"><span class="label-text" id="quickNetEdgeLabel">Net Edge</span><strong id="quickNetEdge">--</strong></div>
                     </div>
                     <p class="decision-note" id="quickDecisionNote">Waiting for session policy.</p>
+                    <div class="decision-meta-row">
+                        <span id="quickExposureText">Mock exposure: 1x</span>
+                        <strong id="quickTPlusOneNote">LONG initiated today -> Exit only tomorrow or later</strong>
+                    </div>
+                    <div class="execute-wrap" id="executeBtnWrap" data-tooltip="">
+                        <button class="btn btn-primary execute-btn" id="executeBtn" type="button">Execute (Mock)</button>
+                    </div>
+                    <p class="decision-note" id="executeHint">Select mock exposure to preview SL / TP / Net Edge.</p>
                 </div>
             </div>
 
@@ -722,6 +1002,13 @@
                         <div class="table-title">Session-by-Session Forecast</div>
                         <p class="table-inline-note">Hover a row to inspect the reasoning, limit risk, and suggested wait state.</p>
                     </div>
+                    <div class="table-controls">
+                        <select id="tableSessionFilter" class="table-filter-select" aria-label="Filter by session">
+                            <option value="all">All Sessions</option>
+                            <option value="morning">Morning</option>
+                            <option value="afternoon">Afternoon</option>
+                        </select>
+                    </div>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -755,8 +1042,8 @@
                             <strong id="hoveredExplanation">Move across the session table to inspect the rationale.</strong>
                         </div>
                         <div class="detail-cell">
-                            <span class="label-text">Execution Hint</span>
-                            <strong id="hoveredExecutionHint">NO-GO stays highlighted until confidence clears the execution gate.</strong>
+                            <span class="label-text">Suggested Action</span>
+                            <strong id="hoveredSuggestedAction">LONG if P(UP) >= 55% after open | Confidence boost expected.</strong>
                         </div>
                         <div class="detail-cell">
                             <span class="label-text">Window Bias</span>
@@ -766,12 +1053,42 @@
                             <span class="label-text">Limit / T+1</span>
                             <strong id="hoveredLimitText">--</strong>
                         </div>
+                        <div class="detail-cell">
+                            <span class="label-text">Execution State</span>
+                            <strong id="hoveredExecutionState">Waiting for the current A-share window.</strong>
+                        </div>
                     </div>
                 </div>
                 <div class="footnote-bar">
                     <div class="footnote-item" id="dataDelayNote">Data Source: EastMoney | Delay: ~10s</div>
-                    <div class="footnote-item" id="mockDisclaimer">Mock Mode | Simulated for A-Share Index Sessions | Not Trading Advice</div>
+                    <div class="footnote-item" id="mockDisclaimer">Mock Mode | Simulated for SSE Composite &amp; CSI 300 | Data: EastMoney Level-1 | Educational Use Only</div>
                 </div>
+            </div>
+
+            <div class="table-shell trade-log-shell" id="tradeLogPanel">
+                <div class="table-head-row">
+                    <div>
+                        <div class="table-title">Session Trade Log (Mock)</div>
+                        <p class="table-inline-note">Local mock executions only. T+1 note is stored with each simulated A-share trade.</p>
+                    </div>
+                </div>
+                <table class="data-table trade-log-table">
+                    <thead>
+                        <tr>
+                            <th>Time (BJT)</th>
+                            <th>Index</th>
+                            <th>Action</th>
+                            <th>Mock Exposure</th>
+                            <th>Entry</th>
+                            <th>SL / TP</th>
+                            <th>Net Edge</th>
+                            <th>T+1 Note</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradeLogBody">
+                        <tr><td class="trade-log-empty" colspan="8">No mock trades yet.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </main>
@@ -779,10 +1096,21 @@
     <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 2rem 0; margin-top: 4rem;">
         <div class="container">
             <div style="text-align: center;">
-                <p style="color: var(--text-muted); font-size: 0.875rem;">&copy; 2026 StockandCrypto. Mock Mode | Simulated for A-Share Index Sessions | Not Trading Advice.</p>
+                <p style="color: var(--text-muted); font-size: 0.875rem;">&copy; 2026 StockandCrypto. Mock Mode | Simulated for SSE Composite &amp; CSI 300 | Data: EastMoney Level-1 | Educational Use Only.</p>
             </div>
         </div>
     </footer>
+
+    <div id="executeModal" class="mock-modal" aria-hidden="true">
+        <div class="mock-modal-card" role="dialog" aria-modal="true" aria-labelledby="executeModalTitle">
+            <div id="executeModalTitle" class="mock-modal-title">Mock Execution Confirmation</div>
+            <div id="executeModalBody" class="mock-modal-body">Preparing simulated execution...</div>
+            <div class="mock-modal-actions">
+                <button type="button" id="executeViewTradeLog" class="btn btn-primary btn-sm">View in Trade Log</button>
+                <button type="button" id="executeModalClose" class="btn btn-secondary btn-sm">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/nav.js"></script>
     <script src="js/utils.js"></script>

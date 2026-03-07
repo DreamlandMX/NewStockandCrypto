@@ -240,16 +240,45 @@ const api = {
         return this.get(`/session/index?index=${index}`);
     },
 
-    // ==================== Tracking ====================
-    
-    // Get universe ranking
-    async getUniverseRanking(market = 'all') {
-        return this.get(`/tracking/universe?market=${market}`);
+    // ==================== Home ====================
+
+    async getHomeLanding() {
+        return this.get('/home/landing');
     },
 
-    // Get factor scores
-    async getFactorScores(symbol) {
-        return this.get(`/tracking/factors?symbol=${symbol}`);
+    // ==================== Tracking ====================
+    
+    async getTrackingSummary() {
+        return this.get('/tracking/summary');
+    },
+
+    async getTrackingUniverse(params = {}) {
+        return this.get(`/tracking/universe${buildQueryString(params)}`);
+    },
+
+    async getTrackingFactors(params = {}) {
+        return this.get(`/tracking/factors${buildQueryString(params)}`);
+    },
+
+    async getTrackingCoverage() {
+        return this.get('/tracking/coverage');
+    },
+
+    async getTrackingActions(params = {}) {
+        return this.get(`/tracking/actions${buildQueryString(params)}`);
+    },
+
+    async simulateTrackingPortfolio(payload) {
+        return this.post('/tracking/simulate', payload);
+    },
+
+    // Compatibility aliases
+    async getUniverseRanking(market = 'all') {
+        return this.getTrackingUniverse({ market });
+    },
+
+    async getFactorScores(symbol, market = '') {
+        return this.getTrackingFactors({ symbol, market });
     },
 
     // ==================== Execution ====================

@@ -43,6 +43,47 @@
             margin: 0.35rem 0 0.45rem;
         }
 
+        .status-tag-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            margin-top: 0.35rem;
+        }
+
+        .status-inline-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .status-inline-tag.info {
+            color: #7dd3fc;
+            background: rgba(56, 189, 248, 0.14);
+            border-color: rgba(56, 189, 248, 0.28);
+        }
+
+        .status-inline-tag.warning {
+            color: #fdba74;
+            background: rgba(251, 146, 60, 0.16);
+            border-color: rgba(251, 146, 60, 0.32);
+        }
+
+        .status-inline-tag.muted {
+            color: #cbd5e1;
+            background: rgba(148, 163, 184, 0.14);
+            border-color: rgba(148, 163, 184, 0.26);
+        }
+
+        .status-inline-tag[hidden] {
+            display: none !important;
+        }
+
         .status-subtitle,
         .section-note,
         .panel-note,
@@ -67,6 +108,7 @@
         }
 
         .status-progress-track {
+            position: relative;
             width: 100%;
             height: 12px;
             border-radius: 999px;
@@ -75,11 +117,44 @@
         }
 
         .status-progress-fill {
+            position: relative;
             width: 0%;
             height: 100%;
             border-radius: inherit;
             background: linear-gradient(90deg, rgba(34, 197, 94, 0.86), rgba(45, 212, 191, 0.96));
-            transition: width 0.35s ease, background 0.35s ease;
+            background-size: 200% 100%;
+            animation: progressShift 2.8s linear infinite;
+            transition: width 0.95s linear, background 0.35s ease, box-shadow 0.35s ease;
+        }
+
+        .status-progress-fill::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+            opacity: 0.45;
+            transform: translateX(-100%);
+            animation: progressSheen 2.2s ease-in-out infinite;
+        }
+
+        .status-banner.is-open-soon,
+        .status-banner.is-close-soon {
+            animation: bannerPulse 1.4s ease-in-out infinite;
+        }
+
+        .status-progress-fill.is-open-soon,
+        .status-progress-fill.is-close-soon {
+            box-shadow: 0 0 24px rgba(251, 146, 60, 0.42);
+        }
+
+        .countdown-live {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .countdown-live.is-ticking {
+            animation: tickPulse 0.4s ease;
         }
 
         .status-chip-grid,
@@ -128,6 +203,26 @@
             color: var(--text-secondary);
             font-size: 0.82rem;
             margin-bottom: 0.35rem;
+        }
+
+        .status-chip-label,
+        .status-tag-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .status-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.15rem;
+            height: 1.15rem;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.16);
+            color: #e2e8f0;
+            font-size: 0.76rem;
+            line-height: 1;
         }
 
         .status-chip strong,
@@ -270,6 +365,133 @@
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 0.9rem;
+            flex-wrap: wrap;
+        }
+
+        .decision-control-row,
+        .decision-meta-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.9rem;
+        }
+
+        .decision-control-row label {
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+        }
+
+        .decision-select,
+        .table-filter-select {
+            min-width: 170px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            border-radius: 12px;
+            padding: 0.75rem 0.95rem;
+        }
+
+        .decision-meta-row {
+            align-items: flex-start;
+            margin-top: 0.85rem;
+        }
+
+        .decision-meta-row strong {
+            font-size: 0.92rem;
+        }
+
+        .execute-wrap {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .execute-wrap.is-disabled .execute-btn {
+            opacity: 0.58;
+            cursor: not-allowed;
+            background: rgba(148, 163, 184, 0.14) !important;
+            color: #94a3b8 !important;
+            border: 1px solid rgba(148, 163, 184, 0.26) !important;
+            box-shadow: none !important;
+        }
+
+        .execute-btn:disabled {
+            background: rgba(148, 163, 184, 0.14) !important;
+            color: #94a3b8 !important;
+            border: 1px solid rgba(148, 163, 184, 0.26) !important;
+            box-shadow: none !important;
+        }
+
+        .execute-wrap[data-tooltip]:hover::after,
+        .execute-wrap[data-tooltip]:focus-within::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 10px);
+            transform: translateX(-50%);
+            width: min(320px, 80vw);
+            padding: 0.7rem 0.8rem;
+            border-radius: 12px;
+            background: rgba(8, 17, 32, 0.96);
+            border: 1px solid rgba(251, 146, 60, 0.26);
+            color: var(--text-primary);
+            font-size: 0.78rem;
+            line-height: 1.45;
+            z-index: 10;
+            box-shadow: 0 20px 50px rgba(2, 6, 23, 0.35);
+        }
+
+        .execute-wrap[data-tooltip=""]::after,
+        .execute-wrap:not(.is-disabled)::after {
+            display: none;
+        }
+
+        .gap-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.28rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.08);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .gap-badge.low {
+            color: #66f1b8;
+            background: rgba(34, 197, 94, 0.14);
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+
+        .gap-badge.moderate {
+            color: #fde68a;
+            background: rgba(250, 204, 21, 0.15);
+            border-color: rgba(250, 204, 21, 0.28);
+        }
+
+        .gap-badge.high {
+            color: #fdba74;
+            background: linear-gradient(90deg, rgba(251, 146, 60, 0.2), rgba(248, 113, 113, 0.18));
+            border-color: rgba(251, 146, 60, 0.34);
+            box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.12), 0 12px 28px rgba(249, 115, 22, 0.12);
+        }
+
+        .gap-badge.high::before {
+            content: '!';
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 999px;
+            background: rgba(251, 146, 60, 0.24);
+            border: 1px solid rgba(251, 146, 60, 0.32);
+            color: #fed7aa;
+            font-size: 0.72rem;
+            font-weight: 800;
         }
 
         .signal-pill {
@@ -303,6 +525,12 @@
             color: #fb7185;
             background: rgba(244, 63, 94, 0.14);
             border-color: rgba(244, 63, 94, 0.35);
+        }
+
+        .status-badge.muted {
+            color: #cbd5e1;
+            background: rgba(148, 163, 184, 0.14);
+            border-color: rgba(148, 163, 184, 0.26);
         }
 
         .window-bars {
@@ -341,6 +569,28 @@
         .spark-wrap {
             height: 260px;
             margin-top: 1rem;
+        }
+
+        .magnitude-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.35rem;
+        }
+
+        .overlay-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            user-select: none;
+        }
+
+        .overlay-toggle input {
+            accent-color: #fb923c;
         }
 
         .magnitude-grid {
@@ -388,12 +638,21 @@
         .row-pill {
             display: inline-flex;
             align-items: center;
+            gap: 0.4rem;
             padding: 0.18rem 0.6rem;
             border-radius: 999px;
             font-size: 0.74rem;
             font-weight: 700;
             letter-spacing: 0.04em;
             border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .row-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: currentColor;
+            box-shadow: 0 0 14px currentColor;
         }
 
         .row-pill.low {
@@ -407,8 +666,8 @@
         }
 
         .row-pill.high {
-            color: #fb7185;
-            background: rgba(244, 63, 94, 0.14);
+            color: #fdba74;
+            background: linear-gradient(90deg, rgba(251, 146, 60, 0.18), rgba(249, 115, 22, 0.12));
         }
 
         .detail-panel {
@@ -432,6 +691,72 @@
             border-top: 1px solid rgba(255, 255, 255, 0.08);
         }
 
+        .trade-log-shell {
+            margin-top: 1.5rem;
+        }
+
+        .trade-log-table td {
+            vertical-align: middle;
+        }
+
+        .trade-log-empty {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 1.2rem;
+        }
+
+        .mock-modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.2rem;
+            background: rgba(2, 6, 23, 0.66);
+            backdrop-filter: blur(14px);
+            z-index: 1000;
+        }
+
+        .mock-modal.open {
+            display: flex;
+        }
+
+        .mock-modal-card {
+            width: min(560px, 100%);
+            padding: 1.2rem;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+                radial-gradient(circle at top right, rgba(34, 211, 238, 0.12), transparent 36%),
+                linear-gradient(180deg, rgba(8, 17, 32, 0.98), rgba(9, 12, 24, 0.98));
+            box-shadow: 0 20px 70px rgba(2, 6, 23, 0.45);
+        }
+
+        .mock-modal-title {
+            font-size: 1.08rem;
+            font-weight: 700;
+            margin-bottom: 0.8rem;
+        }
+
+        .mock-modal-body {
+            color: var(--text-secondary);
+            line-height: 1.65;
+        }
+
+        .mock-modal-meta {
+            margin-top: 0.75rem;
+            color: #cbd5e1;
+            font-size: 0.85rem;
+        }
+
+        .mock-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.7rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
         .activity-live {
             background: linear-gradient(90deg, rgba(34, 197, 94, 0.22), rgba(16, 185, 129, 0.22));
         }
@@ -442,6 +767,28 @@
 
         .activity-closed {
             background: rgba(148, 163, 184, 0.14);
+        }
+
+        @keyframes tickPulse {
+            0% { transform: translateY(0) scale(1); opacity: 0.72; }
+            50% { transform: translateY(-1px) scale(1.02); opacity: 1; }
+            100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+
+        @keyframes progressShift {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+        }
+
+        @keyframes progressSheen {
+            0% { transform: translateX(-110%); opacity: 0; }
+            20% { opacity: 0.35; }
+            100% { transform: translateX(140%); opacity: 0; }
+        }
+
+        @keyframes bannerPulse {
+            0%, 100% { box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35); }
+            50% { box-shadow: 0 26px 82px rgba(251, 146, 60, 0.28); }
         }
 
         @media (max-width: 980px) {
@@ -468,6 +815,12 @@
             .magnitude-grid,
             .detail-body {
                 grid-template-columns: 1fr;
+            }
+
+            .decision-control-row,
+            .decision-meta-row {
+                flex-direction: column;
+                align-items: stretch;
             }
         }
     </style>
@@ -529,12 +882,16 @@
                 <p class="section-note">Track Dow Jones, Nasdaq, and S&amp;P 500 during regular US cash hours only. Pre-market and after-hours are treated as closed.</p>
             </div>
 
-            <section class="status-banner">
+            <section class="status-banner" id="statusBanner">
                 <div class="status-banner-head">
                     <div>
                         <span class="section-tag">Current Status Banner</span>
                         <h2 class="status-title" id="statusBannerTitle">Current: Loading session status...</h2>
                         <p class="status-subtitle" id="statusBannerSubtitle">Preparing US regular-hours timing, current state, and the next official open.</p>
+                        <div class="status-tag-row">
+                            <span class="status-inline-tag info" id="nextTradingWindowTag"><span class="status-tag-label"><span class="status-icon" aria-hidden="true">&#128197;</span><span id="nextTradingWindowText">Next Trading Window: --</span></span></span>
+                            <span class="status-inline-tag muted" id="statusSoonNotice" hidden>--</span>
+                        </div>
                     </div>
                     <div class="status-inline">
                         <span class="status-badge info" id="marketStatusBadge">Loading</span>
@@ -554,15 +911,15 @@
 
                 <div class="status-chip-grid">
                     <div class="status-chip">
-                        <span>Current Phase</span>
+                        <span class="status-chip-label">Current Phase</span>
                         <strong id="currentPhaseText">--</strong>
                     </div>
                     <div class="status-chip">
-                        <span>Time Remaining</span>
+                        <span class="status-chip-label"><span class="status-icon" aria-hidden="true">&#128339;</span>Time Remaining</span>
                         <strong id="timeRemainingText">--</strong>
                     </div>
                     <div class="status-chip">
-                        <span>Next Event</span>
+                        <span class="status-chip-label"><span class="status-icon" aria-hidden="true">&#128197;</span>Next Event</span>
                         <strong id="nextOpenText">--</strong>
                     </div>
                     <div class="status-chip">
@@ -625,7 +982,7 @@
                                 <span class="status-badge warning" id="goNoGoBadge">NO-GO</span>
                                 <span class="status-badge info" id="tPlusOneBadge" title="Real-data only">REAL</span>
                             </div>
-                            <div class="metric-meta" id="accuracyBreakdown">Direction: -- | Coverage: -- | Brier Score: --</div>
+                            <div class="metric-meta" id="accuracyBreakdown" title="Direction: -- | Coverage: -- | Brier: --">Direction: -- | Coverage: -- | Brier: --</div>
                             <p class="panel-note" id="noGoReason">Waiting for a real regular-session snapshot.</p>
                         </div>
                     </div>
@@ -636,6 +993,15 @@
                     <div class="decision-action">
                         <span class="signal-pill flat" id="quickDecisionPill">NO-GO</span>
                         <span class="status-badge info" id="quickDecisionMode">Closed</span>
+                        <span class="gap-badge moderate" id="quickGapRiskBadge">Gap Risk: --</span>
+                    </div>
+                    <div class="decision-control-row">
+                        <label for="leverageSelector">Position Size / Leverage</label>
+                        <select id="leverageSelector" class="decision-select">
+                            <option value="1">1x</option>
+                            <option value="5">5x</option>
+                            <option value="10">10x</option>
+                        </select>
                     </div>
                     <div class="decision-grid">
                         <div class="decision-row"><span class="label-text" id="quickEntryLabel">Entry</span><strong id="quickEntry">--</strong></div>
@@ -644,6 +1010,14 @@
                         <div class="decision-row"><span class="label-text" id="quickNetEdgeLabel">Net Edge</span><strong id="quickNetEdge">--</strong></div>
                     </div>
                     <p class="decision-note" id="quickDecisionNote">Waiting for session policy.</p>
+                    <div class="decision-meta-row">
+                        <span class="decision-note" id="quickExposureText">Mock exposure: 1x</span>
+                        <strong id="quickGapRiskNote">Gap risk context: --</strong>
+                    </div>
+                    <div class="execute-wrap" id="executeBtnWrap" data-tooltip="">
+                        <button class="btn btn-primary execute-btn" id="executeBtn" type="button">Execute (Mock)</button>
+                    </div>
+                    <p class="decision-note" id="executeHint">Select leverage to preview SL / TP / Net Edge.</p>
                 </div>
             </div>
 
@@ -678,7 +1052,13 @@
 
             <div class="secondary-grid">
                 <div class="panel-card" id="magnitudeCard">
-                    <div class="panel-title">Magnitude Forecast</div>
+                    <div class="magnitude-toolbar">
+                        <div class="panel-title" style="margin-bottom: 0;">Magnitude Forecast</div>
+                        <label class="overlay-toggle" for="magnitudeOverlayToggle">
+                            <input type="checkbox" id="magnitudeOverlayToggle">
+                            <span>Show Volatility Overlay</span>
+                        </label>
+                    </div>
                     <p class="panel-note">q10 / q50 / q90 for regular-session returns. No pre-market or after-hours projection is shown here.</p>
                     <div class="magnitude-grid">
                         <div class="magnitude-strip"><span class="label-text">q10</span><strong id="magnitudeQ10">--</strong></div>
@@ -729,6 +1109,13 @@
                         <div class="table-title">Session-by-Session Forecast</div>
                         <p class="table-inline-note">Hover a row to inspect the reasoning, gap risk, and regular-session execution bias.</p>
                     </div>
+                    <div class="table-controls">
+                        <select id="tableSessionFilter" class="table-filter-select" aria-label="Filter by session">
+                            <option value="all">All Sessions</option>
+                            <option value="opening">Opening Drive</option>
+                            <option value="closing">Closing Ramp</option>
+                        </select>
+                    </div>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -762,8 +1149,12 @@
                             <strong id="hoveredExplanation">Move across the session table to inspect the rationale.</strong>
                         </div>
                         <div class="detail-cell">
-                            <span class="label-text">Execution Hint</span>
-                            <strong id="hoveredExecutionHint">Decision packets are only shown from real regular-session data.</strong>
+                            <span class="label-text">Suggested Action</span>
+                            <strong id="hoveredSuggestedAction">Decision packets are only shown from real regular-session data.</strong>
+                        </div>
+                        <div class="detail-cell">
+                            <span class="label-text">Gap Mitigation Hint</span>
+                            <strong id="hoveredGapHint">Wait for the first 15 minutes if the opening gap expands beyond normal range.</strong>
                         </div>
                         <div class="detail-cell">
                             <span class="label-text">Window Bias</span>
@@ -773,12 +1164,42 @@
                             <span class="label-text">Gap / Liquidity</span>
                             <strong id="hoveredLimitText">--</strong>
                         </div>
+                        <div class="detail-cell">
+                            <span class="label-text">Execution State</span>
+                            <strong id="hoveredExecutionState">--</strong>
+                        </div>
                     </div>
                 </div>
                 <div class="footnote-bar">
                     <div class="footnote-item" id="dataDelayNote">Data Source: US Level-1 quote feed | Delay depends on venue</div>
-                    <div class="footnote-item" id="mockDisclaimer">Regular Session Only | Last real snapshot only | Not Trading Advice</div>
+                    <div class="footnote-item" id="mockDisclaimer">Regular Session Only | US Level-1 Quotes | Simulated Data | Educational Use Only | Not Trading Advice</div>
                 </div>
+            </div>
+
+            <div class="table-shell trade-log-shell" id="tradeLogPanel">
+                <div class="table-head-row">
+                    <div>
+                        <div class="table-title">Session Trade Log (Mock)</div>
+                        <p class="table-inline-note">Local mock executions only. Uses the active leverage preview and regular-session risk packet.</p>
+                    </div>
+                </div>
+                <table class="data-table trade-log-table">
+                    <thead>
+                        <tr>
+                            <th>Time (ET)</th>
+                            <th>Index</th>
+                            <th>Action</th>
+                            <th>Leverage</th>
+                            <th>Entry</th>
+                            <th>SL / TP</th>
+                            <th>Net Edge</th>
+                            <th>Gap Risk</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradeLogBody">
+                        <tr><td class="trade-log-empty" colspan="8">No mock trades yet.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </main>
@@ -786,10 +1207,22 @@
     <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 2rem 0; margin-top: 4rem;">
         <div class="container">
             <div style="text-align: center;">
-                <p style="color: var(--text-muted); font-size: 0.875rem;">&copy; 2026 StockandCrypto. Regular Session Only | Last real snapshot only | Not Trading Advice.</p>
+                <p style="color: var(--text-muted); font-size: 0.875rem;">&copy; 2026 StockandCrypto. Regular Session Only | US Level-1 Quotes | Simulated Data | Educational Use Only | Not Trading Advice.</p>
             </div>
         </div>
     </footer>
+
+    <div id="executeModal" class="mock-modal" aria-hidden="true">
+        <div class="mock-modal-card" role="dialog" aria-modal="true" aria-labelledby="executeModalTitle">
+            <div id="executeModalTitle" class="mock-modal-title">Mock Execution Confirmation</div>
+            <div id="executeModalBody" class="mock-modal-body">Preparing simulated execution...</div>
+            <div id="executeModalMeta" class="mock-modal-meta">Added to Session Trade Log</div>
+            <div class="mock-modal-actions">
+                <button type="button" id="executeViewTradeLog" class="btn btn-primary btn-sm">View Log</button>
+                <button type="button" id="executeModalClose" class="btn btn-secondary btn-sm">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/nav.js"></script>
     <script src="js/utils.js"></script>

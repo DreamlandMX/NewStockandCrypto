@@ -1,20 +1,203 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StockandCrypto - AI Quantitative Trading Platform</title>
-    <meta name="description" content="Advanced multi-market forecasting system with LSTM+Attention models">
+    <title>StockandCrypto - Live Quantitative Trading Platform</title>
+    <meta name="description" content="Live multi-market forecasting and tracking for crypto, CN A-shares, and US equities.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .home-hero-status {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .home-hero-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1.5rem;
+        }
+        .home-hero-metric {
+            padding: 1.25rem 0;
+        }
+        .home-hero-metric-value {
+            font-size: 3.2rem;
+            font-weight: 800;
+            font-family: var(--font-mono);
+            line-height: 1;
+            color: var(--text-primary);
+        }
+        .home-hero-metric-value.gradient {
+            background: var(--gradient-accent);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .home-hero-metric-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 0.75rem;
+        }
+        .home-hero-metric-meta {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.35rem;
+            font-family: var(--font-mono);
+        }
+        .home-overview-layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 2rem;
+        }
+        .home-overview-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .home-overview-card {
+            text-align: left;
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+            min-height: 215px;
+            background: rgba(8, 12, 29, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .home-overview-card:hover,
+        .home-overview-card.is-selected {
+            transform: translateY(-2px);
+            border-color: rgba(0, 229, 255, 0.45);
+            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+        }
+        .home-overview-card.is-selected {
+            background: linear-gradient(135deg, rgba(0, 229, 255, 0.16) 0%, rgba(16, 185, 129, 0.08) 100%);
+        }
+        .home-overview-card.is-stale {
+            border-color: rgba(255, 204, 0, 0.32);
+        }
+        .home-overview-card.is-unavailable {
+            opacity: 0.72;
+        }
+        .home-overview-card.is-loading {
+            opacity: 0.7;
+        }
+        .home-card-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+        }
+        .home-card-subcopy {
+            margin-top: 0.45rem;
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            font-family: var(--font-mono);
+        }
+        .home-card-price {
+            min-height: 2.5rem;
+        }
+        .home-card-footer {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: flex-end;
+            margin-top: 1rem;
+        }
+        .home-card-signal {
+            text-align: right;
+        }
+        .home-card-pup {
+            font-size: 0.78rem;
+            color: var(--success);
+        }
+        .home-card-conf {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+        .home-feature-panel .card-body {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .home-feature-meta {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+        }
+        .home-factor-row {
+            margin-bottom: 1rem;
+        }
+        .home-factor-row:last-child {
+            margin-bottom: 0;
+        }
+        .home-factor-labels {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.4rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        .home-factor-meta {
+            margin-top: 0.4rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+        .home-factor-positive {
+            color: var(--success);
+            font-weight: 700;
+        }
+        .home-factor-neutral {
+            color: var(--primary-accent);
+            font-weight: 700;
+        }
+        .home-factor-negative {
+            color: var(--warning);
+            font-weight: 700;
+        }
+        .home-bar-momentum { background: var(--success); }
+        .home-bar-edge { background: var(--primary-accent); }
+        .home-bar-liquidity { background: var(--warning); }
+        .home-bar-volatility { background: var(--info); }
+        .home-bar-coverage { background: linear-gradient(90deg, rgba(0,229,255,0.95), rgba(16,185,129,0.95)); }
+        .home-explanation-box {
+            background: rgba(0, 229, 255, 0.05);
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            border-left: 3px solid var(--primary-accent);
+        }
+        .home-explanation-box .label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 0.45rem;
+        }
+        .home-panel-empty {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            padding: 1rem 0;
+        }
+        @media (max-width: 1100px) {
+            .home-overview-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 900px) {
+            .home-hero-metrics,
+            .home-overview-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
-    <!-- Header -->
-        <header class="header">
+    <header class="header">
         <div class="header-container">
             <div class="logo">
                 <a href="index.html">
@@ -63,82 +246,57 @@
         </div>
     </header>
 
-    <!-- Hero Section -->
     <section style="padding: 160px 0 80px; position: relative; z-index: 1;">
         <div class="container">
-            <div style="max-width: 800px;">
+            <div style="max-width: 880px;">
                 <div style="margin-bottom: 1rem;">
-                    <span class="status-badge model-tag">Model v3.2 • PyTorch • LSTM+Attention</span>
+                    <span class="status-badge model-tag">LIVE MULTI-MARKET FEED</span>
                 </div>
                 <h1 style="font-size: 4rem; margin-bottom: 1.5rem; line-height: 1.1;">
-                    AI-Powered<br/>
+                    AI-Powered<br>
                     <span style="color: var(--primary-accent);">Quantitative Trading</span>
                 </h1>
-                <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem; max-width: 600px;">
-                    Multi-market forecasting with drift detection, confidence intervals, and explainable AI for crypto, CN A-shares, and US equities.
+                <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem; max-width: 640px;">
+                    Live cross-market tracking with actionable signals, factor explanations, and real-time market snapshots for crypto, CN A-shares, and US equities.
                 </p>
-                <div style="display: flex; gap: 1rem; margin-bottom: 3rem;">
-                    <a href="model-explorer.html" class="btn btn-primary btn-lg">
-                        Explore AI Models
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M5 12h14M12 5l7 7-7 7"/>
-                        </svg>
-                    </a>
+                <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                    <a href="model-explorer.html" class="btn btn-primary btn-lg">Explore AI Models</a>
                     <a href="backtest-lab.html" class="btn btn-secondary btn-lg">Backtest Lab</a>
                 </div>
-
-                <!-- Hero Metrics -->
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem;">
-                    <div>
-                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); background: var(--gradient-accent); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1;">
-                            98.5%
-                        </div>
-                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            <span style="color: var(--text-primary); font-weight: 600;">Direction Accuracy</span>
-                            <span class="mono" style="color: var(--success);"> (±1.2%)</span>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
-                            Sharpe: 2.34 | Win Rate: 54.2%
-                        </div>
+                <div class="home-hero-status">
+                    <span class="status-badge success" id="homeStatusBadge">LIVE</span>
+                    <span class="status-badge info" id="homeRefreshBadge">Refresh 10s</span>
+                    <span class="status-badge info" id="homeUpdatedBadge">Updated --</span>
+                    <span class="status-badge info" id="homeActionBadge">Latest Action --</span>
+                </div>
+                <div class="home-hero-metrics">
+                    <div class="home-hero-metric">
+                        <div class="home-hero-metric-value gradient" id="heroCoverageValue">--</div>
+                        <div class="home-hero-metric-label">Live Coverage</div>
+                        <div class="home-hero-metric-meta" id="heroCoverageMeta">Loading live coverage...</div>
                     </div>
-                    <div>
-                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-primary); line-height: 1;">
-                            1,033
-                        </div>
-                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            <span style="color: var(--text-primary); font-weight: 600;">Assets Covered</span>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
-                            Crypto • CN A-Share • US Equity
-                        </div>
+                    <div class="home-hero-metric">
+                        <div class="home-hero-metric-value" id="heroAssetsValue">--</div>
+                        <div class="home-hero-metric-label">Assets Covered</div>
+                        <div class="home-hero-metric-meta" id="heroAssetsMeta">Loading asset counts...</div>
                     </div>
-                    <div>
-                        <div style="font-size: 3.5rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-primary); line-height: 1;">
-                            81%
-                        </div>
-                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-                            <span style="color: var(--text-primary); font-weight: 600;">Interval Coverage</span>
-                            <span class="mono" style="color: var(--success);"> (q10-q90)</span>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;" class="mono">
-                            Target: 80% | Width: 3.2%
-                        </div>
+                    <div class="home-hero-metric">
+                        <div class="home-hero-metric-value" id="heroSignalsValue">--</div>
+                        <div class="home-hero-metric-label">Actionable Signals</div>
+                        <div class="home-hero-metric-meta" id="heroSignalsMeta">Loading live opportunity counts...</div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Features Grid -->
     <section style="padding: 80px 0; position: relative; z-index: 1;">
         <div class="container">
             <div style="margin-bottom: 3rem;">
                 <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Core Features</h2>
                 <p style="color: var(--text-muted);">Production-grade ML pipeline with real-time monitoring</p>
             </div>
-            
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-                <!-- Feature 1 -->
                 <div class="card">
                     <div class="card-body">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
@@ -146,7 +304,7 @@
                             <span class="status-badge model-tag">LSTM+Attention</span>
                         </div>
                         <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Direction probability, start-window prediction, and magnitude intervals (q10/q50/q90) across multiple horizons.
+                            Direction probability, start-window prediction, and magnitude intervals across multiple horizons.
                         </p>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                             <span class="status-badge info">Hourly</span>
@@ -155,8 +313,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Feature 2 -->
                 <div class="card">
                     <div class="card-body">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
@@ -164,46 +320,42 @@
                             <span class="status-badge model-tag">PSI Monitor</span>
                         </div>
                         <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Real-time model health monitoring with Population Stability Index and automated retirement triggers.
+                            Live model-health monitoring with stability checks, stale detection, and automatic retirement guards.
                         </p>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge warning">47 Alerts</span>
+                            <span class="status-badge warning">Live Guards</span>
                             <span class="status-badge success">Data Fresh</span>
-                            <span class="status-badge info">Auto-Retrain</span>
+                            <span class="status-badge info">Auto Refresh</span>
                         </div>
                     </div>
                 </div>
-
-                <!-- Feature 3 -->
                 <div class="card">
                     <div class="card-body">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
                             <h3 style="font-size: 1.25rem; font-weight: 700;">Explainable AI</h3>
-                            <span class="status-badge model-tag">SHAP Values</span>
+                            <span class="status-badge model-tag">Live Factors</span>
                         </div>
                         <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Feature importance visualization and prediction explanations for every forecast.
+                            Factor importance, action rationale, and confidence-driven explanations for every live card on the page.
                         </p>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge info">Feature Heatmap</span>
+                            <span class="status-badge info">Feature Panel</span>
                             <span class="status-badge info">Reason Codes</span>
                         </div>
                     </div>
                 </div>
-
-                <!-- Feature 4 -->
                 <div class="card">
                     <div class="card-body">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
                             <h3 style="font-size: 1.25rem; font-weight: 700;">Policy Engine</h3>
-                            <span class="status-badge model-tag">News Gating</span>
+                            <span class="status-badge model-tag">Execution Lens</span>
                         </div>
                         <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Smart position sizing with news sentiment analysis, risk scaling, and execution planning.
+                            Live action ranking for strong buy, buy, hold, and reduce signals across crypto, CN, and US markets.
                         </p>
                         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge success">Dynamic Sizing</span>
-                            <span class="status-badge info">TP/SL Prob</span>
+                            <span class="status-badge success">Dynamic Ranking</span>
+                            <span class="status-badge info">Live Signals</span>
                         </div>
                     </div>
                 </div>
@@ -211,181 +363,27 @@
         </div>
     </section>
 
-    <!-- Market Overview - Heatmap Style -->
     <section style="padding: 80px 0; position: relative; z-index: 1;">
         <div class="container">
             <div style="margin-bottom: 3rem;">
                 <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Market Overview</h2>
-                <p style="color: var(--text-muted);">Real-time predictions across all supported markets</p>
+                <p style="color: var(--text-muted);">Live snapshots for fixed benchmark markets plus CN and US composite leaders.</p>
             </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 400px; gap: 2rem;">
-                <!-- Heatmap Grid -->
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
-                    <!-- Crypto -->
-                    <div class="metric-card" style="background: linear-gradient(135deg, rgba(0, 229, 255, 0.15) 0%, rgba(16, 185, 129, 0.1) 100%);">
-                        <div class="metric-label">BTC/USDT</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">$67,234</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+2.34%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.67</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">98% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">ETH/USDT</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">$3,456</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+3.12%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.65</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">95% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">SOL/USDT</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">$145.2</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change negative mono">-1.45%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--warning);">P(UP): 0.48</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">72% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- CN A-Shares -->
-                    <div class="metric-card">
-                        <div class="metric-label">SSE Composite</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">3,124</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+1.23%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.58</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">88% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">CSI 300</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">3,892</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change negative mono">-0.45%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--warning);">P(UP): 0.47</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">85% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">600519 Moutai</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">¥1,856</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+2.3%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.61</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">91% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- US Equities -->
-                    <div class="metric-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(0, 229, 255, 0.1) 100%);">
-                        <div class="metric-label">S&P 500</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">5,234</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+1.12%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.67</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">96% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">Dow Jones</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">38,654</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+0.85%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.62</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">92% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-label">AAPL</div>
-                        <div class="metric-value mono" style="font-size: 1.5rem;">$178.7</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
-                            <span class="metric-change positive mono">+2.1%</span>
-                            <div style="text-align: right;">
-                                <div class="mono" style="font-size: 0.75rem; color: var(--success);">P(UP): 0.68</div>
-                                <div class="mono" style="font-size: 0.7rem; color: var(--text-muted);">97% Conf</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SHAP Panel -->
-                <div class="card">
+            <div class="home-overview-layout">
+                <div class="home-overview-grid" id="marketOverviewGrid"></div>
+                <div class="card home-feature-panel">
                     <div class="card-header">
-                        <h3 class="card-title">Feature Importance</h3>
-                        <span class="status-badge model-tag">SHAP Values</span>
+                        <div>
+                            <h3 class="card-title" id="featurePanelTitle">Feature Importance</h3>
+                            <div class="home-feature-meta" id="featurePanelMeta">Waiting for live selection...</div>
+                        </div>
+                        <span class="status-badge model-tag" id="featurePanelBadge">Live Factors</span>
                     </div>
                     <div class="card-body">
-                        <div style="margin-bottom: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Momentum (20d)</span>
-                                <span class="mono" style="color: var(--success); font-weight: 600;">+0.342</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 85%; background: var(--success);"></div>
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Volatility Score</span>
-                                <span class="mono" style="color: var(--primary-accent); font-weight: 600;">+0.287</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 72%;"></div>
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary); font-size: 0.85rem;">US Correlation</span>
-                                <span class="mono" style="color: var(--warning); font-weight: 600;">+0.231</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 58%; background: var(--warning);"></div>
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                                <span style="color: var(--text-secondary); font-size: 0.85rem;">Size Factor</span>
-                                <span class="mono" style="color: var(--info); font-weight: 600;">+0.198</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 50%; background: var(--info);"></div>
-                            </div>
-                        </div>
-
-                        <div style="background: rgba(0, 229, 255, 0.05); padding: 1rem; border-radius: var(--radius-md); border-left: 3px solid var(--primary-accent); margin-top: 1.5rem;">
-                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">Model Explanation:</div>
-                            <div style="font-size: 0.9rem; color: var(--text-primary); line-height: 1.6;">
-                                "Strong bullish signal driven by momentum surge (+0.34) and low volatility environment. US market correlation adds +0.23 confidence."
-                            </div>
+                        <div id="featurePanelList"></div>
+                        <div class="home-explanation-box">
+                            <div class="label">Model Explanation</div>
+                            <div style="font-size: 0.9rem; color: var(--text-primary); line-height: 1.6;" id="featurePanelExplanation">Waiting for live explanation...</div>
                         </div>
                     </div>
                 </div>
@@ -393,7 +391,6 @@
         </div>
     </section>
 
-    <!-- Tech Stack Bar -->
     <div class="tech-stack-bar" style="position: relative; z-index: 1;">
         <div class="container">
             <div class="tech-stack-items">
@@ -409,16 +406,15 @@
         </div>
     </div>
 
-    <!-- Footer -->
     <footer style="background: rgba(5, 10, 26, 0.5); border-top: 1px solid var(--border-default); padding: 2rem 0; position: relative; z-index: 1;">
         <div class="container">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
                 <div class="logo">
-                    <span class="logo-icon">◈</span>
+                    <span class="logo-icon">&#9671;</span>
                     <span class="logo-text">StockandCrypto</span>
                 </div>
-                <p style="color: var(--text-muted); font-size: 0.85rem;" class="mono">
-                    © 2026 StockandCrypto. AI-powered quantitative trading platform.
+                <p style="color: var(--text-muted); font-size: 0.85rem;" class="mono" id="homeFooterCopy">
+                    LIVE SNAPSHOT | Auto-refresh 10s | Not Investment Advice
                 </p>
             </div>
         </div>
@@ -427,8 +423,6 @@
     <script src="js/nav.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/api.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/home.js"></script>
 </body>
 </html>
-
-

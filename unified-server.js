@@ -22,6 +22,7 @@ const CN_INDEX_HISTORY_DEFAULT_INTERVAL = '1m';
 const CN_INDEX_HISTORY_INTERVAL_ALLOW = new Set(['1m', '5m']);
 const CN_INDEX_HISTORY_SESSION_ALLOW = new Set(['auto', 'today', 'last']);
 const EASTMONEY_KLINE_BASE = 'https://push2his.eastmoney.com/api/qt/stock/kline/get';
+const SINA_CN_QUOTES_BASE = 'https://hq.sinajs.cn/list=';
 const US_CACHE_TTL_MS = Number(process.env.US_CACHE_TTL_MS || 9000);
 const US_POLL_INTERVAL_SEC = Number(process.env.US_POLL_INTERVAL_SEC || 10);
 const US_INDEX_FAST_CACHE_TTL_MS = Number(process.env.US_INDEX_FAST_CACHE_TTL_MS || 5000);
@@ -94,6 +95,45 @@ const US_INDEX_HISTORY_SYMBOLS = {
     sp500: '^GSPC'
 };
 const US_INDEX_HISTORY_MODE_ALLOW = new Set(['regular_sessions']);
+const TRACKING_REFRESH_INTERVAL_SEC = Number(process.env.TRACKING_REFRESH_INTERVAL_SEC || 10);
+const TRACKING_CACHE_TTL_MS = Number(process.env.TRACKING_CACHE_TTL_MS || 5000);
+const TRACKING_CRYPTO_CACHE_TTL_MS = Number(process.env.TRACKING_CRYPTO_CACHE_TTL_MS || 15000);
+const HOME_LANDING_CACHE_TTL_MS = Number(process.env.HOME_LANDING_CACHE_TTL_MS || 5000);
+const TRACKING_DEFAULT_PAGE_SIZE = Number(process.env.TRACKING_DEFAULT_PAGE_SIZE || 20);
+const TRACKING_ACTION_LOG_LIMIT = Number(process.env.TRACKING_ACTION_LOG_LIMIT || 100);
+const TRACKING_ACTION_SEED_LIMIT = Number(process.env.TRACKING_ACTION_SEED_LIMIT || 6);
+const TRACKING_SIMULATION_DEFAULT_TOP_N = Number(process.env.TRACKING_SIMULATION_DEFAULT_TOP_N || 10);
+const CN_QUOTE_CHUNK_SIZE = Number(process.env.CN_QUOTE_CHUNK_SIZE || 60);
+const SINA_CN_QUOTE_CHUNK_SIZE = Number(process.env.SINA_CN_QUOTE_CHUNK_SIZE || 150);
+const CN_QUOTE_RETRY_LIMIT = Number(process.env.CN_QUOTE_RETRY_LIMIT || 2);
+const CN_QUOTE_RETRY_DELAY_MS = Number(process.env.CN_QUOTE_RETRY_DELAY_MS || 350);
+const CN_MIN_CONSTITUENT_COVERAGE_PCT = Number(process.env.CN_MIN_CONSTITUENT_COVERAGE_PCT || 85);
+const CN_LIVE_FETCH_TIMEOUT_MS = Number(process.env.CN_LIVE_FETCH_TIMEOUT_MS || 6000);
+const CN_FAILURE_BACKOFF_MS = Number(process.env.CN_FAILURE_BACKOFF_MS || 60000);
+const COINGECKO_MARKETS_BASE = 'https://api.coingecko.com/api/v3/coins/markets';
+const TRACKING_CACHE_DIR = path.join(__dirname, 'output', 'tracking-cache');
+const TRACKING_FACTOR_WEIGHTS = Object.freeze({
+    momentum: 0.30,
+    edge: 0.25,
+    liquidity: 0.15,
+    volatility: 0.15,
+    coverage: 0.15
+});
+const TRACKING_TOTAL_SCORE_WEIGHTS = Object.freeze({
+    factorScore: 0.50,
+    pUp: 0.30,
+    confidence: 0.20
+});
+const TRACKING_STABLECOIN_SYMBOLS = new Set([
+    'USDT', 'USDC', 'DAI', 'FDUSD', 'TUSD', 'USDE', 'USDD', 'USDP', 'BUSD', 'PYUSD', 'LUSD', 'FRAX', 'GUSD', 'RLUSD', 'EURC'
+]);
+const TRACKING_STABLECOIN_IDS = new Set([
+    'tether', 'usd-coin', 'dai', 'first-digital-usd', 'true-usd', 'ethena-usde', 'usdd', 'pax-dollar',
+    'binance-usd', 'paypal-usd', 'liquity-usd', 'frax', 'gemini-dollar', 'ripple-usd', 'euro-coin'
+]);
+const TRACKING_STABLECOIN_NAME_KEYWORDS = [
+    'stablecoin', 'usd coin', 'us dollar', 'digital usd', 'dollar', 'pax dollar', 'paypal usd', 'gemini dollar'
+];
 const LIMIT_STATUS_ORDER = {
     LIMIT_UP: 3,
     LIMIT_DOWN: 2,
@@ -110,6 +150,9 @@ const cryptoLastPriceBySymbol = new Map();
 const cryptoReturnHistoryBySymbol = new Map();
 let cnCache = null;
 let cnCacheAt = 0;
+let cnCachePromise = null;
+let cnLastFailureAt = 0;
+let cnLastFailureReason = null;
 let cnIndicesHistoryCache = null;
 let cnIndicesHistoryCacheAt = 0;
 let cnIndicesHistoryCacheKey = '';
@@ -120,6 +163,18 @@ let usIndicesCacheAt = 0;
 let usIndicesHistoryCache = null;
 let usIndicesHistoryCacheAt = 0;
 let usIndicesHistoryCacheKey = '';
+let trackingCryptoUniverseCache = null;
+let trackingCryptoUniverseCacheAt = 0;
+let trackingAggregateCache = null;
+let trackingAggregateCacheAt = 0;
+let trackingAggregatePromise = null;
+let homeLandingCache = null;
+let homeLandingCacheAt = 0;
+let homeLandingPromise = null;
+let trackingActionLog = [];
+let trackingLatestActionAt = null;
+let trackingPreviousTrackedState = new Map();
+let trackingKnownUniverseSymbols = new Set();
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -148,6 +203,31 @@ function sendJson(res, statusCode, payload) {
     res.end(body);
 }
 
+function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        req.on('data', (chunk) => {
+            body += chunk.toString('utf8');
+            if (body.length > 1_000_000) {
+                reject(new Error('Request body too large'));
+                req.destroy();
+            }
+        });
+        req.on('end', () => {
+            if (!body.trim()) {
+                resolve({});
+                return;
+            }
+            try {
+                resolve(JSON.parse(body));
+            } catch (error) {
+                reject(new Error(`Invalid JSON body: ${error.message}`));
+            }
+        });
+        req.on('error', reject);
+    });
+}
+
 function parseNumber(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
@@ -161,6 +241,59 @@ function clamp(value, min, max) {
 
 function deepCopy(value) {
     return JSON.parse(JSON.stringify(value));
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, timeoutMs, message) {
+    let timer = null;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        })
+    ]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
+function readTrackingSnapshot(name) {
+    try {
+        const filePath = path.join(TRACKING_CACHE_DIR, `${name}.json`);
+        if (!fs.existsSync(filePath)) {
+            return null;
+        }
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (error) {
+        return null;
+    }
+}
+
+function writeTrackingSnapshot(name, payload) {
+    try {
+        fs.mkdirSync(TRACKING_CACHE_DIR, { recursive: true });
+        fs.writeFileSync(path.join(TRACKING_CACHE_DIR, `${name}.json`), JSON.stringify(payload));
+    } catch (error) {
+        console.warn(`tracking snapshot write failed for ${name}: ${error.message}`);
+    }
+}
+
+function readTrackingBucketSnapshot(market) {
+    return readTrackingSnapshot(market);
+}
+
+function writeTrackingBucketSnapshot(market, bucket) {
+    writeTrackingSnapshot(market, bucket);
+}
+
+function readCnLiveSnapshot() {
+    return readTrackingSnapshot('cn-live');
+}
+
+function writeCnLiveSnapshot(payload) {
+    writeTrackingSnapshot('cn-live', payload);
 }
 
 function parseInteger(value, fallback) {
@@ -568,10 +701,12 @@ function fetchJsonFromHttps(url, timeoutMs = 5000, redirectCount = 0) {
             url,
             {
                 method: 'GET',
+                agent: false,
                 timeout: timeoutMs,
                 headers: {
                     'User-Agent': 'Mozilla/5.0',
-                    Accept: 'application/json,text/plain,*/*'
+                    Accept: 'application/json,text/plain,*/*',
+                    Connection: 'close'
                 }
             },
             (upstream) => {
@@ -598,6 +733,50 @@ function fetchJsonFromHttps(url, timeoutMs = 5000, redirectCount = 0) {
                     } catch (error) {
                         reject(new Error(`Invalid upstream JSON: ${error.message}`));
                     }
+                });
+            }
+        );
+
+        request.on('timeout', () => request.destroy(new Error('Upstream timeout')));
+        request.on('error', reject);
+        request.end();
+    });
+}
+
+function fetchTextFromHttps(url, timeoutMs = 5000, redirectCount = 0, headers = {}) {
+    return new Promise((resolve, reject) => {
+        const request = https.request(
+            url,
+            {
+                method: 'GET',
+                agent: false,
+                timeout: timeoutMs,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0',
+                    Accept: '*/*',
+                    Connection: 'close',
+                    ...headers
+                }
+            },
+            (upstream) => {
+                const chunks = [];
+                upstream.on('data', (chunk) => { chunks.push(chunk); });
+                upstream.on('end', () => {
+                    const statusCode = upstream.statusCode || 500;
+                    if (statusCode >= 300 && statusCode <= 399 && upstream.headers.location) {
+                        if (redirectCount >= 5) {
+                            reject(new Error(`Too many upstream redirects from ${url}`));
+                            return;
+                        }
+                        const nextUrl = new URL(upstream.headers.location, url).toString();
+                        fetchTextFromHttps(nextUrl, timeoutMs, redirectCount + 1, headers).then(resolve).catch(reject);
+                        return;
+                    }
+                    if (statusCode < 200 || statusCode > 299) {
+                        reject(new Error(`Upstream status ${upstream.statusCode}`));
+                        return;
+                    }
+                    resolve(Buffer.concat(chunks).toString('utf8'));
                 });
             }
         );
@@ -2160,13 +2339,69 @@ async function fetchEastMoneyQuotesForChunk(secids) {
     return diff;
 }
 
+function isRetryableCnQuoteError(error) {
+    const message = String(error?.message || '').toLowerCase();
+    return (
+        message.includes('socket hang up')
+        || message.includes('timeout')
+        || message.includes('econnreset')
+        || message.includes('upstream status 5')
+        || message.includes('temporary')
+    );
+}
+
+async function fetchEastMoneyQuotesForChunkWithRetry(secids) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= CN_QUOTE_RETRY_LIMIT; attempt += 1) {
+        try {
+            return await fetchEastMoneyQuotesForChunk(secids);
+        } catch (error) {
+            lastError = error;
+            const canRetry = attempt < CN_QUOTE_RETRY_LIMIT && isRetryableCnQuoteError(error);
+            if (!canRetry) {
+                throw error;
+            }
+            await sleep(CN_QUOTE_RETRY_DELAY_MS * (attempt + 1));
+        }
+    }
+    throw lastError || new Error('Failed to fetch EastMoney quote chunk');
+}
+
 async function fetchEastMoneyQuotes(secids) {
-    const CHUNK_SIZE = 60;
-    const allRows = [];
+    const CHUNK_SIZE = CN_QUOTE_CHUNK_SIZE;
+    const chunks = [];
     for (let i = 0; i < secids.length; i += CHUNK_SIZE) {
-        const chunk = secids.slice(i, i + CHUNK_SIZE);
-        const rows = await fetchEastMoneyQuotesForChunk(chunk);
-        allRows.push(...rows);
+        chunks.push({
+            index: Math.floor(i / CHUNK_SIZE),
+            secids: secids.slice(i, i + CHUNK_SIZE)
+        });
+    }
+
+    const settled = await Promise.all(chunks.map(async (chunkInfo) => {
+        try {
+            const rows = await fetchEastMoneyQuotesForChunkWithRetry(chunkInfo.secids);
+            return { status: 'fulfilled', chunkInfo, rows };
+        } catch (error) {
+            return { status: 'rejected', chunkInfo, error };
+        }
+    }));
+
+    const allRows = [];
+    const failedChunks = [];
+    for (const result of settled) {
+        if (result.status === 'fulfilled') {
+            allRows.push(...result.rows);
+            continue;
+        }
+        failedChunks.push({
+            index: result.chunkInfo.index,
+            secids: result.chunkInfo.secids,
+            error: result.error.message
+        });
+    }
+
+    if (!allRows.length) {
+        throw new Error(failedChunks[0]?.error || 'No CN quotes available from upstream');
     }
 
     const bySecid = new Map();
@@ -2195,7 +2430,160 @@ async function fetchEastMoneyQuotes(secids) {
             peTtm: parseNumber(item.f115)
         });
     }
+    return {
+        quoteMap: bySecid,
+        failedChunks,
+        totalChunks: chunks.length,
+        successfulChunks: chunks.length - failedChunks.length,
+        source: 'eastmoney'
+    };
+}
+
+function toSinaCnSymbol(secid) {
+    const [marketIdRaw, codeRaw] = String(secid || '').split('.');
+    const marketId = Number(marketIdRaw);
+    const code = String(codeRaw || '').padStart(6, '0');
+    const prefix = marketId === 1 ? 'sh' : 'sz';
+    return `${prefix}${code}`;
+}
+
+function buildSinaCnQuotesUrl(symbols) {
+    return `${SINA_CN_QUOTES_BASE}${symbols.join(',')}`;
+}
+
+function fetchSinaText(url, timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+        const request = https.request(
+            url,
+            {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0',
+                    Referer: 'https://finance.sina.com.cn',
+                    Accept: '*/*'
+                },
+                timeout: timeoutMs
+            },
+            (upstream) => {
+                const chunks = [];
+                upstream.on('data', (chunk) => { chunks.push(chunk); });
+                upstream.on('end', () => {
+                    const statusCode = upstream.statusCode || 500;
+                    if (statusCode < 200 || statusCode > 299) {
+                        reject(new Error(`Upstream status ${statusCode}`));
+                        return;
+                    }
+                    resolve(Buffer.concat(chunks).toString('utf8'));
+                });
+            }
+        );
+        request.on('timeout', () => request.destroy(new Error('Upstream timeout')));
+        request.on('error', reject);
+        request.end();
+    });
+}
+
+function normalizeSinaCnQuote(symbol, fields) {
+    const normalizedSymbol = String(symbol || '').trim().toLowerCase();
+    const market = normalizedSymbol.startsWith('sh') ? 'SH' : 'SZ';
+    const code = normalizedSymbol.slice(2).padStart(6, '0');
+    const secid = `${market === 'SH' ? 1 : 0}.${code}`;
+    const open = parseNumber(fields[1]);
+    const prevClose = parseNumber(fields[2]);
+    const price = parseNumber(fields[3]);
+    const high = parseNumber(fields[4]);
+    const low = parseNumber(fields[5]);
+    const changeAmount = Number.isFinite(price) && Number.isFinite(prevClose) ? roundTrackingNumber(price - prevClose, 4) : null;
+    const changePct = Number.isFinite(price) && Number.isFinite(prevClose) && Math.abs(prevClose) > 1e-9
+        ? roundTrackingNumber(((price - prevClose) / prevClose) * 100, 4)
+        : null;
+    return {
+        code,
+        secid,
+        market,
+        name: fields[0] || '',
+        price,
+        changePct,
+        changeAmount,
+        high,
+        low,
+        open,
+        prevClose,
+        marketCap: null,
+        floatMarketCap: null,
+        volume: parseNumber(fields[8]),
+        turnover: parseNumber(fields[9]),
+        sectorRaw: '',
+        conceptTagsRaw: '',
+        peTtm: null
+    };
+}
+
+function parseSinaCnQuoteResponse(body) {
+    const bySecid = new Map();
+    const lines = String(body || '').split(/\r?\n/);
+    for (const line of lines) {
+        const match = line.match(/var hq_str_([a-z]{2}\d{6})=\"([^\"]*)\";/i);
+        if (!match) continue;
+        const fields = match[2].split(',');
+        const quote = normalizeSinaCnQuote(match[1], fields);
+        bySecid.set(quote.secid, quote);
+    }
     return bySecid;
+}
+
+async function fetchSinaCnQuotes(secids) {
+    const CHUNK_SIZE = SINA_CN_QUOTE_CHUNK_SIZE;
+    const chunks = [];
+    for (let i = 0; i < secids.length; i += CHUNK_SIZE) {
+        chunks.push({
+            index: Math.floor(i / CHUNK_SIZE),
+            symbols: secids.slice(i, i + CHUNK_SIZE).map((secid) => toSinaCnSymbol(secid))
+        });
+    }
+
+    const bySecid = new Map();
+    const failedChunks = [];
+    for (const chunk of chunks) {
+        let body = null;
+        let lastError = null;
+        for (let attempt = 0; attempt <= CN_QUOTE_RETRY_LIMIT; attempt += 1) {
+            try {
+                body = await fetchSinaText(buildSinaCnQuotesUrl(chunk.symbols), 12000);
+                break;
+            } catch (error) {
+                lastError = error;
+                if (attempt >= CN_QUOTE_RETRY_LIMIT) break;
+                await sleep(CN_QUOTE_RETRY_DELAY_MS * (attempt + 1));
+            }
+        }
+
+        if (!body) {
+            console.warn(`Sina CN chunk failed idx=${chunk.index} symbols=${chunk.symbols.length} error=${lastError?.message || 'unknown'}`);
+            failedChunks.push({
+                index: chunk.index,
+                secids: chunk.symbols,
+                error: lastError?.message || 'Sina CN quote fetch failed'
+            });
+            continue;
+        }
+
+        const chunkMap = parseSinaCnQuoteResponse(body);
+        for (const [secid, quote] of chunkMap.entries()) {
+            bySecid.set(secid, quote);
+        }
+    }
+
+    if (!bySecid.size) {
+        throw new Error(failedChunks[0]?.error || 'No CN quotes available from Sina');
+    }
+
+    return {
+        quoteMap: bySecid,
+        failedChunks,
+        totalChunks: chunks.length,
+        successfulChunks: chunks.length - failedChunks.length,
+        source: 'sina'
+    };
 }
 
 function buildEastMoneyKlineUrl(secid, interval) {
@@ -2685,9 +3073,27 @@ function normalizeIndex(indexCode, quote) {
     };
 }
 
-async function fetchCnLivePayload() {
-    const secids = [...Object.values(INDEX_SECIDS), ...csi300Secids];
-    const quoteMap = await fetchEastMoneyQuotes(secids);
+function markCnPayloadStale(payload, reason) {
+    const stalePayload = deepCopy(payload);
+    stalePayload.meta = {
+        ...stalePayload.meta,
+        source: stalePayload.meta?.source || 'eastmoney',
+        stale: true,
+        staleReason: reason,
+        timestamp: new Date().toISOString(),
+        pollIntervalSec: stalePayload.meta?.pollIntervalSec || CN_POLL_INTERVAL_SEC,
+        delayNote: stalePayload.meta?.delayNote || CN_DELAY_NOTE,
+        disclaimer: stalePayload.meta?.disclaimer || CN_DISCLAIMER
+    };
+    return stalePayload;
+}
+
+function buildCnLivePayloadFromQuoteResult(quoteResult, primaryProviderError = null) {
+    const quoteMap = quoteResult.quoteMap;
+    const source = quoteResult.source || 'eastmoney';
+    const delayNote = source === 'sina'
+        ? 'Data Source: Sina HQ fallback | Delay: ~3-10s (Level-1)'
+        : CN_DELAY_NOTE;
     const sseQuote = quoteMap.get(INDEX_SECIDS['000001.SH']);
     const csiQuote = quoteMap.get(INDEX_SECIDS['000300.SH']);
     if (!sseQuote || !csiQuote) {
@@ -2695,18 +3101,29 @@ async function fetchCnLivePayload() {
     }
 
     const rows = csi300Snapshot.map((constituent) => asUniverseRow(constituent, quoteMap.get(constituent.secid)));
-    const marketSession = computeMarketSession();
+    const availableConstituents = rows.filter((row) => Number.isFinite(row.price)).length;
+    const constituentCoveragePct = csi300Snapshot.length ? (availableConstituents / csi300Snapshot.length) * 100 : 0;
+    if (constituentCoveragePct < CN_MIN_CONSTITUENT_COVERAGE_PCT) {
+        throw new Error(`CN constituent coverage ${roundTrackingNumber(constituentCoveragePct, 1)}% below minimum ${CN_MIN_CONSTITUENT_COVERAGE_PCT}%`);
+    }
 
     return {
         meta: {
-            source: 'eastmoney',
+            source,
+            primaryProviderError,
             timestamp: new Date().toISOString(),
             stale: false,
             pollIntervalSec: CN_POLL_INTERVAL_SEC,
-            delayNote: CN_DELAY_NOTE,
-            disclaimer: CN_DISCLAIMER
+            delayNote,
+            disclaimer: CN_DISCLAIMER,
+            coveragePct: roundTrackingNumber(constituentCoveragePct, 1),
+            availableConstituents,
+            totalConstituents: csi300Snapshot.length,
+            failedChunks: quoteResult.failedChunks?.length || 0,
+            successfulChunks: quoteResult.successfulChunks ?? 0,
+            totalChunks: quoteResult.totalChunks ?? 0
         },
-        marketSession,
+        marketSession: computeMarketSession(),
         indices: {
             sse: normalizeIndex('000001.SH', sseQuote),
             csi300: normalizeIndex('000300.SH', csiQuote)
@@ -2718,26 +3135,75 @@ async function fetchCnLivePayload() {
     };
 }
 
+async function fetchCnLivePayload() {
+    const secids = [...Object.values(INDEX_SECIDS), ...csi300Secids];
+    try {
+        const quoteResult = await fetchSinaCnQuotes(secids);
+        return buildCnLivePayloadFromQuoteResult(quoteResult);
+    } catch (primaryError) {
+        console.warn(`CN live primary provider failed: ${primaryError.message}`);
+        try {
+            const fallbackResult = await fetchEastMoneyQuotes(secids);
+            return buildCnLivePayloadFromQuoteResult(fallbackResult, primaryError.message);
+        } catch (fallbackError) {
+            console.warn(`CN live fallback provider failed: ${fallbackError.message}`);
+            throw fallbackError;
+        }
+    }
+}
+
 async function getCnPayloadWithCache() {
     const now = Date.now();
     if (cnCache && now - cnCacheAt <= CN_CACHE_TTL_MS) {
         return deepCopy(cnCache);
     }
-
-    try {
-        const payload = await fetchCnLivePayload();
-        cnCache = payload;
-        cnCacheAt = Date.now();
+    const snapshot = readCnLiveSnapshot();
+    const shouldUseBackoffSnapshot = Boolean(
+        snapshot?.universe?.rows?.length
+        && cnLastFailureAt
+        && (now - cnLastFailureAt) <= CN_FAILURE_BACKOFF_MS
+    );
+    if (shouldUseBackoffSnapshot) {
+        return markCnPayloadStale(snapshot, cnLastFailureReason || `CN live fetch backoff ${CN_FAILURE_BACKOFF_MS}ms`);
+    }
+    if (cnCachePromise) {
+        const payload = await cnCachePromise;
         return deepCopy(payload);
-    } catch (error) {
-        if (cnCache) {
-            const stalePayload = deepCopy(cnCache);
-            stalePayload.meta.stale = true;
-            stalePayload.meta.staleReason = error.message;
-            stalePayload.meta.timestamp = new Date().toISOString();
-            return stalePayload;
+    }
+
+    const inFlight = (async () => {
+        try {
+            const payload = await withTimeout(
+                fetchCnLivePayload(),
+                CN_LIVE_FETCH_TIMEOUT_MS,
+                `CN live fetch timeout after ${CN_LIVE_FETCH_TIMEOUT_MS}ms`
+            );
+            cnCache = payload;
+            cnCacheAt = Date.now();
+            cnLastFailureAt = 0;
+            cnLastFailureReason = null;
+            writeCnLiveSnapshot(payload);
+            return payload;
+        } catch (error) {
+            cnLastFailureAt = Date.now();
+            cnLastFailureReason = error.message;
+            if (cnCache) {
+                return markCnPayloadStale(cnCache, error.message);
+            }
+            if (snapshot?.universe?.rows?.length) {
+                return markCnPayloadStale(snapshot, error.message);
+            }
+            throw error;
         }
-        throw error;
+    })();
+    cnCachePromise = inFlight;
+    try {
+        const payload = await inFlight;
+        return deepCopy(payload);
+    } finally {
+        if (cnCachePromise === inFlight) {
+            cnCachePromise = null;
+        }
     }
 }
 
@@ -2847,6 +3313,27 @@ async function handleCnPrices(req, res, parsedUrl) {
     } catch (error) {
         sendJson(res, 502, {
             error: 'Failed to fetch CN equity prices from EastMoney',
+            detail: error.message
+        });
+    }
+}
+
+async function handleCnLive(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+
+    try {
+        const payload = await getCnPayloadWithCache();
+        sendJson(res, 200, payload);
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to fetch CN equity live payload from EastMoney',
             detail: error.message
         });
     }
@@ -4194,6 +4681,1355 @@ async function handleUsPredictionsAlias(req, res, parsedUrl) {
     await handleUsStock(req, res, symbol);
 }
 
+function roundTrackingNumber(value, digits = 4) {
+    return Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
+}
+
+function signedTrackingFactor(value) {
+    return roundTrackingNumber((clamp(Number.isFinite(value) ? value : 0.5, 0, 1) - 0.5) * 2, 2);
+}
+
+function formatTrackingSigned(value) {
+    if (!Number.isFinite(value)) return '+0.00';
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
+}
+
+function normalizeTrackingMarket(raw) {
+    const candidate = String(raw || 'all').trim().toLowerCase();
+    if (candidate === 'crypto') return 'crypto';
+    if (candidate === 'cn' || candidate === 'cn a-shares' || candidate === 'cn_equity') return 'cn';
+    if (candidate === 'us' || candidate === 'us equities' || candidate === 'us_equity') return 'us';
+    return 'all';
+}
+
+function normalizeTrackingAction(raw) {
+    const candidate = String(raw || 'all').trim().toLowerCase();
+    if (candidate === 'strong_buy' || candidate === 'strong buy') return 'strong_buy';
+    if (candidate === 'buy') return 'buy';
+    if (candidate === 'hold') return 'hold';
+    if (candidate === 'reduce') return 'reduce';
+    return 'all';
+}
+
+function normalizeTrackingActionType(raw) {
+    const candidate = String(raw || 'all').trim().toLowerCase();
+    if (candidate === 'added') return 'added';
+    if (candidate === 'reduced') return 'reduced';
+    if (candidate === 'new_coverage' || candidate === 'new coverage') return 'new_coverage';
+    return 'all';
+}
+
+function normalizeTrackingSortBy(raw) {
+    const candidate = String(raw || 'totalScore').trim().toLowerCase();
+    if (candidate === 'symbol') return 'symbol';
+    if (candidate === 'market') return 'market';
+    if (candidate === 'pup' || candidate === 'p_up') return 'pUp';
+    if (candidate === 'factorscore' || candidate === 'factor_score') return 'factorScore';
+    return 'totalScore';
+}
+
+function normalizeTrackingView(raw) {
+    return String(raw || '').trim().toLowerCase() === 'all' ? 'all' : 'top';
+}
+
+function normalizeTrackingPageSize(raw) {
+    return clamp(parseInteger(raw, TRACKING_DEFAULT_PAGE_SIZE), 1, 100);
+}
+
+function trackingRowKey(row) {
+    return `${row.market}:${String(row.symbol || '').toUpperCase()}`;
+}
+
+function buildCoinGeckoMarketsUrl(page = 1, perPage = 120) {
+    const query = new URLSearchParams({
+        vs_currency: 'usd',
+        order: 'market_cap_desc',
+        per_page: String(perPage),
+        page: String(page),
+        sparkline: 'false',
+        price_change_percentage: '24h'
+    });
+    return `${COINGECKO_MARKETS_BASE}?${query.toString()}`;
+}
+
+function isStablecoinCoinGeckoRow(row) {
+    const symbol = String(row?.symbol || '').trim().toUpperCase();
+    const id = String(row?.id || '').trim().toLowerCase();
+    const name = String(row?.name || '').trim().toLowerCase();
+    const price = Number(row?.current_price ?? row?.price ?? NaN);
+    const combined = `${id} ${name} ${symbol.toLowerCase()}`;
+    if (TRACKING_STABLECOIN_SYMBOLS.has(symbol) || TRACKING_STABLECOIN_IDS.has(id)) return true;
+    if (TRACKING_STABLECOIN_NAME_KEYWORDS.some((keyword) => combined.includes(keyword))) return true;
+    if (Number.isFinite(price) && price > 0.75 && price < 1.25) {
+        if (symbol.endsWith('USD')) return true;
+        if (/(^|[^a-z])(usd|usdt|usdc|usde|usdd|usdp|fdusd|tusd|dai|pyusd|rlusd|lusd|frax|gusd)([^a-z]|$)/.test(combined)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function liquidityFactorFromProxy(proxyValue) {
+    if (!Number.isFinite(proxyValue) || proxyValue <= 0) return 0.35;
+    return clamp((Math.log10(proxyValue) - 6) / 6, 0.1, 1);
+}
+
+function coverageFactorFromCompleteness(values, stale) {
+    const total = Array.isArray(values) ? values.length : 0;
+    const available = total
+        ? values.filter((value) => value !== null && value !== undefined && Number.isFinite(value)).length
+        : 0;
+    const completeness = total ? available / total : 0.4;
+    return clamp(completeness - (stale ? 0.18 : 0), 0.1, 1);
+}
+
+function computeTrackingFactors(base) {
+    const momentum = clamp(0.5 + (base.changePct || 0) / 16, 0.02, 0.98);
+    const q50Component = clamp(0.5 + (base.q50 || 0) * 5, 0, 1);
+    const edge = clamp(base.pUp * 0.55 + base.confidence * 0.35 + q50Component * 0.10, 0.02, 0.98);
+    const liquidity = liquidityFactorFromProxy(base.liquidityProxy);
+    const volatilityPenalty = clamp((base.bandWidth || 0.02) / 0.18, 0, 1);
+    const changePenalty = clamp(Math.abs(base.changePct || 0) / 18, 0, 0.22);
+    const volatility = clamp(1 - volatilityPenalty * 0.82 - changePenalty, 0.05, 0.98);
+    const coverage = coverageFactorFromCompleteness(base.coverageInputs, base.stale);
+    const factors = { momentum, edge, liquidity, volatility, coverage };
+    const weighted = Object.fromEntries(
+        Object.entries(factors).map(([key, value]) => [key, value * TRACKING_FACTOR_WEIGHTS[key]])
+    );
+    const weightedSum = Object.values(weighted).reduce((sum, value) => sum + value, 0);
+    const factorScore = clamp(weightedSum, 0, 1);
+    const totalScore = clamp(
+        factorScore * TRACKING_TOTAL_SCORE_WEIGHTS.factorScore
+            + base.pUp * TRACKING_TOTAL_SCORE_WEIGHTS.pUp
+            + base.confidence * TRACKING_TOTAL_SCORE_WEIGHTS.confidence,
+        0,
+        1
+    );
+    const contributionTotal = Math.max(1e-6, weightedSum);
+    const contribution = Object.fromEntries(
+        Object.entries(weighted).map(([key, value]) => [key, roundTrackingNumber((value / contributionTotal) * 100, 1)])
+    );
+    return {
+        factors: Object.fromEntries(Object.entries(factors).map(([key, value]) => [key, roundTrackingNumber(value, 4)])),
+        factorScore: roundTrackingNumber(factorScore, 4),
+        totalScore: roundTrackingNumber(totalScore, 4),
+        contribution
+    };
+}
+
+function buildTrackingFactorExplanations(row, factors) {
+    const signedValues = Object.fromEntries(
+        Object.entries(factors).map(([key, value]) => [key, formatTrackingSigned(signedTrackingFactor(value))])
+    );
+    return {
+        momentum: `Momentum Factor ${signedValues.momentum}: Strong recent price trend -> ${factors.momentum >= 0.6 ? 'Bullish bias' : 'Muted trend bias'}.`,
+        edge: `Edge Factor ${signedValues.edge}: Live edge combines P(UP) ${row.pUp.toFixed(2)} and confidence ${(row.confidence * 100).toFixed(0)}%.`,
+        liquidity: `Liquidity Factor ${signedValues.liquidity}: Deeper tradable flow supports faster execution reliability.`,
+        volatility: `Volatility Factor ${signedValues.volatility}: Controlled return band ${(row.bandWidth * 100).toFixed(2)}% improves score stability.`,
+        coverage: `Coverage Factor ${signedValues.coverage}: Freshness and field completeness support live decision quality.`
+    };
+}
+
+function trackingActionPriority(actionKey) {
+    switch (actionKey) {
+    case 'strong_buy': return 4;
+    case 'buy': return 3;
+    case 'hold': return 2;
+    case 'reduce': return 1;
+    default: return 0;
+    }
+}
+
+function resolveTrackingActionDescriptor(row) {
+    let action = 'HOLD';
+    let actionKey = 'hold';
+    let actionTone = 'warning';
+    if (row.totalScore >= 0.78 && row.pUp >= 0.60 && row.confidence >= 0.58) {
+        action = 'STRONG BUY';
+        actionKey = 'strong_buy';
+        actionTone = 'success';
+    } else if (row.totalScore >= 0.64 && row.pUp >= 0.54 && row.confidence >= 0.48) {
+        action = 'BUY';
+        actionKey = 'buy';
+        actionTone = 'success';
+    } else if (row.totalScore < 0.46 || row.pUp <= 0.44 || row.confidence <= 0.34) {
+        action = 'REDUCE';
+        actionKey = 'reduce';
+        actionTone = 'danger';
+    }
+
+    const momentumText = formatTrackingSigned(signedTrackingFactor(row.factors.momentum));
+    const tooltip = action === 'STRONG BUY'
+        ? `Strong bullish signal detected (Momentum ${momentumText}, P(UP) ${row.pUp.toFixed(2)})`
+        : action === 'BUY'
+            ? `Constructive live edge detected (Momentum ${momentumText}, P(UP) ${row.pUp.toFixed(2)})`
+            : action === 'REDUCE'
+                ? `Edge deteriorating (Momentum ${momentumText}, P(UP) ${row.pUp.toFixed(2)})`
+                : `Monitor only (Momentum ${momentumText}, P(UP) ${row.pUp.toFixed(2)})`;
+    return { action, actionKey, actionTone, actionTooltip: tooltip };
+}
+
+function buildTrackingRow(base) {
+    const factorBundle = computeTrackingFactors(base);
+    const row = {
+        symbol: base.symbol,
+        name: base.name,
+        market: base.market,
+        marketLabel: base.marketLabel,
+        price: roundTrackingNumber(base.price, 4),
+        changePct: roundTrackingNumber((base.changePct || 0) / 100, 4),
+        rawChangePct: roundTrackingNumber(base.changePct || 0, 2),
+        pUp: roundTrackingNumber(base.pUp, 4),
+        confidence: roundTrackingNumber(base.confidence, 4),
+        q10: roundTrackingNumber(base.q10, 4),
+        q50: roundTrackingNumber(base.q50, 4),
+        q90: roundTrackingNumber(base.q90, 4),
+        bandWidth: roundTrackingNumber(base.bandWidth, 4),
+        factors: factorBundle.factors,
+        factorScore: factorBundle.factorScore,
+        totalScore: factorBundle.totalScore,
+        contribution: factorBundle.contribution,
+        signalSource: base.signalSource,
+        timestamp: base.timestamp,
+        stale: Boolean(base.stale),
+        staleReason: base.staleReason || null,
+        status: base.status,
+        liquidityProxy: roundTrackingNumber(base.liquidityProxy, 2),
+        meta: base.meta || {}
+    };
+    row.factorExplanations = buildTrackingFactorExplanations(row, row.factors);
+    Object.assign(row, resolveTrackingActionDescriptor(row));
+    return row;
+}
+
+function buildTrackingCryptoRow(coin, stale = false, staleReason = null, timestamp = new Date().toISOString()) {
+    const price = parseNumber(coin?.current_price);
+    const volume = parseNumber(coin?.total_volume) ?? 0;
+    const marketCap = parseNumber(coin?.market_cap) ?? 0;
+    const changePct = parseNumber(coin?.price_change_percentage_24h_in_currency ?? coin?.price_change_percentage_24h) ?? 0;
+    const predictionPayload = buildCryptoPredictionPayload(
+        String(coin?.symbol || '').trim().toUpperCase(),
+        { price, volume, change: changePct },
+        stale,
+        staleReason
+    );
+    return buildTrackingRow({
+        symbol: String(coin?.symbol || '').trim().toUpperCase(),
+        name: coin?.name || String(coin?.symbol || '').trim().toUpperCase(),
+        market: 'crypto',
+        marketLabel: 'Crypto',
+        price,
+        changePct,
+        pUp: predictionPayload.prediction.p_up,
+        confidence: predictionPayload.prediction.confidence,
+        q10: predictionPayload.prediction.magnitude.q10,
+        q50: predictionPayload.prediction.magnitude.q50,
+        q90: predictionPayload.prediction.magnitude.q90,
+        bandWidth: predictionPayload.prediction.magnitude.q90 - predictionPayload.prediction.magnitude.q10,
+        liquidityProxy: marketCap || volume,
+        coverageInputs: [price, volume, marketCap, changePct, predictionPayload.prediction.p_up, predictionPayload.prediction.confidence],
+        signalSource: 'derived_live',
+        stale,
+        staleReason,
+        timestamp,
+        status: Number.isFinite(price) ? (stale ? 'STALE' : 'LIVE') : 'UNAVAILABLE',
+        meta: {
+            marketCap: roundTrackingNumber(marketCap, 2),
+            totalVolume: roundTrackingNumber(volume, 2),
+            marketCapRank: parseInteger(coin?.market_cap_rank, null),
+            id: coin?.id || null
+        }
+    });
+}
+
+function buildTrackingCnRow(row, stale = false, timestamp = new Date().toISOString(), staleReason = null) {
+    return buildTrackingRow({
+        symbol: row.code,
+        name: row.name,
+        market: 'cn',
+        marketLabel: 'CN A-Shares',
+        price: row.price,
+        changePct: row.changePct,
+        pUp: row.prediction?.pUp ?? 0.5,
+        confidence: row.prediction?.confidence ?? 0.5,
+        q10: row.prediction?.q10 ?? -0.01,
+        q50: row.prediction?.q50 ?? 0,
+        q90: row.prediction?.q90 ?? 0.01,
+        bandWidth: (row.prediction?.q90 ?? 0.01) - (row.prediction?.q10 ?? -0.01),
+        liquidityProxy: row.turnover || row.valuation?.marketCap || row.volume || 0,
+        coverageInputs: [row.price, row.changePct, row.volume, row.turnover, row.prediction?.pUp, row.prediction?.confidence],
+        signalSource: 'derived_live',
+        stale,
+        staleReason,
+        timestamp,
+        status: row.price === null ? 'UNAVAILABLE' : (stale ? 'STALE' : 'LIVE'),
+        meta: {
+            sector: row.sector || '',
+            limitPct: row.limitPct ?? null,
+            marginEligible: Boolean(row.marginEligible),
+            valuation: row.valuation || null
+        }
+    });
+}
+
+function buildTrackingUsRow(row, stale = false, timestamp = new Date().toISOString(), staleReason = null) {
+    const liquidityProxy = row.valuation?.marketCap || ((row.volume ?? 0) * (row.price ?? 0)) || row.volume || 0;
+    return buildTrackingRow({
+        symbol: row.symbol,
+        name: row.name,
+        market: 'us',
+        marketLabel: 'US Equities',
+        price: row.price,
+        changePct: row.changePct,
+        pUp: row.prediction?.pUp ?? 0.5,
+        confidence: row.prediction?.confidence ?? 0.5,
+        q10: row.prediction?.q10 ?? -0.01,
+        q50: row.prediction?.q50 ?? 0,
+        q90: row.prediction?.q90 ?? 0.01,
+        bandWidth: (row.prediction?.q90 ?? 0.01) - (row.prediction?.q10 ?? -0.01),
+        liquidityProxy,
+        coverageInputs: [row.price, row.changePct, row.volume, liquidityProxy, row.prediction?.pUp, row.prediction?.confidence],
+        signalSource: 'derived_live',
+        stale,
+        staleReason,
+        timestamp,
+        status: row.price === null ? 'UNAVAILABLE' : (stale ? 'STALE' : 'LIVE'),
+        meta: {
+            sector: row.sector || '',
+            valuation: row.valuation || null
+        }
+    });
+}
+
+async function fetchTrackingCryptoUniverse() {
+    const endpoint = buildCoinGeckoMarketsUrl(1, 120);
+    const payload = await fetchJsonFromHttps(endpoint, 9000);
+    if (!Array.isArray(payload)) {
+        throw new Error('Unexpected CoinGecko markets payload');
+    }
+    const rows = payload.filter((row) => !isStablecoinCoinGeckoRow(row)).slice(0, 50);
+    if (rows.length < 50) {
+        throw new Error(`Filtered CoinGecko universe too small (${rows.length}/50)`);
+    }
+    return rows;
+}
+
+async function getTrackingCryptoUniverseWithCache() {
+    const now = Date.now();
+    if (trackingCryptoUniverseCache && now - trackingCryptoUniverseCacheAt <= TRACKING_CRYPTO_CACHE_TTL_MS) {
+        return deepCopy(trackingCryptoUniverseCache);
+    }
+
+    try {
+        const timestamp = new Date().toISOString();
+        const rawRows = await fetchTrackingCryptoUniverse();
+        const rows = rawRows.map((row) => buildTrackingCryptoRow(row, false, null, timestamp));
+        const payload = {
+            meta: {
+                source: 'coingecko_markets',
+                timestamp,
+                stale: false
+            },
+            rows
+        };
+        trackingCryptoUniverseCache = payload;
+        trackingCryptoUniverseCacheAt = Date.now();
+        return deepCopy(payload);
+    } catch (error) {
+        if (trackingCryptoUniverseCache) {
+            const stalePayload = deepCopy(trackingCryptoUniverseCache);
+            stalePayload.meta = {
+                ...stalePayload.meta,
+                stale: true,
+                staleReason: error.message,
+                timestamp: new Date().toISOString()
+            };
+            stalePayload.rows = stalePayload.rows.map((row) => ({
+                ...row,
+                stale: true,
+                staleReason: error.message,
+                status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
+            }));
+            return stalePayload;
+        }
+        throw error;
+    }
+}
+
+function getTrackingSortValue(row, sortBy) {
+    switch (sortBy) {
+    case 'symbol': return row.symbol;
+    case 'market': return row.marketLabel;
+    case 'factorScore': return row.factorScore;
+    case 'pUp': return row.pUp;
+    case 'totalScore':
+    default:
+        return row.totalScore;
+    }
+}
+
+function applyTrackingUniverseQuery(rows, options = {}) {
+    const market = normalizeTrackingMarket(options.market);
+    const action = normalizeTrackingAction(options.action);
+    const search = String(options.search || '').trim().toLowerCase();
+    const sortBy = normalizeTrackingSortBy(options.sortBy || options.sort);
+    const sortDir = String(options.sortDir || options.direction || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+    const view = normalizeTrackingView(options.view);
+    const page = clamp(parseInteger(options.page, 1), 1, 1000);
+    const pageSize = normalizeTrackingPageSize(options.pageSize);
+
+    const filtered = rows.filter((row) => {
+        const marketMatch = market === 'all' || row.market === market;
+        const actionMatch = action === 'all' || row.actionKey === action;
+        const searchMatch = !search
+            || row.symbol.toLowerCase().includes(search)
+            || row.name.toLowerCase().includes(search)
+            || row.marketLabel.toLowerCase().includes(search);
+        return marketMatch && actionMatch && searchMatch;
+    });
+
+    const directionFactor = sortDir === 'asc' ? 1 : -1;
+    filtered.sort((a, b) => {
+        const av = getTrackingSortValue(a, sortBy);
+        const bv = getTrackingSortValue(b, sortBy);
+        if (typeof av === 'string' && typeof bv === 'string') {
+            const cmp = av.localeCompare(bv);
+            if (cmp !== 0) return cmp * directionFactor;
+        } else if (av !== bv) {
+            return av > bv ? directionFactor : -directionFactor;
+        }
+        if (a.totalScore !== b.totalScore) return a.totalScore > b.totalScore ? -1 : 1;
+        return a.symbol.localeCompare(b.symbol);
+    });
+
+    const total = filtered.length;
+    const allRows = view === 'all';
+    const effectivePageSize = allRows ? Math.max(total, pageSize) || total : pageSize;
+    const totalPages = allRows ? 1 : Math.max(1, Math.ceil(total / effectivePageSize));
+    const safePage = allRows ? 1 : clamp(page, 1, totalPages);
+    const start = allRows ? 0 : (safePage - 1) * effectivePageSize;
+    const windowRows = filtered.slice(start, start + effectivePageSize).map((row, index) => ({
+        ...row,
+        rank: start + index + 1
+    }));
+
+    return {
+        total,
+        page: safePage,
+        pageSize: effectivePageSize,
+        totalPages,
+        hasMore: !allRows && safePage < totalPages,
+        rows: windowRows
+    };
+}
+
+function buildTrackingCoverageRow(market, marketLabel, rows, stale = false) {
+    const total = rows.length;
+    const available = rows.filter((row) => Number.isFinite(row.price) && row.status !== 'UNAVAILABLE').length;
+    const coveragePct = total ? (available / total) * 100 : 0;
+    const qualityPct = total
+        ? rows.reduce((sum, row) => sum + ((row.factors?.coverage ?? 0) * 100), 0) / total
+        : 0;
+    const missingPct = Math.max(0, 100 - coveragePct);
+    const qualityText = qualityPct >= 95 ? 'High' : qualityPct >= 80 ? 'Moderate' : 'Low';
+    return {
+        market,
+        marketLabel,
+        totalSymbols: total,
+        coveragePct: roundTrackingNumber(coveragePct, 1),
+        missingPct: roundTrackingNumber(missingPct, 1),
+        qualityPct: roundTrackingNumber(qualityPct, 1),
+        qualityText,
+        stale,
+        tooltip: `Avg Quality ${roundTrackingNumber(qualityPct, 1)}%: ${qualityPct >= 95 ? 'High across this market, minimal missing data' : qualityPct >= 80 ? 'Usable coverage with some degraded fields' : 'Coverage degraded, review stale inputs'}.`
+    };
+}
+
+function buildTrackingActionEntry(type, row, reason, timestamp) {
+    return {
+        id: `${type}_${trackingRowKey(row)}_${timestamp}`,
+        type,
+        label: type === 'added' ? 'Added to Watchlist' : type === 'reduced' ? 'Position Reduced' : 'New Coverage',
+        tone: type === 'added' ? 'success' : type === 'reduced' ? 'warning' : 'info',
+        market: row.market,
+        marketLabel: row.marketLabel,
+        symbol: row.symbol,
+        name: row.name,
+        action: row.action,
+        reason,
+        timestamp,
+        symbolDetail: {
+            pUp: row.pUp,
+            confidence: row.confidence,
+            totalScore: row.totalScore,
+            factorScore: row.factorScore,
+            factors: row.factors,
+            whyAdded: reason
+        }
+    };
+}
+
+function appendTrackingAction(entry) {
+    const entryTime = Date.parse(entry.timestamp);
+    const duplicate = trackingActionLog.find((item) => (
+        item.type === entry.type
+        && item.market === entry.market
+        && item.symbol === entry.symbol
+        && item.reason === entry.reason
+        && Math.abs(Date.parse(item.timestamp) - entryTime) < 60000
+    ));
+    if (duplicate) {
+        return;
+    }
+    trackingActionLog.unshift(entry);
+    trackingActionLog = trackingActionLog.slice(0, TRACKING_ACTION_LOG_LIMIT);
+    trackingLatestActionAt = entry.timestamp;
+}
+
+function updateTrackingActionLog(rows, timestamp) {
+    const rankedRows = [...rows]
+        .sort((a, b) => (b.totalScore - a.totalScore) || (b.pUp - a.pUp) || a.symbol.localeCompare(b.symbol))
+        .slice(0, TRACKING_DEFAULT_PAGE_SIZE);
+    const nextTrackedState = new Map(rankedRows.map((row) => [trackingRowKey(row), row]));
+
+    if (!trackingPreviousTrackedState.size) {
+        rankedRows
+            .filter((row) => trackingActionPriority(row.actionKey) >= trackingActionPriority('buy'))
+            .slice(0, TRACKING_ACTION_SEED_LIMIT)
+            .forEach((row) => appendTrackingAction(buildTrackingActionEntry('added', row, row.actionTooltip, timestamp)));
+        trackingPreviousTrackedState = nextTrackedState;
+        trackingKnownUniverseSymbols = new Set(rows.map((row) => trackingRowKey(row)));
+        return;
+    }
+
+    const newCoverageRows = [];
+    rows.forEach((row) => {
+        const key = trackingRowKey(row);
+        if (!trackingKnownUniverseSymbols.has(key)) {
+            trackingKnownUniverseSymbols.add(key);
+            newCoverageRows.push(row);
+        }
+    });
+    newCoverageRows
+        .sort((a, b) => (b.totalScore - a.totalScore) || (b.pUp - a.pUp) || a.symbol.localeCompare(b.symbol))
+        .slice(0, TRACKING_ACTION_SEED_LIMIT)
+        .forEach((row) => appendTrackingAction(buildTrackingActionEntry('new_coverage', row, `Fresh live coverage detected for ${row.symbol}.`, timestamp)));
+
+    nextTrackedState.forEach((row, key) => {
+        const prev = trackingPreviousTrackedState.get(key);
+        const nextPriority = trackingActionPriority(row.actionKey);
+        const prevPriority = prev ? trackingActionPriority(prev.actionKey) : 0;
+        if (!prev && nextPriority >= trackingActionPriority('buy')) {
+            appendTrackingAction(buildTrackingActionEntry('added', row, row.actionTooltip, timestamp));
+            return;
+        }
+        if (prev && nextPriority > prevPriority && nextPriority >= trackingActionPriority('buy')) {
+            appendTrackingAction(buildTrackingActionEntry('added', row, `${row.symbol} upgraded to ${row.action}.`, timestamp));
+            return;
+        }
+        if (prev && nextPriority < prevPriority && prevPriority >= trackingActionPriority('buy')) {
+            appendTrackingAction(buildTrackingActionEntry('reduced', row, `${row.symbol} downgraded to ${row.action}.`, timestamp));
+        }
+    });
+
+    trackingPreviousTrackedState.forEach((row, key) => {
+        if (!nextTrackedState.has(key) && trackingActionPriority(row.actionKey) >= trackingActionPriority('buy')) {
+            appendTrackingAction(buildTrackingActionEntry('reduced', row, `${row.symbol} dropped out of the active ranked universe.`, timestamp));
+        }
+    });
+
+    trackingPreviousTrackedState = nextTrackedState;
+}
+
+function buildTrackingAggregateFromBuckets(buckets, staleReasons = []) {
+    const timestamp = new Date().toISOString();
+    const rows = [
+        ...(buckets.crypto?.rows || []),
+        ...(buckets.cn?.rows || []),
+        ...(buckets.us?.rows || [])
+    ];
+    updateTrackingActionLog(rows, timestamp);
+
+    const coverageRows = [
+        buildTrackingCoverageRow('crypto', 'Crypto', buckets.crypto?.rows || [], Boolean(buckets.crypto?.meta?.stale)),
+        buildTrackingCoverageRow('cn', 'CN A-Shares', buckets.cn?.rows || [], Boolean(buckets.cn?.meta?.stale)),
+        buildTrackingCoverageRow('us', 'US Equities', buckets.us?.rows || [], Boolean(buckets.us?.meta?.stale))
+    ];
+    const totalSymbols = rows.length;
+    const totalLiveRows = rows.filter((row) => Number.isFinite(row.price) && row.status !== 'UNAVAILABLE').length;
+    const totalCoveragePct = totalSymbols ? (totalLiveRows / totalSymbols) * 100 : 0;
+    const averageQualityPct = coverageRows.length
+        ? coverageRows.reduce((sum, row) => sum + row.qualityPct, 0) / coverageRows.length
+        : 0;
+    const stale = buckets.crypto?.meta?.stale || buckets.cn?.meta?.stale || buckets.us?.meta?.stale || staleReasons.length > 0;
+
+    return {
+        meta: {
+            timestamp,
+            lastUpdatedAt: timestamp,
+            refreshIntervalSec: TRACKING_REFRESH_INTERVAL_SEC,
+            stale: Boolean(stale),
+            staleReasons
+        },
+        buckets,
+        allRows: rows,
+        summary: {
+            cryptoCount: buckets.crypto?.rows?.length || 0,
+            cnCount: buckets.cn?.rows?.length || 0,
+            usCount: buckets.us?.rows?.length || 0,
+            totalSymbols,
+            totalCoveragePct: roundTrackingNumber(totalCoveragePct, 1),
+            averageQualityPct: roundTrackingNumber(averageQualityPct, 1),
+            latestActionAt: trackingLatestActionAt,
+            lastUpdatedAt: timestamp,
+            refreshIntervalSec: TRACKING_REFRESH_INTERVAL_SEC,
+            stale: Boolean(stale)
+        },
+        coverage: {
+            rows: coverageRows,
+            totalSymbols,
+            averageQualityPct: roundTrackingNumber(averageQualityPct, 1),
+            summaryTooltip: `Avg Quality ${roundTrackingNumber(averageQualityPct, 1)}%: High across all markets, minimal missing data.`
+        },
+        actions: {
+            latestActionAt: trackingLatestActionAt,
+            items: deepCopy(trackingActionLog)
+        }
+    };
+}
+
+async function buildTrackingAggregate() {
+    const previousBuckets = {
+        crypto: trackingAggregateCache?.buckets?.crypto || readTrackingBucketSnapshot('crypto'),
+        cn: trackingAggregateCache?.buckets?.cn || readTrackingBucketSnapshot('cn'),
+        us: trackingAggregateCache?.buckets?.us || readTrackingBucketSnapshot('us')
+    };
+    const staleReasons = [];
+
+    const [cryptoResult, cnResult, usResult] = await Promise.allSettled([
+        getTrackingCryptoUniverseWithCache(),
+        getCnPayloadWithCache(),
+        getUsPayloadWithCache()
+    ]);
+
+    let cryptoBucket;
+    if (cryptoResult.status === 'fulfilled') {
+        cryptoBucket = {
+            rows: cryptoResult.value.rows,
+            meta: {
+                ...cryptoResult.value.meta,
+                stale: Boolean(cryptoResult.value.meta?.stale)
+            }
+        };
+        if (cryptoBucket.meta.stale && cryptoBucket.meta.staleReason) {
+            staleReasons.push(`crypto: ${cryptoBucket.meta.staleReason}`);
+        }
+        writeTrackingBucketSnapshot('crypto', cryptoBucket);
+    } else if (previousBuckets.crypto) {
+        staleReasons.push(`crypto: ${cryptoResult.reason.message}`);
+        cryptoBucket = deepCopy(previousBuckets.crypto);
+        cryptoBucket.meta = {
+            ...cryptoBucket.meta,
+            stale: true,
+            staleReason: cryptoResult.reason.message,
+            timestamp: new Date().toISOString()
+        };
+        cryptoBucket.rows = cryptoBucket.rows.map((row) => ({
+            ...row,
+            stale: true,
+            staleReason: cryptoResult.reason.message,
+            status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
+        }));
+    } else {
+        staleReasons.push(`crypto: ${cryptoResult.reason.message}`);
+        cryptoBucket = { rows: [], meta: { source: 'coingecko_markets', timestamp: new Date().toISOString(), stale: true, staleReason: cryptoResult.reason.message } };
+    }
+
+    let cnBucket;
+    if (cnResult.status === 'fulfilled') {
+        const timestamp = cnResult.value.meta?.timestamp || new Date().toISOString();
+        const stale = Boolean(cnResult.value.meta?.stale);
+        cnBucket = {
+            rows: cnResult.value.universe.rows.map((row) => buildTrackingCnRow(row, stale, timestamp, cnResult.value.meta?.staleReason || null)),
+            meta: { ...cnResult.value.meta, stale }
+        };
+        if (cnBucket.meta.stale && cnBucket.meta.staleReason) {
+            staleReasons.push(`cn: ${cnBucket.meta.staleReason}`);
+        }
+        writeTrackingBucketSnapshot('cn', cnBucket);
+    } else if (previousBuckets.cn) {
+        staleReasons.push(`cn: ${cnResult.reason.message}`);
+        cnBucket = deepCopy(previousBuckets.cn);
+        cnBucket.meta = {
+            ...cnBucket.meta,
+            stale: true,
+            staleReason: cnResult.reason.message,
+            timestamp: new Date().toISOString()
+        };
+        cnBucket.rows = cnBucket.rows.map((row) => ({
+            ...row,
+            stale: true,
+            staleReason: cnResult.reason.message,
+            status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
+        }));
+    } else {
+        staleReasons.push(`cn: ${cnResult.reason.message}`);
+        cnBucket = { rows: [], meta: { source: 'cn_equity_live', timestamp: new Date().toISOString(), stale: true, staleReason: cnResult.reason.message } };
+    }
+
+    let usBucket;
+    if (usResult.status === 'fulfilled') {
+        const timestamp = usResult.value.meta?.timestamp || new Date().toISOString();
+        const stale = Boolean(usResult.value.meta?.stale);
+        usBucket = {
+            rows: usResult.value.universe.rows.map((row) => buildTrackingUsRow(row, stale, timestamp, usResult.value.meta?.staleReason || null)),
+            meta: { ...usResult.value.meta, stale }
+        };
+        if (usBucket.meta.stale && usBucket.meta.staleReason) {
+            staleReasons.push(`us: ${usBucket.meta.staleReason}`);
+        }
+        writeTrackingBucketSnapshot('us', usBucket);
+    } else if (previousBuckets.us) {
+        staleReasons.push(`us: ${usResult.reason.message}`);
+        usBucket = deepCopy(previousBuckets.us);
+        usBucket.meta = {
+            ...usBucket.meta,
+            stale: true,
+            staleReason: usResult.reason.message,
+            timestamp: new Date().toISOString()
+        };
+        usBucket.rows = usBucket.rows.map((row) => ({
+            ...row,
+            stale: true,
+            staleReason: usResult.reason.message,
+            status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
+        }));
+    } else {
+        staleReasons.push(`us: ${usResult.reason.message}`);
+        usBucket = { rows: [], meta: { source: 'us_equity_live', timestamp: new Date().toISOString(), stale: true, staleReason: usResult.reason.message } };
+    }
+
+    const aggregate = buildTrackingAggregateFromBuckets({ crypto: cryptoBucket, cn: cnBucket, us: usBucket }, staleReasons);
+    if (!aggregate.allRows.length && trackingAggregateCache) {
+        const staleAggregate = deepCopy(trackingAggregateCache);
+        staleAggregate.meta = {
+            ...staleAggregate.meta,
+            stale: true,
+            staleReasons,
+            timestamp: new Date().toISOString(),
+            lastUpdatedAt: new Date().toISOString()
+        };
+        return staleAggregate;
+    }
+    return aggregate;
+}
+
+async function getTrackingAggregateWithCache() {
+    const now = Date.now();
+    if (trackingAggregateCache && now - trackingAggregateCacheAt <= TRACKING_CACHE_TTL_MS) {
+        return deepCopy(trackingAggregateCache);
+    }
+    if (trackingAggregatePromise) {
+        const payload = await trackingAggregatePromise;
+        return deepCopy(payload);
+    }
+
+    const inFlight = (async () => {
+        const payload = await buildTrackingAggregate();
+        trackingAggregateCache = payload;
+        trackingAggregateCacheAt = Date.now();
+        return payload;
+    })();
+    trackingAggregatePromise = inFlight;
+    try {
+        const payload = await inFlight;
+        return deepCopy(payload);
+    } finally {
+        if (trackingAggregatePromise === inFlight) {
+            trackingAggregatePromise = null;
+        }
+    }
+}
+
+function findTrackingRow(aggregate, symbol, market = 'all') {
+    const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+    const normalizedMarket = normalizeTrackingMarket(market);
+    return aggregate.allRows.find((row) => {
+        const marketMatch = normalizedMarket === 'all' || row.market === normalizedMarket;
+        return marketMatch && String(row.symbol || '').toUpperCase() === normalizedSymbol;
+    }) || null;
+}
+
+function buildTrackingFactorPayloadFromRow(row, aggregate, options = {}) {
+    const marketRows = aggregate.allRows.filter((item) => item.market === row.market);
+    const marketAverageFactors = Object.keys(TRACKING_FACTOR_WEIGHTS).reduce((acc, key) => {
+        acc[key] = roundTrackingNumber(
+            marketRows.reduce((sum, item) => sum + (item.factors?.[key] ?? 0), 0) / Math.max(1, marketRows.length),
+            4
+        );
+        return acc;
+    }, {});
+    const leader = aggregate.allRows.slice().sort((a, b) => b.totalScore - a.totalScore)[0] || null;
+    const factors = Object.entries(row.factors || {}).map(([key, value]) => ({
+        key,
+        label: `${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+        value,
+        explanation: row.factorExplanations?.[key] || '',
+        contributionPct: row.contribution?.[key] ?? 0
+    }));
+    const rankedFactors = factors.slice().sort((a, b) => (b.contributionPct || 0) - (a.contributionPct || 0));
+    const dominantFactor = rankedFactors[0] || null;
+    const defaultExplanation = [
+        options.leadIn || '',
+        row.actionTooltip || '',
+        dominantFactor?.explanation || ''
+    ].filter(Boolean).join(' ');
+
+    return {
+        symbol: row.symbol,
+        name: row.name,
+        market: row.market,
+        marketLabel: row.marketLabel,
+        totalScore: row.totalScore,
+        factorScore: row.factorScore,
+        action: row.action,
+        actionTone: row.actionTone,
+        stale: Boolean(row.stale),
+        title: options.title || row.name,
+        subtitle: options.subtitle || `${row.marketLabel} | ${row.symbol}`,
+        badge: options.badge || (row.stale ? 'Stale Snapshot' : 'Live Factors'),
+        factors,
+        contribution: row.contribution,
+        explanation: options.explanation || defaultExplanation || `${row.name} live factor snapshot.`,
+        actionTooltip: options.actionTooltip || row.actionTooltip,
+        compare: {
+            marketAverageFactors,
+            leader
+        }
+    };
+}
+
+function buildHomeUnavailableCard(cardKey, label, market, marketLabel, displayKind = 'number') {
+    return {
+        cardKey,
+        label,
+        symbol: null,
+        name: null,
+        market,
+        marketLabel,
+        price: null,
+        changePct: null,
+        pUp: null,
+        confidence: null,
+        totalScore: null,
+        action: 'UNAVAILABLE',
+        actionTone: 'danger',
+        signalSource: null,
+        stale: true,
+        timestamp: new Date().toISOString(),
+        unavailable: true,
+        displayKind,
+        leaderMeta: null
+    };
+}
+
+function buildHomeCardFromRow(cardKey, label, row, extra = {}) {
+    if (!row) {
+        return buildHomeUnavailableCard(
+            cardKey,
+            label,
+            extra.market || 'all',
+            extra.marketLabel || 'Unavailable',
+            extra.displayKind || 'number'
+        );
+    }
+    return {
+        cardKey,
+        label,
+        symbol: row.symbol,
+        name: row.name,
+        market: row.market,
+        marketLabel: row.marketLabel,
+        price: row.price,
+        changePct: row.changePct,
+        pUp: row.pUp,
+        confidence: row.confidence,
+        totalScore: row.totalScore,
+        action: row.action,
+        actionTone: row.actionTone,
+        signalSource: row.signalSource,
+        stale: Boolean(row.stale),
+        timestamp: row.timestamp,
+        unavailable: row.status === 'UNAVAILABLE',
+        displayKind: extra.displayKind || 'number',
+        leaderMeta: extra.leaderMeta || null
+    };
+}
+
+function buildHomeCnIndexRow(payload, indexCode = '000001.SH') {
+    const indexData = indexCode === '000001.SH' ? payload?.indices?.sse : payload?.indices?.csi300;
+    if (!indexData || !Number.isFinite(indexData.price)) return null;
+
+    const quoteLike = {
+        price: indexData.price,
+        changePct: indexData.changePct,
+        open: indexData.open,
+        high: indexData.high,
+        low: indexData.low,
+        prevClose: indexData.prevClose
+    };
+    const prediction = calculatePrediction(quoteLike);
+    const stale = Boolean(payload?.meta?.stale);
+    return buildTrackingRow({
+        symbol: indexCode,
+        name: INDEX_NAME_BY_CODE[indexCode] || indexCode,
+        market: 'cn',
+        marketLabel: 'CN A-Shares',
+        price: indexData.price,
+        changePct: indexData.changePct,
+        pUp: prediction.pUp,
+        confidence: prediction.confidence,
+        q10: prediction.q10,
+        q50: prediction.q50,
+        q90: prediction.q90,
+        bandWidth: prediction.q90 - prediction.q10,
+        liquidityProxy: indexData.turnover || indexData.volume || ((indexData.price || 0) * 100000000),
+        coverageInputs: [
+            indexData.price,
+            indexData.changePct,
+            indexData.open,
+            indexData.high,
+            indexData.low,
+            indexData.prevClose,
+            prediction.pUp,
+            prediction.confidence
+        ],
+        signalSource: 'derived_live',
+        stale,
+        staleReason: payload?.meta?.staleReason || payload?.meta?.stale_reason || null,
+        timestamp: payload?.meta?.timestamp || new Date().toISOString(),
+        status: stale ? 'STALE' : 'LIVE',
+        meta: {
+            kind: 'index',
+            indexCode
+        }
+    });
+}
+
+function buildHomeUsIndexRow(payload, symbol) {
+    const key = indexKeyFromCanonicalSymbol(symbol);
+    const indexData = key ? payload?.indices?.[key] : null;
+    if (!indexData || !Number.isFinite(indexData.price)) return null;
+
+    const prediction = calculateUsPrediction(indexData);
+    const stale = Boolean(payload?.meta?.stale);
+    return buildTrackingRow({
+        symbol,
+        name: indexData.name || symbol,
+        market: 'us',
+        marketLabel: 'US Equities',
+        price: indexData.price,
+        changePct: indexData.changePct,
+        pUp: prediction.pUp,
+        confidence: prediction.confidence,
+        q10: prediction.q10,
+        q50: prediction.q50,
+        q90: prediction.q90,
+        bandWidth: prediction.q90 - prediction.q10,
+        liquidityProxy: indexData.volume || ((indexData.price || 0) * 100000000),
+        coverageInputs: [
+            indexData.price,
+            indexData.changePct,
+            indexData.open,
+            indexData.high,
+            indexData.low,
+            prediction.pUp,
+            prediction.confidence
+        ],
+        signalSource: 'derived_live',
+        stale,
+        staleReason: payload?.meta?.staleReason || payload?.meta?.stale_reason || null,
+        timestamp: payload?.meta?.timestamp || new Date().toISOString(),
+        status: stale ? 'STALE' : 'LIVE',
+        meta: {
+            kind: 'index',
+            indexSymbol: symbol
+        }
+    });
+}
+
+function buildHomeCompositeDetailLeadIn(cardKey, row) {
+    if (!row) return '';
+    if (cardKey === 'cnComposite') {
+        return `CN Composite currently led by ${row.symbol} ${row.name}.`;
+    }
+    if (cardKey === 'usComposite') {
+        return `US Composite currently led by ${row.symbol} ${row.name}.`;
+    }
+    return '';
+}
+
+async function buildHomeLandingPayload() {
+    const aggregate = await getTrackingAggregateWithCache();
+    const [cnResult, usResult] = await Promise.allSettled([
+        getCnPayloadWithCache(),
+        getUsPayloadWithCache()
+    ]);
+
+    const cryptoBtc = findTrackingRow(aggregate, 'BTC', 'crypto');
+    const cryptoEth = findTrackingRow(aggregate, 'ETH', 'crypto');
+    const cryptoSol = findTrackingRow(aggregate, 'SOL', 'crypto');
+
+    const cnRows = aggregate.allRows.filter((row) => row.market === 'cn').sort((a, b) => b.totalScore - a.totalScore);
+    const usRows = aggregate.allRows.filter((row) => row.market === 'us').sort((a, b) => b.totalScore - a.totalScore);
+    const cnLeader = cnRows[0] || null;
+    const usLeader = usRows[0] || null;
+
+    const sseRow = cnResult.status === 'fulfilled' ? buildHomeCnIndexRow(cnResult.value, '000001.SH') : null;
+    const spxRow = usResult.status === 'fulfilled' ? buildHomeUsIndexRow(usResult.value, '^SPX') : null;
+    const djiRow = usResult.status === 'fulfilled' ? buildHomeUsIndexRow(usResult.value, '^DJI') : null;
+    const ndxRow = usResult.status === 'fulfilled' ? buildHomeUsIndexRow(usResult.value, '^NDX') : null;
+
+    const cards = [
+        buildHomeCardFromRow('btc', 'BTC/USDT', cryptoBtc, { displayKind: 'usd' }),
+        buildHomeCardFromRow('eth', 'ETH/USDT', cryptoEth, { displayKind: 'usd' }),
+        buildHomeCardFromRow('sol', 'SOL/USDT', cryptoSol, { displayKind: 'usd' }),
+        buildHomeCardFromRow('sse', 'SSE COMPOSITE', sseRow, { market: 'cn', marketLabel: 'CN A-Shares', displayKind: 'number' }),
+        buildHomeCardFromRow('cnComposite', 'CN COMPOSITE', cnLeader, {
+            market: 'cn',
+            marketLabel: 'CN A-Shares',
+            displayKind: 'cny',
+            leaderMeta: cnLeader ? { symbol: cnLeader.symbol, name: cnLeader.name, market: cnLeader.market } : null
+        }),
+        buildHomeCardFromRow('usComposite', 'US COMPOSITE', usLeader, {
+            market: 'us',
+            marketLabel: 'US Equities',
+            displayKind: 'usd',
+            leaderMeta: usLeader ? { symbol: usLeader.symbol, name: usLeader.name, market: usLeader.market } : null
+        }),
+        buildHomeCardFromRow('spx', 'S&P 500', spxRow, { market: 'us', marketLabel: 'US Equities', displayKind: 'number' }),
+        buildHomeCardFromRow('dji', 'DOW JONES', djiRow, { market: 'us', marketLabel: 'US Equities', displayKind: 'number' }),
+        buildHomeCardFromRow('ndx', 'NASDAQ', ndxRow, { market: 'us', marketLabel: 'US Equities', displayKind: 'number' })
+    ];
+
+    const cardRows = {
+        btc: cryptoBtc,
+        eth: cryptoEth,
+        sol: cryptoSol,
+        sse: sseRow,
+        cnComposite: cnLeader,
+        usComposite: usLeader,
+        spx: spxRow,
+        dji: djiRow,
+        ndx: ndxRow
+    };
+
+    const detailsByCard = Object.fromEntries(
+        cards.map((card) => {
+            const row = cardRows[card.cardKey];
+            if (!row) {
+                return [card.cardKey, {
+                    title: card.label,
+                    subtitle: 'Data unavailable',
+                    badge: 'Unavailable',
+                    factors: [],
+                    contribution: {},
+                    explanation: `${card.label} is currently unavailable.`,
+                    actionTooltip: 'Live data unavailable',
+                    action: 'UNAVAILABLE',
+                    actionTone: 'danger',
+                    stale: true
+                }];
+            }
+            const leadIn = buildHomeCompositeDetailLeadIn(card.cardKey, row);
+            return [card.cardKey, buildTrackingFactorPayloadFromRow(row, aggregate, {
+                title: card.label,
+                subtitle: card.leaderMeta ? `${card.leaderMeta.symbol} | ${card.leaderMeta.name}` : `${row.marketLabel} | ${row.symbol}`,
+                badge: row.stale ? 'Stale Snapshot' : 'Live Factors',
+                leadIn
+            })];
+        })
+    );
+
+    const featuredCard = cards
+        .filter((card) => Number.isFinite(card.totalScore))
+        .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))[0] || cards[0];
+
+    return {
+        meta: {
+            ...aggregate.meta,
+            lastUpdatedAt: aggregate.meta?.lastUpdatedAt || aggregate.summary?.lastUpdatedAt || new Date().toISOString(),
+            refreshIntervalSec: aggregate.meta?.refreshIntervalSec || aggregate.summary?.refreshIntervalSec || TRACKING_REFRESH_INTERVAL_SEC
+        },
+        hero: {
+            liveCoveragePct: aggregate.summary?.totalCoveragePct || 0,
+            assetsCovered: aggregate.summary?.totalSymbols || 0,
+            actionableSignals: aggregate.allRows.filter((row) => row.action === 'STRONG BUY' || row.action === 'BUY').length,
+            strongBuyCount: aggregate.allRows.filter((row) => row.action === 'STRONG BUY').length,
+            buyCount: aggregate.allRows.filter((row) => row.action === 'BUY').length,
+            latestActionAt: aggregate.summary?.latestActionAt || null
+        },
+        overview: { cards },
+        detailsByCard,
+        featuredCardKey: featuredCard?.cardKey || 'btc'
+    };
+}
+
+async function getHomeLandingWithCache() {
+    const now = Date.now();
+    if (homeLandingCache && now - homeLandingCacheAt <= HOME_LANDING_CACHE_TTL_MS) {
+        return deepCopy(homeLandingCache);
+    }
+    if (homeLandingPromise) {
+        const payload = await homeLandingPromise;
+        return deepCopy(payload);
+    }
+
+    const inFlight = (async () => {
+        const payload = await buildHomeLandingPayload();
+        homeLandingCache = payload;
+        homeLandingCacheAt = Date.now();
+        return payload;
+    })();
+    homeLandingPromise = inFlight;
+    try {
+        const payload = await inFlight;
+        return deepCopy(payload);
+    } finally {
+        homeLandingPromise = null;
+    }
+}
+
+function buildTrackingSimulation(rows, topN) {
+    const picks = rows.slice(0, topN);
+    const count = picks.length;
+    const expectedReturn = count ? picks.reduce((sum, row) => sum + (row.q50 || 0), 0) / count : 0;
+    const downside = count ? picks.reduce((sum, row) => sum + (row.q10 || 0), 0) / count : 0;
+    const upside = count ? picks.reduce((sum, row) => sum + (row.q90 || 0), 0) / count : 0;
+    const dispersion = count
+        ? Math.sqrt(picks.reduce((sum, row) => sum + (((row.q50 || 0) - expectedReturn) ** 2), 0) / count)
+        : 0;
+    const sharpe = dispersion > 1e-6 ? expectedReturn / dispersion : expectedReturn / 0.01;
+    const capital = 100000;
+    const pnlUsd = capital * expectedReturn;
+    return {
+        topN: count,
+        expectedReturnPct: roundTrackingNumber(expectedReturn * 100, 2),
+        downsidePct: roundTrackingNumber(downside * 100, 2),
+        upsidePct: roundTrackingNumber(upside * 100, 2),
+        sharpe: roundTrackingNumber(sharpe, 2),
+        pnlUsd: roundTrackingNumber(pnlUsd, 2),
+        holdings: picks.map((row) => ({
+            symbol: row.symbol,
+            market: row.market,
+            weightPct: roundTrackingNumber((1 / Math.max(1, count)) * 100, 1),
+            q50Pct: roundTrackingNumber((row.q50 || 0) * 100, 2),
+            totalScore: row.totalScore
+        }))
+    };
+}
+
+async function handleTrackingSummary(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const aggregate = await getTrackingAggregateWithCache();
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            summary: aggregate.summary
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build tracking summary',
+            detail: error.message
+        });
+    }
+}
+
+async function handleTrackingUniverse(req, res, parsedUrl) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const aggregate = await getTrackingAggregateWithCache();
+        const universe = applyTrackingUniverseQuery(aggregate.allRows, {
+            market: parsedUrl.searchParams.get('market'),
+            action: parsedUrl.searchParams.get('action'),
+            search: parsedUrl.searchParams.get('search'),
+            sortBy: parsedUrl.searchParams.get('sortBy'),
+            sort: parsedUrl.searchParams.get('sort'),
+            sortDir: parsedUrl.searchParams.get('sortDir'),
+            direction: parsedUrl.searchParams.get('direction'),
+            page: parsedUrl.searchParams.get('page'),
+            pageSize: parsedUrl.searchParams.get('pageSize'),
+            view: parsedUrl.searchParams.get('view')
+        });
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            summary: aggregate.summary,
+            universe
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build tracking universe',
+            detail: error.message
+        });
+    }
+}
+
+async function handleTrackingFactors(req, res, parsedUrl) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    const symbol = parsedUrl.searchParams.get('symbol');
+    if (!symbol) {
+        sendJson(res, 400, { error: 'Missing required query param: symbol' });
+        return;
+    }
+    try {
+        const aggregate = await getTrackingAggregateWithCache();
+        const market = parsedUrl.searchParams.get('market');
+        const row = findTrackingRow(aggregate, symbol, market);
+        if (!row) {
+            sendJson(res, 404, { error: `Tracking row not found for ${symbol}` });
+            return;
+        }
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            ...buildTrackingFactorPayloadFromRow(row, aggregate)
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build tracking factor payload',
+            detail: error.message
+        });
+    }
+}
+
+async function handleHomeLanding(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const payload = await getHomeLandingWithCache();
+        sendJson(res, 200, payload);
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build home landing payload',
+            detail: error.message
+        });
+    }
+}
+
+async function handleTrackingCoverage(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const aggregate = await getTrackingAggregateWithCache();
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            coverage: aggregate.coverage
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build tracking coverage matrix',
+            detail: error.message
+        });
+    }
+}
+
+async function handleTrackingActions(req, res, parsedUrl) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const aggregate = await getTrackingAggregateWithCache();
+        const limit = clamp(parseInteger(parsedUrl.searchParams.get('limit'), 20), 1, 100);
+        const type = normalizeTrackingActionType(parsedUrl.searchParams.get('type'));
+        const filtered = type === 'all'
+            ? aggregate.actions.items
+            : aggregate.actions.items.filter((item) => item.type === type);
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            latestActionAt: aggregate.actions.latestActionAt,
+            total: filtered.length,
+            items: filtered.slice(0, limit)
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to build tracking actions feed',
+            detail: error.message
+        });
+    }
+}
+
+async function handleTrackingSimulate(req, res) {
+    if (req.method === 'OPTIONS') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+    if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const body = await readJsonBody(req);
+        const aggregate = await getTrackingAggregateWithCache();
+        const filtered = applyTrackingUniverseQuery(aggregate.allRows, {
+            market: body.market,
+            action: body.action,
+            search: body.search,
+            sortBy: body.sortBy,
+            sortDir: body.sortDir,
+            page: 1,
+            pageSize: 100,
+            view: 'all'
+        }).rows;
+        const topN = clamp(parseInteger(body.topN, TRACKING_SIMULATION_DEFAULT_TOP_N), 1, 20);
+        sendJson(res, 200, {
+            meta: aggregate.meta,
+            simulation: buildTrackingSimulation(filtered, topN)
+        });
+    } catch (error) {
+        sendJson(res, 502, {
+            error: 'Failed to simulate tracking portfolio',
+            detail: error.message
+        });
+    }
+}
+
 function handleAlertContract(req, res) {
     if (req.method === 'OPTIONS') {
         sendJson(res, 200, { ok: true });
@@ -4389,6 +6225,10 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (parsedUrl.pathname === '/api/cn-equity/live') {
+        handleCnLive(req, res);
+        return;
+    }
     if (parsedUrl.pathname === '/api/cn-equity/prices') {
         handleCnPrices(req, res, parsedUrl);
         return;
@@ -4452,6 +6292,36 @@ const server = http.createServer((req, res) => {
     }
     if (parsedUrl.pathname === '/api/us-equity/predictions') {
         handleUsPredictionsAlias(req, res, parsedUrl);
+        return;
+    }
+
+    if (parsedUrl.pathname === '/api/tracking/summary') {
+        handleTrackingSummary(req, res);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/tracking/universe') {
+        handleTrackingUniverse(req, res, parsedUrl);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/tracking/factors') {
+        handleTrackingFactors(req, res, parsedUrl);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/tracking/coverage') {
+        handleTrackingCoverage(req, res);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/tracking/actions') {
+        handleTrackingActions(req, res, parsedUrl);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/tracking/simulate') {
+        handleTrackingSimulate(req, res);
+        return;
+    }
+
+    if (parsedUrl.pathname === '/api/home/landing') {
+        handleHomeLanding(req, res);
         return;
     }
 
