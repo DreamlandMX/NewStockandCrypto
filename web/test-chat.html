@@ -1,0 +1,433 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test - Notes & Chat | StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .test-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .test-section {
+            background: rgba(8, 12, 29, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .test-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .test-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .test-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .test-status.pending { background: rgba(250, 204, 21, 0.2); color: #facc15; }
+        .test-status.success { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .test-status.error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .test-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .log-area {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+        .log-entry { margin-bottom: 0.25rem; }
+        .log-entry.info { color: var(--primary-accent); }
+        .log-entry.success { color: var(--success); }
+        .log-entry.error { color: var(--error); }
+        .log-entry.warn { color: #facc15; }
+        .quick-links {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+        .quick-links a {
+            padding: 1rem 1.5rem;
+            background: rgba(0, 229, 255, 0.1);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: 8px;
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: all 0.2s;
+        }
+        .quick-links a:hover {
+            background: rgba(0, 229, 255, 0.2);
+            border-color: var(--primary-accent);
+        }
+    </style>
+</head>
+<body style="padding-top: 20px;">
+    <div class="test-container">
+        <div class="section-header" style="text-align: left; margin-bottom: 2rem;">
+            <span class="section-tag">Testing</span>
+            <h1 class="section-title">Notes & Chat Feature Test</h1>
+            <p style="color: var(--text-secondary);">Validate the full notes and board chat workflow.</p>
+        </div>
+
+        <div class="quick-links">
+            <a href="notes.html">Notes Page</a>
+            <a href="chat.html">Chat Page</a>
+            <a href="login.html">Login Page</a>
+            <a href="register.html">Register Page</a>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">
+                <h3 class="test-title">Authentication Status</h3>
+                <span class="test-status" id="authStatus">Checking...</span>
+            </div>
+            <div class="test-actions">
+                <button class="btn btn-secondary btn-sm" onclick="checkAuth()">Check Login Status</button>
+                <button class="btn btn-primary btn-sm" onclick="window.location.href='login.html'">Go to Login</button>
+            </div>
+            <div class="log-area" id="authLog">
+                <div class="log-entry info">Waiting for check...</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">
+                <h3 class="test-title">Supabase Connection</h3>
+                <span class="test-status" id="supabaseStatus">Checking...</span>
+            </div>
+            <div class="test-actions">
+                <button class="btn btn-secondary btn-sm" onclick="testSupabaseConnection()">Test Connection</button>
+                <button class="btn btn-secondary btn-sm" onclick="testDatabaseSchema()">Check Database Tables</button>
+            </div>
+            <div class="log-area" id="supabaseLog">
+                <div class="log-entry info">Waiting for test...</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">
+                <h3 class="test-title">Notes Features</h3>
+                <span class="test-status" id="notesStatus">Pending</span>
+            </div>
+            <div class="test-actions">
+                <button class="btn btn-secondary btn-sm" onclick="testCreateNote()">Create Test Note</button>
+                <button class="btn btn-secondary btn-sm" onclick="testGetNotes()">Fetch Notes</button>
+                <button class="btn btn-secondary btn-sm" onclick="testDeleteNote()">Delete Test Note</button>
+            </div>
+            <div class="log-area" id="notesLog">
+                <div class="log-entry info">Waiting for test...</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">
+                <h3 class="test-title">Chat Features</h3>
+                <span class="test-status" id="chatStatus">Pending</span>
+            </div>
+            <div class="test-actions">
+                <button class="btn btn-secondary btn-sm" onclick="testGetBoards()">Fetch Chat Boards</button>
+                <button class="btn btn-secondary btn-sm" onclick="testJoinBoard()">Join Test Board</button>
+                <button class="btn btn-secondary btn-sm" onclick="testSendMessage()">Send Test Message</button>
+                <button class="btn btn-secondary btn-sm" onclick="testGetMessages()">Fetch Messages</button>
+            </div>
+            <div class="log-area" id="chatLog">
+                <div class="log-entry info">Waiting for test...</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-header">
+                <h3 class="test-title">Realtime Subscription</h3>
+                <span class="test-status" id="realtimeStatus">Pending</span>
+            </div>
+            <div class="test-actions">
+                <button class="btn btn-secondary btn-sm" onclick="testRealtime()">Test Realtime Messages</button>
+            </div>
+            <div class="log-area" id="realtimeLog">
+                <div class="log-entry info">Waiting for test...</div>
+            </div>
+        </div>
+
+        <div class="test-section" style="background: rgba(0, 229, 255, 0.08); border-color: rgba(0, 229, 255, 0.3);">
+            <h3 style="margin-bottom: 1rem;">Test Checklist</h3>
+            <ol style="color: var(--text-secondary); line-height: 1.8; padding-left: 1.5rem;">
+                <li>Register or log in first. Authentication is required before using notes and chat.</li>
+                <li>Run <code>database/supabase_schema.sql</code> in Supabase to create the required tables.</li>
+                <li>Click <strong>Test Connection</strong> to verify Supabase connectivity.</li>
+                <li>Click <strong>Check Database Tables</strong> to confirm that all tables exist.</li>
+                <li>Test note actions: create, fetch, and delete notes.</li>
+                <li>Test chat actions: fetch boards, join a board, and send messages.</li>
+                <li>Open two browser windows if you want to validate realtime subscriptions.</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script>
+        let testNoteId = null;
+        let testBoardId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+        function log(containerId, message, type = 'info') {
+            const container = document.getElementById(containerId);
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function setStatus(elementId, status, type) {
+            const el = document.getElementById(elementId);
+            el.textContent = status;
+            el.className = `test-status ${type}`;
+        }
+
+        async function checkAuth() {
+            try {
+                await SupabaseClient.init();
+                const user = await SupabaseClient.auth.getCurrentUser();
+
+                if (user) {
+                    log('authLog', `Logged in: ${user.email}`, 'success');
+                    log('authLog', `User ID: ${user.id}`, 'info');
+                    setStatus('authStatus', 'Logged In', 'success');
+                } else {
+                    log('authLog', 'Not logged in. Please sign in first.', 'warn');
+                    setStatus('authStatus', 'Logged Out', 'pending');
+                }
+            } catch (error) {
+                log('authLog', `Auth check failed: ${error.message}`, 'error');
+                setStatus('authStatus', 'Error', 'error');
+            }
+        }
+
+        async function testSupabaseConnection() {
+            try {
+                log('supabaseLog', 'Initializing Supabase...', 'info');
+                await SupabaseClient.init();
+                log('supabaseLog', 'Supabase initialized successfully.', 'success');
+
+                const user = await SupabaseClient.auth.getCurrentUser();
+                if (user) {
+                    log('supabaseLog', `Connection healthy. User: ${user.email}`, 'success');
+                    setStatus('supabaseStatus', 'Connected', 'success');
+                } else {
+                    log('supabaseLog', 'Connection healthy, but no user session is active.', 'warn');
+                    setStatus('supabaseStatus', 'Logged Out', 'pending');
+                }
+            } catch (error) {
+                log('supabaseLog', `Connection failed: ${error.message}`, 'error');
+                setStatus('supabaseStatus', 'Connection Failed', 'error');
+            }
+        }
+
+        async function testDatabaseSchema() {
+            try {
+                log('supabaseLog', 'Checking database tables...', 'info');
+
+                const tables = ['notes', 'chat_boards', 'chat_messages', 'chat_members'];
+                for (const table of tables) {
+                    try {
+                        const { error } = await SupabaseClient.supabase
+                            .from(table)
+                            .select('count')
+                            .limit(1);
+
+                        if (error) throw error;
+                        log('supabaseLog', `Table ${table} exists.`, 'success');
+                    } catch (e) {
+                        log('supabaseLog', `Table ${table} is missing or inaccessible: ${e.message}`, 'error');
+                    }
+                }
+
+                setStatus('supabaseStatus', 'Check Complete', 'success');
+            } catch (error) {
+                log('supabaseLog', `Schema check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testCreateNote() {
+            try {
+                log('notesLog', 'Creating test note...', 'info');
+
+                const note = await SupabaseClient.notes.create({
+                    title: `Test Note ${new Date().toLocaleTimeString()}`,
+                    content: 'This note was created by the automated test flow.\n\nMulti-line content is supported.',
+                    market: 'Crypto',
+                    tags: ['test', 'automated', 'btc']
+                });
+
+                testNoteId = note.id;
+                log('notesLog', `Note created successfully. ID: ${note.id}`, 'success');
+                log('notesLog', `Title: ${note.title}`, 'info');
+                setStatus('notesStatus', 'Create Success', 'success');
+            } catch (error) {
+                log('notesLog', `Create failed: ${error.message}`, 'error');
+                setStatus('notesStatus', 'Create Failed', 'error');
+            }
+        }
+
+        async function testGetNotes() {
+            try {
+                log('notesLog', 'Fetching notes...', 'info');
+
+                const notes = await SupabaseClient.notes.get({ limit: 5 });
+
+                log('notesLog', `Fetched ${notes.length} notes.`, 'success');
+                notes.forEach((note, i) => {
+                    log('notesLog', `${i + 1}. ${note.title} (${note.market})`, 'info');
+                });
+
+                setStatus('notesStatus', 'Fetch Success', 'success');
+            } catch (error) {
+                log('notesLog', `Fetch failed: ${error.message}`, 'error');
+                setStatus('notesStatus', 'Fetch Failed', 'error');
+            }
+        }
+
+        async function testDeleteNote() {
+            if (!testNoteId) {
+                log('notesLog', 'Create a test note first.', 'warn');
+                return;
+            }
+
+            try {
+                log('notesLog', `Deleting note: ${testNoteId}`, 'info');
+
+                await SupabaseClient.notes.delete(testNoteId);
+
+                log('notesLog', 'Note deleted.', 'success');
+                testNoteId = null;
+                setStatus('notesStatus', 'Delete Success', 'success');
+            } catch (error) {
+                log('notesLog', `Delete failed: ${error.message}`, 'error');
+                setStatus('notesStatus', 'Delete Failed', 'error');
+            }
+        }
+
+        async function testGetBoards() {
+            try {
+                log('chatLog', 'Fetching chat boards...', 'info');
+
+                const boards = await SupabaseClient.chat.getBoards();
+
+                log('chatLog', `Fetched ${boards.length} boards.`, 'success');
+                boards.forEach((board, i) => {
+                    log('chatLog', `${i + 1}. ${board.name} - ${board.topic || 'No topic'}`, 'info');
+                });
+
+                if (boards.length > 0) {
+                    testBoardId = boards[0].id;
+                }
+
+                setStatus('chatStatus', 'Fetch Success', 'success');
+            } catch (error) {
+                log('chatLog', `Fetch failed: ${error.message}`, 'error');
+                setStatus('chatStatus', 'Fetch Failed', 'error');
+            }
+        }
+
+        async function testJoinBoard() {
+            try {
+                log('chatLog', `Joining board: ${testBoardId}`, 'info');
+
+                await SupabaseClient.chat.join(testBoardId);
+
+                log('chatLog', 'Joined board.', 'success');
+                setStatus('chatStatus', 'Joined', 'success');
+            } catch (error) {
+                if (error.message.includes('duplicate')) {
+                    log('chatLog', 'Already a member of this board.', 'success');
+                    setStatus('chatStatus', 'Joined', 'success');
+                } else {
+                    log('chatLog', `Join failed: ${error.message}`, 'error');
+                    setStatus('chatStatus', 'Join Failed', 'error');
+                }
+            }
+        }
+
+        async function testSendMessage() {
+            try {
+                log('chatLog', 'Sending test message...', 'info');
+
+                const message = await SupabaseClient.chat.send(
+                    testBoardId,
+                    `Test message - ${new Date().toLocaleTimeString()} [rocket]`
+                );
+
+                log('chatLog', `Message sent. ID: ${message.id}`, 'success');
+                setStatus('chatStatus', 'Send Success', 'success');
+            } catch (error) {
+                log('chatLog', `Send failed: ${error.message}`, 'error');
+                setStatus('chatStatus', 'Send Failed', 'error');
+            }
+        }
+
+        async function testGetMessages() {
+            try {
+                log('chatLog', 'Fetching messages...', 'info');
+
+                const messages = await SupabaseClient.chat.getMessages(testBoardId, 10);
+
+                log('chatLog', `Fetched ${messages.length} messages.`, 'success');
+                messages.slice(-5).forEach((msg) => {
+                    const time = new Date(msg.created_at).toLocaleTimeString();
+                    log('chatLog', `${time}: ${msg.content?.substring(0, 50)}...`, 'info');
+                });
+
+                setStatus('chatStatus', 'Fetch Success', 'success');
+            } catch (error) {
+                log('chatLog', `Fetch failed: ${error.message}`, 'error');
+                setStatus('chatStatus', 'Fetch Failed', 'error');
+            }
+        }
+
+        async function testRealtime() {
+            try {
+                log('realtimeLog', 'Subscribing to realtime messages...', 'info');
+
+                const subscription = SupabaseClient.chat.subscribe(testBoardId, (message) => {
+                    log('realtimeLog', `New message received: ${message.content?.substring(0, 50)}`, 'success');
+                });
+
+                log('realtimeLog', 'Subscribed. Waiting for messages...', 'success');
+                log('realtimeLog', 'Hint: open another window and send a message to test realtime delivery.', 'info');
+                setStatus('realtimeStatus', 'Subscribed', 'success');
+
+                setTimeout(() => {
+                    SupabaseClient.chat.unsubscribe(subscription);
+                    log('realtimeLog', 'Subscription auto-cancelled after 60 seconds.', 'warn');
+                }, 60000);
+            } catch (error) {
+                log('realtimeLog', `Subscription failed: ${error.message}`, 'error');
+                setStatus('realtimeStatus', 'Subscription Failed', 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await checkAuth();
+        });
+    </script>
+</body>
+</html>
