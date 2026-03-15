@@ -6,6 +6,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { createAuthStore } = require('./server/auth-store');
+const { createNotesStore } = require('./server/notes-store');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 9000);
@@ -179,6 +180,7 @@ let trackingLatestActionAt = null;
 let trackingPreviousTrackedState = new Map();
 let trackingKnownUniverseSymbols = new Set();
 const authStore = createAuthStore({ baseDir: __dirname });
+const notesStore = createNotesStore({ baseDir: __dirname });
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -229,6 +231,212 @@ function readJsonBody(req) {
             }
         });
         req.on('error', reject);
+    });
+}
+
+function getAuthenticatedSiteUser(req) {
+    return authStore.getSessionUser(req);
+}
+
+function requireAuthenticatedSiteUser(req, res) {
+    const user = getAuthenticatedSiteUser(req);
+    if (!user) {
+        sendJson(res, 401, {
+            success: false,
+            error: 'UNAUTHORIZED',
+            message: 'Sign in is required.'
+        });
+        return null;
+    }
+    return user;
+}
+
+function normalizeNotePayload(body = {}) {
+    return {
+        title: body.title,
+        content: body.content,
+        market: body.market,
+        tags: body.tags,
+        is_pinned: body.is_pinned,
+        is_favorite: body.is_favorite,
+        is_public: body.is_public
+    };
+}
+
+async function handleNotesCollectionRoute(req, res, parsedUrl) {
+    const user = requireAuthenticatedSiteUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (req.method === 'GET') {
+        const notes = notesStore.listNotes(user.id, {
+            market: parsedUrl.searchParams.get('market'),
+            tag: parsedUrl.searchParams.get('tag'),
+            search: parsedUrl.searchParams.get('search'),
+            pinned: parsedUrl.searchParams.get('pinned'),
+            favorite: parsedUrl.searchParams.get('favorite'),
+            sortBy: parsedUrl.searchParams.get('sortBy') || parsedUrl.searchParams.get('orderBy'),
+            sortOrder: parsedUrl.searchParams.get('sortOrder') || (parsedUrl.searchParams.get('ascending') === 'true' ? 'asc' : 'desc'),
+            limit: parsedUrl.searchParams.get('limit'),
+            offset: parsedUrl.searchParams.get('offset')
+        });
+        sendJson(res, 200, { success: true, notes });
+        return;
+    }
+
+    if (req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const note = notesStore.createNote(user.id, normalizeNotePayload(body));
+        sendJson(res, 201, { success: true, note });
+        return;
+    }
+
+    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+}
+
+async function handleNoteItemRoute(req, res, noteId) {
+    const user = requireAuthenticatedSiteUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (req.method === 'GET') {
+        const note = notesStore.getNoteForUser(user.id, noteId);
+        if (!note) {
+            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+            return;
+        }
+        sendJson(res, 200, { success: true, note });
+        return;
+    }
+
+    if (req.method === 'PUT' || req.method === 'PATCH') {
+        const body = await readJsonBody(req);
+        const note = notesStore.updateNote(user.id, noteId, normalizeNotePayload(body));
+        if (!note) {
+            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+            return;
+        }
+        sendJson(res, 200, { success: true, note });
+        return;
+    }
+
+    if (req.method === 'DELETE') {
+        const deleted = notesStore.deleteNote(user.id, noteId);
+        if (!deleted) {
+            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+            return;
+        }
+        sendJson(res, 200, { success: true });
+        return;
+    }
+
+    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+}
+
+async function handleNoteVersionsRoute(req, res, noteId, parsedUrl) {
+    const user = requireAuthenticatedSiteUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+    }
+
+    const versions = notesStore.getNoteVersions(user.id, noteId, parsedUrl.searchParams.get('limit'));
+    if (!versions) {
+        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+        return;
+    }
+
+    sendJson(res, 200, { success: true, versions });
+}
+
+async function handleNoteShareRoute(req, res, shareId) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+    }
+
+    const note = notesStore.getNoteByShareId(shareId);
+    if (!note) {
+        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+        return;
+    }
+
+    sendJson(res, 200, { success: true, note });
+}
+
+async function handleCommunityIdeasRoute(req, res, parsedUrl) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+    }
+
+    const viewer = getAuthenticatedSiteUser(req);
+    const ideas = notesStore.listIdeas(viewer?.id ?? null, {
+        market: parsedUrl.searchParams.get('market'),
+        tag: parsedUrl.searchParams.get('tag'),
+        search: parsedUrl.searchParams.get('search'),
+        visibility: parsedUrl.searchParams.get('visibility'),
+        sortBy: parsedUrl.searchParams.get('sortBy') || parsedUrl.searchParams.get('orderBy'),
+        sortOrder: parsedUrl.searchParams.get('sortOrder') || (parsedUrl.searchParams.get('ascending') === 'true' ? 'asc' : 'desc'),
+        limit: parsedUrl.searchParams.get('limit'),
+        offset: parsedUrl.searchParams.get('offset')
+    });
+
+    sendJson(res, 200, {
+        success: true,
+        ideas,
+        viewer: viewer ? {
+            id: viewer.id,
+            displayName: viewer.displayName,
+            email: viewer.email
+        } : null
+    });
+}
+
+async function handleCommunityNoteRoute(req, res, noteId) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+    }
+
+    const viewer = getAuthenticatedSiteUser(req);
+    const note = notesStore.getNoteForViewer(viewer?.id ?? null, noteId);
+    if (!note) {
+        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+        return;
+    }
+
+    const related = notesStore.getRelatedIdeas(viewer?.id ?? null, note, 4);
+    sendJson(res, 200, {
+        success: true,
+        note,
+        related
+    });
+}
+
+async function handleCommunityShareRoute(req, res, shareId) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+        return;
+    }
+
+    const note = notesStore.getSharedIdea(shareId);
+    if (!note) {
+        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
+        return;
+    }
+
+    const related = notesStore.getRelatedIdeas(null, note, 4);
+    sendJson(res, 200, {
+        success: true,
+        note,
+        related
     });
 }
 
@@ -6589,6 +6797,53 @@ const server = http.createServer((req, res) => {
     }
     if (parsedUrl.pathname === '/api/auth/logout') {
         authStore.handleLogout(req, res, sendJson);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/notes') {
+        handleNotesCollectionRoute(req, res, parsedUrl).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'NOTES_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (parsedUrl.pathname.startsWith('/api/notes/share/')) {
+        const shareId = decodeURIComponent(parsedUrl.pathname.replace('/api/notes/share/', ''));
+        handleNoteShareRoute(req, res, shareId).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'NOTE_SHARE_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (parsedUrl.pathname === '/api/community/ideas') {
+        handleCommunityIdeasRoute(req, res, parsedUrl).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'COMMUNITY_IDEAS_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (parsedUrl.pathname.startsWith('/api/community/notes/share/')) {
+        const shareId = decodeURIComponent(parsedUrl.pathname.replace('/api/community/notes/share/', ''));
+        handleCommunityShareRoute(req, res, shareId).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'COMMUNITY_SHARE_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (/^\/api\/community\/notes\/\d+$/.test(parsedUrl.pathname)) {
+        const noteId = Number(parsedUrl.pathname.split('/')[4]);
+        handleCommunityNoteRoute(req, res, noteId).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'COMMUNITY_NOTE_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (/^\/api\/notes\/\d+\/versions$/.test(parsedUrl.pathname)) {
+        const noteId = Number(parsedUrl.pathname.split('/')[3]);
+        handleNoteVersionsRoute(req, res, noteId, parsedUrl).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'NOTE_VERSIONS_FAILED', message: error.message });
+        });
+        return;
+    }
+    if (/^\/api\/notes\/\d+$/.test(parsedUrl.pathname)) {
+        const noteId = Number(parsedUrl.pathname.split('/')[3]);
+        handleNoteItemRoute(req, res, noteId).catch((error) => {
+            sendJson(res, 500, { success: false, error: 'NOTE_ITEM_FAILED', message: error.message });
+        });
         return;
     }
 

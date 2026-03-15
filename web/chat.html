@@ -1,357 +1,675 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Community Chat - StockandCrypto</title>
-<link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/components.css">
-<style>
-.chat-layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 1.5rem;
-  height: calc(100vh - 200px);
-  min-height: 500px;
-}
-
-.chat-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.chat-boards-list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.board-item {
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
-  margin-bottom: 0.5rem;
-}
-
-.board-item:hover {
-  background: rgba(0, 229, 255, 0.08);
-  border-color: rgba(0, 229, 255, 0.2);
-}
-
-.board-item.active {
-  background: rgba(0, 229, 255, 0.12);
-  border-color: var(--primary-accent);
-}
-
-.board-item-name {
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-}
-
-.board-item-topic {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.board-item-members {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 0.35rem;
-}
-
-.chat-main {
-  display: flex;
-  flex-direction: column;
-  background: rgba(8, 12, 29, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.chat-header {
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.chat-header-info h3 {
-  font-size: 1.1rem;
-  margin-bottom: 0.25rem;
-}
-
-.chat-header-info p {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.message {
-  display: flex;
-  gap: 0.75rem;
-  max-width: 85%;
-}
-
-.message.own {
-  margin-left: auto;
-  flex-direction: row-reverse;
-}
-
-.message-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-accent), var(--success));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.85rem;
-  flex-shrink: 0;
-}
-
-.message-content {
-  background: rgba(255, 255, 255, 0.05);
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  border-top-left-radius: var(--radius-sm);
-}
-
-.message.own .message-content {
-  background: rgba(0, 229, 255, 0.12);
-  border-top-left-radius: var(--radius-md);
-  border-top-right-radius: var(--radius-sm);
-}
-
-.message-header {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
-  font-size: 0.78rem;
-}
-
-.message-username {
-  font-weight: 600;
-}
-
-.message-time {
-  color: var(--text-muted);
-}
-
-.message-text {
-  font-size: 0.9rem;
-  line-height: 1.5;
-  word-wrap: break-word;
-}
-
-.chat-input-area {
-  padding: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  gap: 0.75rem;
-}
-
-.chat-input {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-md);
-  padding: 0.75rem 1rem;
-  color: var(--text-primary);
-  font-size: 0.9rem;
-}
-
-.chat-input:focus {
-  outline: none;
-  border-color: var(--primary-accent);
-}
-
-.online-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.78rem;
-  color: var(--success);
-}
-
-.online-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--success);
-  border-radius: 50%;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.typing-indicator {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  font-style: italic;
-  padding: 0.5rem 1rem;
-}
-
-.empty-chat {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  text-align: center;
-  padding: 2rem;
-}
-
-.empty-chat h3 {
-  margin-bottom: 0.5rem;
-  color: var(--text-secondary);
-}
-
-@media (max-width: 768px) {
-  .chat-layout {
-    grid-template-columns: 1fr;
-  }
-  .chat-sidebar {
-    display: none;
-  }
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Lounges - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .community-hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+        .community-hero-copy h1 {
+            font-size: clamp(2.5rem, 5.8vw, 4.6rem);
+            line-height: 0.94;
+            margin-bottom: 0.75rem;
+        }
+        .community-hero-copy p {
+            max-width: 760px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            font-size: 1rem;
+        }
+        .community-hero-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .lounge-layout {
+            display: grid;
+            grid-template-columns: 280px minmax(0, 1fr) 320px;
+            gap: 1.5rem;
+            align-items: start;
+            min-height: calc(100vh - 260px);
+        }
+        .lounge-card,
+        .chat-main,
+        .idea-rail-card,
+        .meta-card {
+            background: rgba(8, 12, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 26px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+        }
+        .lounge-sidebar,
+        .idea-rail {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            position: sticky;
+            top: 100px;
+        }
+        .card-section {
+            padding: 1rem;
+        }
+        .card-section h3 {
+            margin: 0 0 0.85rem;
+            font-size: 1.05rem;
+        }
+        .lounges-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .board-item {
+            padding: 0.9rem 1rem;
+            border-radius: 18px;
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .board-item:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 229, 255, 0.22);
+            background: rgba(0, 229, 255, 0.07);
+        }
+        .board-item.active {
+            border-color: rgba(0, 229, 255, 0.4);
+            background: linear-gradient(135deg, rgba(12, 27, 48, 0.9), rgba(9, 33, 41, 0.7));
+            box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.12), 0 12px 30px rgba(0, 229, 255, 0.08);
+        }
+        .board-item-name {
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        .board-item-topic,
+        .board-item-members,
+        .muted-copy {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+        .board-item-members {
+            margin-top: 0.45rem;
+        }
+        .chat-main {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 760px;
+        }
+        .chat-header {
+            padding: 1.1rem 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+        }
+        .chat-header-info h3 {
+            margin: 0;
+            font-size: 1.25rem;
+        }
+        .chat-header-info p {
+            margin-top: 0.3rem;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            line-height: 1.55;
+        }
+        .header-pills {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .status-pill {
+            padding: 0.45rem 0.75rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .chat-search-box {
+            display: none;
+            padding: 0.75rem 1.1rem;
+            gap: 0.6rem;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.15);
+        }
+        .chat-search-box.active {
+            display: flex;
+        }
+        .chat-search-box input,
+        .chat-input,
+        .share-search,
+        .idea-rail-card input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 0.75rem 0.95rem;
+            color: var(--text-primary);
+        }
+        .chat-search-box input:focus,
+        .chat-input:focus,
+        .idea-rail-card input:focus {
+            outline: none;
+            border-color: rgba(0, 229, 255, 0.42);
+        }
+        .reply-preview {
+            display: none;
+            padding: 0.7rem 1.1rem;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.18);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .reply-preview.active {
+            display: flex;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.9rem;
+        }
+        .message {
+            display: flex;
+            gap: 0.75rem;
+            max-width: 84%;
+            position: relative;
+        }
+        .message.own {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+        .message-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.86rem;
+            flex-shrink: 0;
+        }
+        .message-content {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.8rem 1rem;
+            border-radius: 18px;
+            border-top-left-radius: 12px;
+            max-width: 100%;
+        }
+        .message.own .message-content {
+            background: rgba(0, 229, 255, 0.12);
+            border-top-left-radius: 18px;
+            border-top-right-radius: 12px;
+        }
+        .message-header {
+            display: flex;
+            gap: 0.45rem;
+            margin-bottom: 0.3rem;
+            font-size: 0.78rem;
+            flex-wrap: wrap;
+        }
+        .message-username {
+            font-weight: 700;
+        }
+        .message-time,
+        .edited-badge {
+            color: var(--text-muted);
+        }
+        .message-text {
+            font-size: 0.92rem;
+            line-height: 1.62;
+            word-wrap: break-word;
+        }
+        .message-text .mention {
+            color: var(--primary-accent);
+            font-weight: 700;
+        }
+        .message-reply-preview {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.35rem 0.5rem;
+            border-radius: 10px;
+            margin-bottom: 0.4rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+            border-left: 2px solid var(--primary-accent);
+        }
+        .message-actions {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: -0.5rem;
+            gap: 0.25rem;
+        }
+        .message:hover .message-actions {
+            display: flex;
+        }
+        .message.own .message-actions {
+            right: auto;
+            left: 0;
+        }
+        .action-btn,
+        .reaction-badge {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 999px;
+            padding: 0.2rem 0.55rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .action-btn:hover,
+        .reaction-badge:hover,
+        .reaction-badge.own {
+            background: rgba(0, 229, 255, 0.14);
+            border-color: rgba(0, 229, 255, 0.35);
+            color: var(--text-primary);
+        }
+        .message-reactions {
+            display: flex;
+            gap: 0.3rem;
+            margin-top: 0.55rem;
+            flex-wrap: wrap;
+        }
+        .message-attachment {
+            margin-top: 0.5rem;
+        }
+        .message-attachment img {
+            max-width: 220px;
+            border-radius: 16px;
+            cursor: pointer;
+        }
+        .message-attachment a {
+            color: var(--primary-accent);
+        }
+        .typing-indicator {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-style: italic;
+            padding: 0.5rem 1rem;
+        }
+        .chat-input-area {
+            padding: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            gap: 0.75rem;
+            background: rgba(0, 0, 0, 0.12);
+        }
+        .empty-chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem;
+        }
+        .online-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: var(--success);
+            font-size: 0.82rem;
+        }
+        .online-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        .online-users-list {
+            max-height: 220px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+        }
+        .online-user-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 0.55rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            font-size: 0.84rem;
+        }
+        .idea-rail-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .idea-rail-item {
+            display: block;
+            padding: 0.9rem;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .idea-rail-item:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 229, 255, 0.22);
+        }
+        .idea-rail-item h4 {
+            margin: 0.4rem 0 0.45rem;
+            font-size: 0.96rem;
+            line-height: 1.35;
+        }
+        .idea-rail-item p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+            line-height: 1.55;
+        }
+        .lounge-guidelines {
+            display: grid;
+            gap: 0.55rem;
+            color: var(--text-secondary);
+            font-size: 0.82rem;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active {
+            display: flex;
+        }
+        .modal-content {
+            background: var(--bg-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: auto;
+        }
+        .modal-header,
+        .modal-footer,
+        .modal-body {
+            padding: 1rem;
+        }
+        .modal-header,
+        .modal-footer {
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .modal-footer {
+            border-bottom: none;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        .reaction-picker {
+            position: absolute;
+            background: var(--bg-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 0.5rem;
+            display: flex;
+            gap: 0.25rem;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .reaction-picker button {
+            background: none;
+            border: none;
+            font-size: 1.1rem;
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 10px;
+        }
+        .reaction-picker button:hover {
+            background: rgba(0, 229, 255, 0.18);
+        }
+        .search-highlight {
+            background: rgba(251, 191, 36, 0.22);
+            padding: 0 0.15rem;
+            border-radius: 4px;
+        }
+        @media (max-width: 1280px) {
+            .lounge-layout {
+                grid-template-columns: 260px minmax(0, 1fr);
+            }
+            .idea-rail {
+                grid-column: 1 / -1;
+                position: static;
+            }
+        }
+        @media (max-width: 860px) {
+            .community-hero {
+                flex-direction: column;
+                align-items: start;
+            }
+            .lounge-layout {
+                grid-template-columns: 1fr;
+            }
+            .lounge-sidebar,
+            .idea-rail {
+                position: static;
+            }
+            .message-actions {
+                display: flex;
+                position: static;
+            }
+        }
+    </style>
 </head>
 <body>
-<header class="header">
-<div class="header-container">
-<div class="logo">
-<a href="index.html">
-<span class="logo-icon">&#9671;</span>
-<span class="logo-text">StockandCrypto</span>
-</a>
-</div>
-<nav class="nav" data-site-nav>
-<button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="navMenu" aria-expanded="false">
-<span></span><span></span><span></span>
-</button>
-<ul class="nav-menu" id="navMenu">
-<li><a href="index.html" class="nav-link">Home</a></li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="marketsMenu">Markets</button>
-<ul class="nav-dropdown-menu" id="marketsMenu">
-<li><a href="crypto.html" class="nav-link">Crypto</a></li>
-<li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
-<li><a href="us-equity.html" class="nav-link">US Equity</a></li>
-</ul>
-</li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="analysisMenu">Analysis</button>
-<ul class="nav-dropdown-menu" id="analysisMenu">
-<li><a href="model-explorer.html" class="nav-link">AI Models</a></li>
-<li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
-<li><a href="risk-engine.html" class="nav-link">Risk</a></li>
-</ul>
-</li>
-<li><a href="notes.html" class="nav-link">Notes</a></li>
-<li><a href="chat.html" class="nav-link active">Community</a></li>
-</ul>
-<button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
-</nav>
-<div class="nav-actions">
-<a href="login.html" class="btn btn-secondary btn-sm" id="loginBtn">Login</a>
-<button class="btn btn-primary btn-sm" id="logoutBtn" style="display: none;">Logout</button>
-</div>
-</div>
-</header>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">SC</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav" data-site-nav>
+                <button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="navMenu" aria-expanded="false">
+                    <span></span><span></span><span></span>
+                </button>
+                <ul class="nav-menu" id="navMenu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle active" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
+                        <ul class="nav-dropdown-menu" id="communityMenu">
+                            <li><a href="notes.html" class="nav-link">Ideas Feed</a></li>
+                            <li><a href="chat.html" class="nav-link active">Market Lounges</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
+            </nav>
+            <div class="nav-actions">
+                <button class="btn btn-secondary btn-sm" id="searchToggle" title="Search chat">Search</button>
+            </div>
+        </div>
+    </header>
 
-<main style="padding-top: 100px; min-height: 100vh;">
-<div class="container">
-<div class="section-header" style="text-align: left; margin-bottom: 1.5rem;">
-<span class="section-tag">Community</span>
-<h1 class="section-title">Trading Chat</h1>
-<p style="color: var(--text-secondary);">Discuss markets, share insights, and connect with other traders in real-time</p>
-</div>
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div class="container">
+            <section class="community-hero">
+                <div class="community-hero-copy">
+                    <span class="section-tag">Community</span>
+                    <h1>Market Lounges</h1>
+                    <p>Trade desks move between published ideas and live discussion. Use the lounges to pressure-test setups, coordinate with other traders, and jump into the latest market narratives without leaving the community surface.</p>
+                </div>
+                <div class="community-hero-actions">
+                    <a href="notes.html" class="btn btn-secondary">Browse Ideas Feed</a>
+                    <button class="btn btn-primary" type="button" onclick="showCreateChannelModal()">Create Lounge</button>
+                </div>
+            </section>
 
-<div class="chat-layout">
-<!-- Sidebar - Board List -->
-<div class="chat-sidebar">
-<div class="card">
-<div class="card-header">
-<h3 class="card-title">Channels</h3>
-</div>
-<div class="card-body chat-boards-list" id="boardsList">
-<div style="text-align: center; padding: 1rem; color: var(--text-muted);">
-Loading channels...
-</div>
-</div>
-</div>
+            <div class="lounge-layout">
+                <aside class="lounge-sidebar">
+                    <section class="lounge-card card-section">
+                        <h3>Active Lounges</h3>
+                        <div class="lounges-list" id="boardsList">
+                            <div class="muted-copy">Loading lounges...</div>
+                        </div>
+                    </section>
 
-<div class="card">
-<div class="card-body" style="padding: 0.75rem;">
-<div style="display: flex; justify-content: space-between; align-items: center;">
-<span style="font-size: 0.85rem; color: var(--text-secondary);">Online Users</span>
-<span class="online-indicator" id="onlineCount">
-<span class="online-dot"></span>
-<span>--</span>
-</span>
-</div>
-</div>
-</div>
-</div>
+                    <section class="meta-card card-section">
+                        <h3>Desk Presence</h3>
+                        <div class="online-indicator" id="onlineCount">
+                            <span class="online-dot"></span>
+                            <span>Live now</span>
+                            <strong id="onlineCountNum">--</strong>
+                        </div>
+                        <div class="online-users-list" id="onlineUsersList" style="margin-top: 0.85rem;"></div>
+                    </section>
+                </aside>
 
-<!-- Main Chat Area -->
-<div class="chat-main">
-<div class="chat-header">
-<div class="chat-header-info">
-<h3 id="currentBoardName">Select a channel</h3>
-<p id="currentBoardTopic">Choose a channel from the sidebar to start chatting</p>
-</div>
-<button class="btn btn-secondary btn-sm" id="joinBtn" style="display: none;">Join Channel</button>
-</div>
+                <section class="chat-main">
+                    <div class="chat-header">
+                        <div class="chat-header-info">
+                            <h3 id="currentBoardName">Select a lounge</h3>
+                            <p id="currentBoardTopic">Choose a market lounge from the left rail to join the live desk conversation.</p>
+                        </div>
+                        <div class="header-pills">
+                            <span class="status-pill">Live chat</span>
+                            <button class="btn btn-secondary btn-sm" id="uploadBtn" style="display: none;">Attach</button>
+                            <button class="btn btn-secondary btn-sm" id="joinBtn" style="display: none;">Join Lounge</button>
+                        </div>
+                    </div>
 
-<div class="chat-messages" id="messagesContainer">
-<div class="empty-chat">
-<h3>Welcome to Community Chat</h3>
-<p>Select a channel from the sidebar to join the conversation</p>
-</div>
-</div>
+                    <div class="chat-search-box" id="chatSearchBox">
+                        <input type="text" id="chatSearchInput" placeholder="Search lounge messages...">
+                        <button class="btn btn-secondary btn-sm" type="button" onclick="clearSearch()">Clear</button>
+                    </div>
 
-<div class="chat-input-area" id="inputArea" style="display: none;">
-<input type="text" class="chat-input" id="messageInput" placeholder="Type a message...">
-<button class="btn btn-primary" id="sendBtn">Send</button>
-</div>
-</div>
-</div>
-</div>
-</main>
+                    <div class="reply-preview" id="replyPreview"></div>
 
-<footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 1.5rem 0; margin-top: 2rem;">
-<div class="container">
-<div style="text-align: center;">
-<p style="color: var(--text-muted); font-size: 0.8rem;">
-Real-time chat powered by Supabase • Be respectful and follow community guidelines
-</p>
-</div>
-</div>
-</footer>
+                    <div class="chat-messages" id="messagesContainer">
+                        <div class="empty-chat">
+                            <h3>Welcome to the community desk</h3>
+                            <p>Pick a lounge from the left to open the stream. Each lounge acts like a TradingView-style market room with fast reactions, replies, and idea-driven discussion.</p>
+                        </div>
+                    </div>
 
-<!-- Supabase SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/auth.js"></script>
-<script src="js/nav.js"></script>
-<script src="js/utils.js"></script>
-<script src="js/supabase-client.js"></script>
-<script src="js/chat.js"></script>
+                    <div class="typing-indicator" id="typingIndicator" style="display: none;"></div>
+
+                    <div class="chat-input-area" id="inputArea" style="display: none;">
+                        <input type="text" class="chat-input" id="messageInput" placeholder="Share a setup, reply to a thesis, or mention a trader with @...">
+                        <button class="btn btn-primary" id="sendBtn">Send</button>
+                    </div>
+                </section>
+
+                <aside class="idea-rail">
+                    <section class="idea-rail-card card-section">
+                        <h3>Featured Ideas</h3>
+                        <p class="muted-copy" style="margin-bottom: 0.85rem;">Fresh ideas from the feed so lounge discussion stays anchored to published analysis.</p>
+                        <div class="idea-rail-list" id="ideasRail">
+                            <div class="muted-copy">Loading community ideas...</div>
+                        </div>
+                    </section>
+
+                    <section class="meta-card card-section">
+                        <h3>Lounge Guidelines</h3>
+                        <div class="lounge-guidelines">
+                            <span>Keep messages market-relevant and actionable.</span>
+                            <span>Reply directly to preserve context around a setup.</span>
+                            <span>Move polished market theses into the Ideas Feed when they are ready to be shared.</span>
+                        </div>
+                    </section>
+                </aside>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal" id="createChannelModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Lounge</h3>
+                <button class="modal-close" onclick="closeCreateChannelModal()">x</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Channel Name</label>
+                    <input type="text" class="form-input" id="newChannelName" placeholder="Enter lounge name">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" class="form-input" id="newChannelTopic" placeholder="Brief description">
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="checkbox" id="newChannelPublic" checked>
+                        <span>Public Lounge</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCreateChannelModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createChannel()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="imageModal">
+        <div class="modal-content" style="max-width: 90vw; background: transparent; border: none; box-shadow: none;">
+            <img id="modalImage" style="max-width: 100%; max-height: 90vh; border-radius: 20px;">
+        </div>
+    </div>
+
+    <footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 1.5rem 0; margin-top: 2rem;">
+        <div class="container">
+            <div style="text-align: center;">
+                <p style="color: var(--text-muted); font-size: 0.8rem;">
+                    Community Lounges - live market discussion layered on top of the Ideas Feed.
+                </p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/nav.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/chat-enhanced.js"></script>
 </body>
 </html>
-

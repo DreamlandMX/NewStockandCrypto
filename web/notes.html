@@ -1,215 +1,554 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Notes - StockandCrypto</title>
-<link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/components.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Ideas - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .community-shell {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .ideas-hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .ideas-hero-copy h1 {
+            font-size: clamp(2.6rem, 6vw, 4.8rem);
+            line-height: 0.92;
+            margin-bottom: 0.85rem;
+        }
+        .ideas-hero-copy p {
+            max-width: 760px;
+            color: var(--text-secondary);
+            font-size: 1.02rem;
+            line-height: 1.7;
+        }
+        .ideas-hero-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .toolbar-card,
+        .feed-card,
+        .composer-card,
+        .side-card {
+            background: rgba(8, 12, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 26px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+        }
+        .toolbar-card {
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        .toolbar-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(150px, 0.5fr));
+            gap: 0.75rem;
+        }
+        .toolbar-grid input,
+        .toolbar-grid select {
+            width: 100%;
+        }
+        .feed-card {
+            padding: 1.25rem;
+        }
+        .feed-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .feed-header h2,
+        .composer-card h2,
+        .side-card h3 {
+            margin: 0;
+            font-size: 1.15rem;
+        }
+        .ideas-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .idea-card {
+            display: flex;
+            flex-direction: column;
+            min-height: 340px;
+            border-radius: 22px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .idea-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(0, 229, 255, 0.35);
+            box-shadow: 0 16px 40px rgba(0, 229, 255, 0.12);
+        }
+        .idea-cover {
+            position: relative;
+            height: 180px;
+            padding: 1rem;
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+        .idea-cover::before,
+        .idea-cover::after {
+            content: '';
+            position: absolute;
+            border-radius: 999px;
+            opacity: 0.8;
+        }
+        .idea-cover::before {
+            width: 220px;
+            height: 220px;
+            top: -70px;
+            right: -40px;
+            background: radial-gradient(circle, rgba(103, 232, 249, 0.25), transparent 68%);
+        }
+        .idea-cover::after {
+            width: 180px;
+            height: 180px;
+            bottom: -72px;
+            left: -30px;
+            background: radial-gradient(circle, rgba(96, 165, 250, 0.22), transparent 70%);
+        }
+        .idea-cover-market,
+        .idea-visibility {
+            position: relative;
+            z-index: 1;
+        }
+        .idea-visibility {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.4rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            background: rgba(8, 12, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .idea-body {
+            display: flex;
+            flex: 1;
+            flex-direction: column;
+            gap: 0.9rem;
+            padding: 1.15rem;
+        }
+        .idea-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .idea-author {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            min-width: 0;
+        }
+        .idea-author-badge {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(110, 231, 183, 0.2));
+            color: var(--text-primary);
+            flex-shrink: 0;
+        }
+        .idea-author-text {
+            min-width: 0;
+        }
+        .idea-author-name {
+            color: var(--text-primary);
+            font-weight: 600;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .idea-title {
+            font-size: 1.4rem;
+            line-height: 1.15;
+            margin: 0;
+        }
+        .idea-excerpt {
+            color: var(--text-secondary);
+            line-height: 1.65;
+            margin: 0;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .idea-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+        .idea-tag {
+            padding: 0.38rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+            font-size: 0.76rem;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .idea-stats,
+        .idea-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .idea-stats {
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .idea-engagement,
+        .idea-actions-left,
+        .idea-actions-right {
+            display: flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .idea-actions {
+            margin-top: auto;
+        }
+        .idea-actions .btn {
+            padding-inline: 0.75rem;
+        }
+        .composer-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            position: sticky;
+            top: 100px;
+        }
+        .composer-card,
+        .side-card {
+            padding: 1.1rem;
+        }
+        .composer-card textarea {
+            min-height: 220px;
+            resize: vertical;
+        }
+        .composer-inline-row,
+        .composer-actions {
+            display: flex;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .composer-actions {
+            justify-content: space-between;
+            margin-top: 0.9rem;
+        }
+        .composer-status {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .markdown-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-bottom: 0.75rem;
+        }
+        .markdown-toolbar button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            border-radius: 12px;
+            padding: 0.45rem 0.7rem;
+            cursor: pointer;
+        }
+        .markdown-toolbar button:hover {
+            border-color: rgba(0, 229, 255, 0.4);
+            color: var(--text-primary);
+        }
+        .markdown-preview {
+            display: none;
+            min-height: 220px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.025);
+            padding: 1rem;
+            line-height: 1.7;
+        }
+        .inline-stat {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.8rem;
+            color: var(--text-secondary);
+            font-size: 0.86rem;
+            margin-bottom: 0.75rem;
+        }
+        .ideas-empty {
+            padding: 4rem 1.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed rgba(255, 255, 255, 0.12);
+        }
+        .gated-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            padding: 1.2rem;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .search-highlight {
+            background: rgba(251, 191, 36, 0.22);
+            border-radius: 4px;
+            padding: 0 0.16rem;
+        }
+        @media (max-width: 1200px) {
+            .community-shell {
+                grid-template-columns: 1fr;
+            }
+            .composer-stack {
+                position: static;
+            }
+        }
+        @media (max-width: 860px) {
+            .ideas-grid,
+            .toolbar-grid {
+                grid-template-columns: 1fr;
+            }
+            .ideas-hero {
+                flex-direction: column;
+                align-items: start;
+            }
+        }
+    </style>
 </head>
 <body>
-<header class="header">
-<div class="header-container">
-<div class="logo">
-<a href="index.html">
-<span class="logo-icon">&#9671;</span>
-<span class="logo-text">StockandCrypto</span>
-</a>
-</div>
-<nav class="nav" data-site-nav>
-<button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="navMenu" aria-expanded="false">
-<span></span><span></span><span></span>
-</button>
-<ul class="nav-menu" id="navMenu">
-<li><a href="index.html" class="nav-link">Home</a></li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="marketsMenu">Markets</button>
-<ul class="nav-dropdown-menu" id="marketsMenu">
-<li><a href="crypto.html" class="nav-link">Crypto</a></li>
-<li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
-<li><a href="us-equity.html" class="nav-link">US Equity</a></li>
-</ul>
-</li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="analysisMenu">Analysis</button>
-<ul class="nav-dropdown-menu" id="analysisMenu">
-<li><a href="model-explorer.html" class="nav-link">AI Models</a></li>
-<li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
-<li><a href="risk-engine.html" class="nav-link">Risk</a></li>
-</ul>
-</li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
-<ul class="nav-dropdown-menu" id="sessionMenu">
-<li><a href="session-crypto.html" class="nav-link">Crypto Sessions</a></li>
-<li><a href="session-index.html" class="nav-link">A-Share Index Sessions</a></li>
-<li><a href="session-index-us.html" class="nav-link">US Index Sessions</a></li>
-</ul>
-</li>
-<li class="nav-dropdown">
-<button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
-<ul class="nav-dropdown-menu" id="communityMenu">
-<li><a href="notes.html" class="nav-link">Notes</a></li>
-<li><a href="chat.html" class="nav-link">Chat</a></li>
-</ul>
-</li>
-<li><a href="tracking.html" class="nav-link">Tracking</a></li>
-</ul>
-<button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
-</nav>
-<div class="nav-actions">
-<a href="login.html" class="btn btn-secondary btn-sm" id="loginBtn">Login</a>
-<button class="btn btn-primary btn-sm" id="logoutBtn" style="display: none;">Logout</button>
-</div>
-</div>
-</header>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">SC</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav" data-site-nav>
+                <button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle navigation" aria-controls="navMenu" aria-expanded="false">
+                    <span></span><span></span><span></span>
+                </button>
+                <ul class="nav-menu" id="navMenu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="marketsMenu">Markets</button>
+                        <ul class="nav-dropdown-menu" id="marketsMenu">
+                            <li><a href="crypto.html" class="nav-link">Crypto</a></li>
+                            <li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
+                            <li><a href="us-equity.html" class="nav-link">US Equity</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="analysisMenu">Analysis</button>
+                        <ul class="nav-dropdown-menu" id="analysisMenu">
+                            <li><a href="model-explorer.html" class="nav-link">AI Models</a></li>
+                            <li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
+                            <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
+                        <ul class="nav-dropdown-menu" id="sessionMenu">
+                            <li><a href="session-crypto.html" class="nav-link">Crypto Sessions</a></li>
+                            <li><a href="session-index.html" class="nav-link">A-Share Index Sessions</a></li>
+                            <li><a href="session-index-us.html" class="nav-link">US Index Sessions</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle active" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
+                        <ul class="nav-dropdown-menu" id="communityMenu">
+                            <li><a href="notes.html" class="nav-link active">Ideas Feed</a></li>
+                            <li><a href="chat.html" class="nav-link">Market Lounges</a></li>
+                        </ul>
+                    </li>
+                    <li><a href="tracking.html" class="nav-link">Tracking</a></li>
+                </ul>
+                <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
+            </nav>
+            <div class="nav-actions">
+                <a href="login.html" class="btn btn-secondary btn-sm" id="loginBtn">Login</a>
+                <button class="btn btn-primary btn-sm" id="logoutBtn" style="display: none;">Logout</button>
+            </div>
+        </div>
+    </header>
 
-<main style="padding-top: 100px; min-height: 100vh;">
-<div class="container">
-<div class="section-header" style="text-align: left; margin-bottom: 2rem;">
-<span class="section-tag">Research</span>
-<h1 class="section-title">Trading Notes</h1>
-<p style="color: var(--text-secondary);">Document insights, strategies, and observations for your trading journey</p>
-</div>
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div class="container">
+            <section class="ideas-hero">
+                <div class="ideas-hero-copy">
+                    <span class="section-tag">Community Ideas</span>
+                    <h1>Trading Ideas Feed</h1>
+                    <p>
+                        A public, market-first stream of trade plans, macro notes, and post-session breakdowns. Read like an ideas feed,
+                        write like a research desk, and share individual articles with clean public links.
+                    </p>
+                </div>
+                <div class="ideas-hero-actions">
+                    <a href="chat.html" class="btn btn-secondary">Open Market Lounges</a>
+                    <button type="button" class="btn btn-primary" id="focusComposerBtn">Create Idea</button>
+                </div>
+            </section>
 
-<!-- Note Editor -->
-<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem; margin-bottom: 2rem;">
-<div class="card">
-<div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-<h3 class="card-title" id="editorTitle">New Note</h3>
-<div style="display: flex; gap: 0.5rem;">
-<button class="btn btn-secondary btn-sm" id="clearBtn">Clear</button>
-<button class="btn btn-primary btn-sm" id="saveBtn">Save Note</button>
-</div>
-</div>
-<div class="card-body">
-<div class="form-group">
-<input type="text" class="form-input" id="noteTitle" placeholder="Note title..." style="font-size: 1.25rem; font-weight: 600;">
-</div>
-<div class="form-group">
-<select class="form-select" id="noteMarket">
-<option value="General">General</option>
-<option value="Crypto">Crypto</option>
-<option value="CN A-Shares">CN A-Shares</option>
-<option value="US Equities">US Equities</option>
-</select>
-</div>
-<div class="form-group">
-<input type="text" class="form-input" id="noteTags" placeholder="Tags (comma separated)...">
-</div>
-<div class="form-group">
-<textarea class="form-textarea" id="noteContent" rows="12" placeholder="Write your note here...
+            <section class="toolbar-card">
+                <div class="toolbar-grid">
+                    <input type="text" class="form-input" id="searchInput" placeholder="Search ideas, setups, markets, or tags...">
+                    <select class="form-select" id="marketFilter">
+                        <option value="">All Markets</option>
+                        <option value="Crypto">Crypto</option>
+                        <option value="CN A-Shares">CN A-Shares</option>
+                        <option value="US Equities">US Equities</option>
+                        <option value="General">General</option>
+                    </select>
+                    <select class="form-select" id="visibilityFilter">
+                        <option value="">All Visibility</option>
+                        <option value="public">Public Ideas</option>
+                        <option value="private">My Private Drafts</option>
+                    </select>
+                    <select class="form-select" id="sortSelect">
+                        <option value="updated_at:desc">Newest Activity</option>
+                        <option value="created_at:desc">Newest Published</option>
+                        <option value="title:asc">Title A-Z</option>
+                        <option value="market:asc">Market</option>
+                    </select>
+                </div>
+            </section>
 
-You can include:
-- Market observations
-- Trading strategies
-- Model insights
-- Risk management notes
-- Performance analysis"></textarea>
-</div>
-<div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-<span class="status-badge info">Markdown Supported</span>
-<span class="status-badge success" id="autoSaveStatus">Auto-save enabled</span>
-</div>
-</div>
-</div>
+            <section class="community-shell">
+                <div class="feed-card">
+                    <div class="feed-header">
+                        <div>
+                            <h2>Latest Ideas</h2>
+                            <p style="color: var(--text-secondary); margin: 0.35rem 0 0;">Public ideas first. Your private drafts stay visible to you in the same stream.</p>
+                        </div>
+                        <span class="status-badge info" id="feedCountBadge">0 ideas</span>
+                    </div>
+                    <div id="ideasFeed" class="ideas-grid">
+                        <div class="ideas-empty">Loading ideas feed...</div>
+                    </div>
+                </div>
 
-<div>
-<div class="card" style="margin-bottom: 1rem;">
-<div class="card-header">
-<h3 class="card-title">Quick Stats</h3>
-</div>
-<div class="card-body" id="statsContainer">
-<div style="margin-bottom: 1rem;">
-<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-<span style="color: var(--text-secondary);">Total Notes:</span>
-<span style="font-weight: 600;" id="totalNotes">0</span>
-</div>
-</div>
-<div style="margin-bottom: 1rem;">
-<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-<span style="color: var(--text-secondary);">This Week:</span>
-<span style="font-weight: 600; color: var(--success);" id="weekNotes">+0</span>
-</div>
-</div>
-<div style="margin-bottom: 1rem;">
-<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-<span style="color: var(--text-secondary);">Crypto Notes:</span>
-<span style="font-weight: 600;" id="cryptoNotes">0</span>
-</div>
-</div>
-<div>
-<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-<span style="color: var(--text-secondary);">Equity Notes:</span>
-<span style="font-weight: 600;" id="equityNotes">0</span>
-</div>
-</div>
-</div>
-</div>
+                <aside class="composer-stack">
+                    <section class="composer-card" id="composerCard">
+                        <div style="display:flex; justify-content:space-between; gap:0.75rem; align-items:center; margin-bottom:0.9rem;">
+                            <div>
+                                <h2 id="composerTitle">Create Idea</h2>
+                                <p style="color: var(--text-secondary); margin: 0.35rem 0 0; font-size: 0.9rem;">Publish to the feed or keep it private until the thesis is ready.</p>
+                            </div>
+                            <span class="status-badge success" id="autoSaveStatus">Manual save</span>
+                        </div>
+                        <div id="composerGate" class="gated-card" style="display:none;">
+                            <strong>Sign in to publish</strong>
+                            <p style="margin:0; color: var(--text-secondary);">You can browse public ideas without signing in. Sign in to write, edit, and share your own.</p>
+                            <div style="display:flex; gap:0.65rem; flex-wrap:wrap;">
+                                <a href="login.html?redirect=notes.html" class="btn btn-primary btn-sm">Sign In</a>
+                                <a href="register.html?redirect=notes.html" class="btn btn-secondary btn-sm">Create Account</a>
+                            </div>
+                        </div>
+                        <div id="composerFormWrap">
+                            <div class="form-group">
+                                <input type="text" class="form-input" id="noteTitle" placeholder="Title your setup, thesis, or market idea...">
+                            </div>
+                            <div class="composer-inline-row">
+                                <select class="form-select" id="noteMarket">
+                                    <option value="General">General</option>
+                                    <option value="Crypto">Crypto</option>
+                                    <option value="CN A-Shares">CN A-Shares</option>
+                                    <option value="US Equities">US Equities</option>
+                                </select>
+                                <input type="text" class="form-input" id="noteTags" placeholder="Tags: bitcoin, breakout, macro">
+                            </div>
+                            <div class="composer-inline-row" style="margin: 0.8rem 0 0.9rem; justify-content:space-between;">
+                                <label style="display:flex; align-items:center; gap:0.55rem; color: var(--text-secondary); font-size: 0.9rem;">
+                                    <input type="checkbox" id="notePublicToggle">
+                                    <span>Publish publicly</span>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:0.55rem; color: var(--text-secondary); font-size: 0.9rem;">
+                                    <input type="checkbox" id="notePinToggle">
+                                    <span>Pin to my stream</span>
+                                </label>
+                            </div>
+                            <div class="markdown-toolbar">
+                                <button type="button" data-action="bold"><strong>B</strong></button>
+                                <button type="button" data-action="italic"><em>I</em></button>
+                                <button type="button" data-action="code"><code>&lt;/&gt;</code></button>
+                                <button type="button" data-action="link">Link</button>
+                                <button type="button" data-action="heading">H2</button>
+                                <button type="button" data-action="list">List</button>
+                                <button type="button" data-action="quote">Quote</button>
+                            </div>
+                            <div class="form-group">
+                                <textarea class="form-textarea" id="noteContent" placeholder="Write the full thesis here. Use markdown for structure, levels, targets, invalidation, and follow-up notes."></textarea>
+                            </div>
+                            <div class="markdown-preview" id="notePreview"></div>
+                            <div class="composer-actions">
+                                <div class="composer-inline-row">
+                                    <button type="button" class="btn btn-secondary btn-sm" id="previewBtn">Preview</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="clearBtn">Clear</button>
+                                </div>
+                                <button type="button" class="btn btn-primary" id="saveBtn">Publish Idea</button>
+                            </div>
+                            <div class="composer-status" id="composerStatus">Create a public idea or save a private draft. Sharing is available from the full article page.</div>
+                        </div>
+                    </section>
 
-<div class="card">
-<div class="card-header">
-<h3 class="card-title">Popular Tags</h3>
-</div>
-<div class="card-body" id="tagsContainer">
-<div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-<span class="status-badge info">Loading...</span>
-</div>
-</div>
-</div>
-</div>
-</div>
+                    <section class="side-card">
+                        <h3>Quick Pulse</h3>
+                        <div class="inline-stat"><span>Total ideas</span><strong id="totalIdeasStat">0</strong></div>
+                        <div class="inline-stat"><span>Public ideas</span><strong id="publicIdeasStat">0</strong></div>
+                        <div class="inline-stat"><span>Private drafts</span><strong id="privateIdeasStat">0</strong></div>
+                        <div class="inline-stat" style="margin-bottom:0;"><span>Markets covered</span><strong id="marketCoverageStat">0</strong></div>
+                    </section>
 
-<!-- Recent Notes -->
-<div class="table-container">
-<div class="table-header">
-<h3 style="font-size: 1.25rem; font-weight: 600;">Recent Notes</h3>
-<div class="table-controls">
-<input type="text" class="search-input" id="searchInput" placeholder="Search notes...">
-<button class="filter-btn" id="filterBtn">Filter</button>
-</div>
-</div>
-<table class="data-table">
-<thead>
-<tr>
-<th>Title</th>
-<th>Market</th>
-<th>Tags</th>
-<th>Created</th>
-<th>Actions</th>
-</tr>
-</thead>
-<tbody id="notesList">
-<tr>
-<td colspan="5" style="text-align: center; padding: 2rem; color: var(--text-muted);">
-Loading notes...
-</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-</main>
+                    <section class="side-card">
+                        <h3>Popular Tags</h3>
+                        <div id="tagsContainer" class="idea-tags">
+                            <span class="idea-tag">Loading...</span>
+                        </div>
+                    </section>
+                </aside>
+            </section>
+        </div>
+    </main>
 
-<footer style="background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 2rem 0; margin-top: 4rem;">
-<div class="container">
-<div style="text-align: center;">
-<p style="color: var(--text-muted); font-size: 0.875rem;">
-© 2026 StockandCrypto. AI-powered quantitative trading platform.
-</p>
-</div>
-</div>
-</footer>
-
-<!-- Supabase SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="js/auth.js"></script>
-<script src="js/nav.js"></script>
-<script src="js/utils.js"></script>
-<script src="js/supabase-client.js"></script>
-<script src="js/notes.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/nav.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/markdown.js"></script>
+    <script src="js/notes-enhanced.js"></script>
 </body>
 </html>
-
-
-

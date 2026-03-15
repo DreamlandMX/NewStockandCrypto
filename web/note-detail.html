@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idea Article - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .article-shell {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 340px;
+            gap: 1.5rem;
+        }
+        .article-card,
+        .article-side {
+            background: rgba(8, 12, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+        }
+        .article-card {
+            overflow: hidden;
+        }
+        .article-hero {
+            position: relative;
+            min-height: 260px;
+            padding: 1.4rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background: linear-gradient(135deg, rgba(8, 12, 29, 0.96), rgba(5, 10, 23, 0.75));
+        }
+        .article-hero::before,
+        .article-hero::after {
+            content: '';
+            position: absolute;
+            border-radius: 999px;
+            filter: blur(4px);
+        }
+        .article-hero::before {
+            width: 260px;
+            height: 260px;
+            top: -90px;
+            right: -50px;
+            background: radial-gradient(circle, rgba(103, 232, 249, 0.25), transparent 68%);
+        }
+        .article-hero::after {
+            width: 220px;
+            height: 220px;
+            left: -60px;
+            bottom: -100px;
+            background: radial-gradient(circle, rgba(96, 165, 250, 0.2), transparent 72%);
+        }
+        .article-hero-top,
+        .article-hero-bottom {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .article-hero-bottom {
+            align-items: end;
+        }
+        .article-title {
+            font-size: clamp(2.4rem, 5vw, 4rem);
+            line-height: 0.96;
+            margin: 0.9rem 0 0.6rem;
+            max-width: 900px;
+        }
+        .article-submeta {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            color: var(--text-muted);
+            font-size: 0.86rem;
+        }
+        .article-content {
+            padding: 1.5rem;
+        }
+        .article-body {
+            font-size: 1rem;
+            line-height: 1.8;
+            color: var(--text-primary);
+        }
+        .article-body h1,
+        .article-body h2,
+        .article-body h3 {
+            margin-top: 1.4rem;
+        }
+        .article-tags,
+        .article-actions,
+        .related-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+        .article-section {
+            padding: 1.1rem;
+            margin-bottom: 1rem;
+        }
+        .article-side h3 {
+            margin: 0 0 0.85rem;
+            font-size: 1.05rem;
+        }
+        .inline-meta-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.7rem;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+        }
+        .author-chip {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+        .author-badge {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.24), rgba(110, 231, 183, 0.24));
+        }
+        .related-card {
+            padding: 0.9rem;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            display: block;
+        }
+        .related-card h4 {
+            margin: 0.35rem 0 0.45rem;
+            font-size: 0.98rem;
+            line-height: 1.3;
+        }
+        .loading-wrap,
+        .error-wrap {
+            padding: 5rem 1rem;
+            text-align: center;
+        }
+        .share-box {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+        .share-box input {
+            flex: 1;
+            min-width: 0;
+        }
+        @media (max-width: 1100px) {
+            .article-shell {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">SC</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav" data-site-nav>
+                <button class="nav-toggle" id="navToggle" type="button" aria-label="Toggle navigation">
+                    <span></span><span></span><span></span>
+                </button>
+                <ul class="nav-menu" id="navMenu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li class="nav-dropdown">
+                        <button class="nav-link nav-dropdown-toggle active" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
+                        <ul class="nav-dropdown-menu" id="communityMenu">
+                            <li><a href="notes.html" class="nav-link active">Ideas Feed</a></li>
+                            <li><a href="chat.html" class="nav-link">Market Lounges</a></li>
+                        </ul>
+                    </li>
+                </ul>
+                <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
+            </nav>
+            <div class="nav-actions">
+                <a href="notes.html" class="btn btn-secondary btn-sm">Back to Feed</a>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div class="container">
+            <div id="loadingState" class="loading-wrap">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem;">Loading idea article...</p>
+            </div>
+
+            <div id="errorState" class="error-wrap" style="display:none;">
+                <h2>Idea Not Found</h2>
+                <p style="color: var(--text-secondary);">The article you are looking for does not exist or is not available to this account.</p>
+                <a href="notes.html" class="btn btn-primary" style="margin-top: 1rem;">Back to Ideas Feed</a>
+            </div>
+
+            <div id="articleState" style="display:none;">
+                <section class="article-shell">
+                    <article class="article-card">
+                        <div class="article-hero" id="articleHero">
+                            <div class="article-hero-top">
+                                <span class="status-badge info" id="noteMarket">General</span>
+                                <div class="article-actions">
+                                    <button type="button" class="btn btn-secondary btn-sm" id="editBtn">Edit</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="pinBtn">Pin</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="favoriteBtn">Favorite</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" id="shareBtn">Share</button>
+                                    <button type="button" class="btn btn-danger btn-sm" id="deleteBtn">Delete</button>
+                                </div>
+                            </div>
+                            <div class="article-hero-bottom">
+                                <div>
+                                    <span class="section-tag" id="articleVisibility">Private Draft</span>
+                                    <h1 class="article-title" id="noteTitle">Idea title</h1>
+                                    <div class="article-submeta">
+                                        <span id="noteAuthor">By Community Member</span>
+                                        <span id="noteDate">Published --</span>
+                                        <span id="noteUpdated">Updated --</span>
+                                        <span id="noteReadTime">1 min read</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="article-content">
+                            <div class="article-tags" id="tagList" style="margin-bottom: 1rem;"></div>
+                            <div class="article-body" id="noteBody"></div>
+                        </div>
+                    </article>
+
+                    <aside>
+                        <section class="article-side article-section">
+                            <h3>Article Controls</h3>
+                            <div class="share-box" id="shareBox" style="margin-bottom: 1rem;">
+                                <input type="text" class="form-input" id="shareLink" readonly placeholder="Publish the idea to generate a share link">
+                                <button type="button" class="btn btn-primary btn-sm" id="copyShareBtn">Copy Link</button>
+                            </div>
+                            <label style="display:flex; align-items:center; gap:0.65rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                                <input type="checkbox" id="publicToggle">
+                                <span>Publish publicly</span>
+                            </label>
+                            <div class="inline-meta-row"><span>Word count</span><strong id="wordCount">0</strong></div>
+                            <div class="inline-meta-row"><span>Character count</span><strong id="charCount">0</strong></div>
+                            <div class="inline-meta-row" style="margin-bottom:0;"><span>Reading time</span><strong id="readTime">1 min</strong></div>
+                        </section>
+
+                        <section class="article-side article-section">
+                            <h3>Desk Ownership</h3>
+                            <div class="author-chip">
+                                <span class="author-badge" id="authorBadge">C</span>
+                                <div>
+                                    <strong id="authorName">Community Member</strong>
+                                    <div style="color: var(--text-secondary); font-size: 0.84rem;" id="authorRole">Market contributor</div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="article-side article-section">
+                            <h3>Related Ideas</h3>
+                            <div class="related-list" id="relatedIdeas">
+                                <span style="color: var(--text-secondary);">Loading related ideas...</span>
+                            </div>
+                        </section>
+
+                        <section class="article-side article-section">
+                            <h3>Version History</h3>
+                            <div id="versionList">
+                                <span style="color: var(--text-secondary);">Loading article versions...</span>
+                            </div>
+                        </section>
+                    </aside>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/nav.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/markdown.js"></script>
+    <script src="js/note-detail.js"></script>
+</body>
+</html>

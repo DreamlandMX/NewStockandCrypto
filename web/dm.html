@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct Messages - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .dm-container {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 1rem;
+            height: calc(100vh - 140px);
+            padding: 1rem;
+        }
+        .dm-sidebar {
+            background: rgba(8, 12, 29, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .dm-sidebar-header {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .dm-sidebar-header h3 {
+            font-size: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        .dm-search {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }
+        .dm-conversations {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .dm-conversation-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+        .dm-conversation-item:hover {
+            background: rgba(0, 229, 255, 0.08);
+        }
+        .dm-conversation-item.active {
+            background: rgba(0, 229, 255, 0.12);
+            border-left: 3px solid var(--primary-accent);
+        }
+        .dm-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        .dm-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .dm-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .dm-info-name {
+            font-weight: 600;
+            font-size: 0.9rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .dm-info-preview {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .dm-unread-badge {
+            background: var(--primary-accent);
+            color: white;
+            font-size: 0.7rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 10px;
+            min-width: 18px;
+            text-align: center;
+        }
+        .dm-main {
+            background: rgba(8, 12, 29, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .dm-header {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .dm-header-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            overflow: hidden;
+        }
+        .dm-header-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .dm-header-info h3 {
+            font-size: 1rem;
+            margin-bottom: 0.15rem;
+        }
+        .dm-header-status {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .status-dot.online { background: var(--success); }
+        .status-dot.offline { background: var(--text-muted); }
+        .dm-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .dm-message {
+            display: flex;
+            gap: 0.5rem;
+            max-width: 75%;
+        }
+        .dm-message.sent {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+        .dm-message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .dm-message-bubble {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 0.6rem 0.9rem;
+            border-radius: var(--radius-md);
+            border-top-left-radius: var(--radius-sm);
+        }
+        .dm-message.sent .dm-message-bubble {
+            background: rgba(0, 229, 255, 0.15);
+            border-top-left-radius: var(--radius-md);
+            border-top-right-radius: var(--radius-sm);
+        }
+        .dm-message-text {
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+        .dm-message-time {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+            text-align: right;
+        }
+        .dm-message.sent .dm-message-time {
+            text-align: left;
+        }
+        .dm-input-area {
+            padding: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            gap: 0.5rem;
+        }
+        .dm-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            resize: none;
+        }
+        .dm-input:focus {
+            outline: none;
+            border-color: var(--primary-accent);
+        }
+        .dm-empty {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem;
+        }
+        .dm-empty h3 {
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+        @media (max-width: 768px) {
+            .dm-container {
+                grid-template-columns: 1fr;
+            }
+            .dm-sidebar {
+                display: none;
+            }
+            .dm-sidebar.mobile-visible {
+                display: flex;
+                position: fixed;
+                top: 70px;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 100;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">◇</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav">
+                <ul class="nav-menu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li><a href="notes.html" class="nav-link">Notes</a></li>
+                    <li><a href="chat.html" class="nav-link">Chat</a></li>
+                    <li><a href="profile.html" class="nav-link">Profile</a></li>
+                </ul>
+            </nav>
+            <div class="nav-actions">
+                <a href="chat.html" class="btn btn-secondary btn-sm">← Back to Chat</a>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding-top: 80px;">
+        <div class="dm-container">
+            <!-- Sidebar - Conversations List -->
+            <div class="dm-sidebar">
+                <div class="dm-sidebar-header">
+                    <h3>💬 Messages</h3>
+                    <input type="text" class="dm-search" placeholder="Search conversations..." id="dmSearchInput">
+                </div>
+                <div class="dm-conversations" id="conversationsList">
+                    <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                        Loading...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Chat Area -->
+            <div class="dm-main">
+                <div class="dm-empty" id="dmEmpty">
+                    <h3>Select a conversation</h3>
+                    <p>Choose a conversation from the sidebar or start a new one</p>
+                </div>
+
+                <div class="dm-header" id="dmHeader" style="display: none;">
+                    <div class="dm-header-avatar" id="dmHeaderAvatar">
+                        <span id="dmHeaderAvatarLetter">U</span>
+                    </div>
+                    <div class="dm-header-info">
+                        <h3 id="dmHeaderName">Username</h3>
+                        <div class="dm-header-status">
+                            <span class="status-dot offline" id="dmStatusDot"></span>
+                            <span id="dmStatusText">Offline</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" id="viewProfileBtn" style="margin-left: auto;">View Profile</button>
+                </div>
+
+                <div class="dm-messages" id="dmMessages" style="display: none;">
+                    <!-- Messages will be rendered here -->
+                </div>
+
+                <div class="dm-input-area" id="dmInputArea" style="display: none;">
+                    <input type="text" class="dm-input" id="dmInput" placeholder="Type a message...">
+                    <button class="btn btn-primary" id="dmSendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script>
+        let currentUser = null;
+        let otherUserId = null;
+        let dmSubscription = null;
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            await initializeDM();
+        });
+
+        async function initializeDM() {
+            try {
+                await window.SupabaseClient.init();
+                currentUser = await window.SupabaseClient.auth.getCurrentUser();
+
+                if (!currentUser) {
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                // Check for user parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                otherUserId = urlParams.get('user');
+
+                await loadConversations();
+
+                if (otherUserId) {
+                    await selectConversation(otherUserId);
+                }
+
+                setupEventListeners();
+
+            } catch (error) {
+                console.error('Init error:', error);
+            }
+        }
+
+        async function loadConversations() {
+            const container = document.getElementById('conversationsList');
+
+            try {
+                // Get all DMs
+                const { data: sent } = await window.SupabaseClient.supabase
+                    .from('direct_messages')
+                    .select('receiver_id, users:receiver_id(id, username, avatar_url), content, created_at, read_at')
+                    .eq('sender_id', currentUser.id)
+                    .order('created_at', { ascending: false });
+
+                const { data: received } = await window.SupabaseClient.supabase
+                    .from('direct_messages')
+                    .select('sender_id, users:sender_id(id, username, avatar_url), content, created_at, read_at')
+                    .eq('receiver_id', currentUser.id)
+                    .order('created_at', { ascending: false });
+
+                const conversations = new Map();
+
+                (sent || []).forEach(msg => {
+                    if (!conversations.has(msg.receiver_id)) {
+                        conversations.set(msg.receiver_id, {
+                            userId: msg.receiver_id,
+                            username: msg.users?.username || 'User',
+                            avatarUrl: msg.users?.avatar_url,
+                            lastMessage: msg.content,
+                            lastTime: msg.created_at,
+                            unread: 0
+                        });
+                    }
+                });
+
+                (received || []).forEach(msg => {
+                    const existing = conversations.get(msg.sender_id);
+                    if (existing) {
+                        if (new Date(msg.created_at) > new Date(existing.lastTime)) {
+                            existing.lastMessage = msg.content;
+                            existing.lastTime = msg.created_at;
+                        }
+                        if (!msg.read_at) existing.unread++;
+                    } else {
+                        conversations.set(msg.sender_id, {
+                            userId: msg.sender_id,
+                            username: msg.users?.username || 'User',
+                            avatarUrl: msg.users?.avatar_url,
+                            lastMessage: msg.content,
+                            lastTime: msg.created_at,
+                            unread: msg.read_at ? 0 : 1
+                        });
+                    }
+                });
+
+                if (conversations.size === 0) {
+                    container.innerHTML = `
+                        <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                            <p>No conversations yet</p>
+                            <p style="font-size: 0.8rem;">Start one from a user's profile!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = Array.from(conversations.values())
+                    .sort((a, b) => new Date(b.lastTime) - new Date(a.lastTime))
+                    .map(conv => `
+                        <div class="dm-conversation-item ${conv.userId === otherUserId ? 'active' : ''}" 
+                             data-user-id="${conv.userId}" onclick="selectConversation('${conv.userId}')">
+                            <div class="dm-avatar">
+                                ${conv.avatarUrl 
+                                    ? `<img src="${conv.avatarUrl}">` 
+                                    : conv.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div class="dm-info">
+                                <div class="dm-info-name">${escapeHtml(conv.username)}</div>
+                                <div class="dm-info-preview">${escapeHtml(conv.lastMessage)}</div>
+                            </div>
+                            ${conv.unread > 0 ? `<span class="dm-unread-badge">${conv.unread}</span>` : ''}
+                        </div>
+                    `).join('');
+
+            } catch (error) {
+                console.error('Load conversations error:', error);
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">Failed to load</div>';
+            }
+        }
+
+        async function selectConversation(userId) {
+            otherUserId = userId;
+
+            // Update sidebar
+            document.querySelectorAll('.dm-conversation-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.userId === userId);
+            });
+
+            // Get user info
+            const { data: userProfile } = await window.SupabaseClient.supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+
+            const username = userProfile?.username || 'User';
+            const avatarUrl = userProfile?.avatar_url;
+
+            // Update header
+            document.getElementById('dmHeader').style.display = 'flex';
+            document.getElementById('dmHeaderName').textContent = username;
+            
+            if (avatarUrl) {
+                document.getElementById('dmHeaderAvatar').innerHTML = `<img src="${avatarUrl}">`;
+            } else {
+                document.getElementById('dmHeaderAvatarLetter').textContent = username.charAt(0).toUpperCase();
+            }
+
+            // Show chat area
+            document.getElementById('dmEmpty').style.display = 'none';
+            document.getElementById('dmMessages').style.display = 'flex';
+            document.getElementById('dmInputArea').style.display = 'flex';
+
+            // Load messages
+            await loadMessages();
+
+            // Subscribe to new messages
+            if (dmSubscription) window.SupabaseClient.supabase.removeChannel(dmSubscription);
+
+            dmSubscription = window.SupabaseClient.supabase
+                .channel(`dm:${userId}`)
+                .on('postgres_changes', {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'direct_messages',
+                    filter: `or(and(sender_id.eq.${currentUser.id},receiver_id.eq.${userId}),and(sender_id.eq.${userId},receiver_id.eq.${currentUser.id}))`
+                }, (payload) => {
+                    appendMessage(payload.new);
+                })
+                .subscribe();
+        }
+
+        async function loadMessages() {
+            const container = document.getElementById('dmMessages');
+            container.innerHTML = '<div style="text-align: center; color: var(--text-muted);">Loading...</div>';
+
+            try {
+                const messages = await window.SupabaseClient.dm.get(otherUserId, 100);
+
+                if (messages.length === 0) {
+                    container.innerHTML = `
+                        <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                            <p>No messages yet</p>
+                            <p style="font-size: 0.85rem;">Start the conversation!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = messages.map(msg => formatMessage(msg)).join('');
+                container.scrollTop = container.scrollHeight;
+
+                // Mark as read
+                messages.forEach(msg => {
+                    if (msg.receiver_id === currentUser.id && !msg.read_at) {
+                        window.SupabaseClient.dm.markRead(msg.id);
+                    }
+                });
+
+            } catch (error) {
+                console.error('Load messages error:', error);
+                container.innerHTML = '<div style="text-align: center; color: var(--text-muted);">Failed to load messages</div>';
+            }
+        }
+
+        function formatMessage(msg) {
+            const isSent = msg.sender_id === currentUser.id;
+            const time = new Date(msg.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+            return `
+                <div class="dm-message ${isSent ? 'sent' : ''}">
+                    <div class="dm-message-bubble">
+                        <div class="dm-message-text">${escapeHtml(msg.content)}</div>
+                        <div class="dm-message-time">${time}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function appendMessage(msg) {
+            const container = document.getElementById('dmMessages');
+            const emptyMsg = container.querySelector('[style*="text-align: center"]');
+            if (emptyMsg) emptyMsg.remove();
+
+            container.insertAdjacentHTML('beforeend', formatMessage(msg));
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('dmInput');
+            const content = input.value.trim();
+            if (!content || !otherUserId) return;
+
+            input.value = '';
+
+            try {
+                await window.SupabaseClient.dm.send(otherUserId, content);
+            } catch (error) {
+                console.error('Send error:', error);
+                input.value = content;
+                showToast('Failed to send', 'error');
+            }
+        }
+
+        function setupEventListeners() {
+            // Send button
+            document.getElementById('dmSendBtn')?.addEventListener('click', sendMessage);
+
+            // Enter key
+            document.getElementById('dmInput')?.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // View profile
+            document.getElementById('viewProfileBtn')?.addEventListener('click', () => {
+                window.open(`profile.html?user=${otherUserId}`, '_blank');
+            });
+
+            // Search
+            document.getElementById('dmSearchInput')?.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                document.querySelectorAll('.dm-conversation-item').forEach(item => {
+                    const name = item.querySelector('.dm-info-name').textContent.toLowerCase();
+                    item.style.display = name.includes(query) ? 'flex' : 'none';
+                });
+            });
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            toast.style.cssText = `
+                position: fixed; bottom: 20px; right: 20px; padding: 12px 24px;
+                background: ${type === 'error' ? 'var(--error)' : 'var(--primary-accent)'};
+                color: white; border-radius: 8px; z-index: 10000;
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        window.selectConversation = selectConversation;
+    </script>
+</body>
+</html>

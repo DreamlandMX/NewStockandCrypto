@@ -58,3 +58,9 @@ data/*.db-wal
 # Local browser automation artifacts
 .playwright-cli/
 output/
+
+# Local planning docs not intended for commit
+docs/FEATURE_ENHANCEMENT_PLAN.md
+docs/NOTES_CHAT_MISSING_FEATURES.md
+docs/NOTES_CHAT_SETUP_GUIDE.md
+docs/SUPABASE_SETUP_GUIDE.md

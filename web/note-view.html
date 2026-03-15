@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Idea - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .public-shell {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 320px;
+            gap: 1.5rem;
+        }
+        .public-article,
+        .public-side {
+            background: rgba(8, 12, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 28px;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+        }
+        .public-hero {
+            min-height: 240px;
+            padding: 1.4rem;
+            background: linear-gradient(135deg, rgba(8, 12, 29, 0.96), rgba(5, 10, 23, 0.74));
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .public-title {
+            font-size: clamp(2.3rem, 5vw, 4rem);
+            line-height: 0.96;
+            margin: 0.9rem 0 0.6rem;
+        }
+        .public-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.86rem;
+        }
+        .public-content {
+            padding: 1.5rem;
+        }
+        .public-body {
+            font-size: 1rem;
+            line-height: 1.8;
+        }
+        .public-tags,
+        .related-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+        .public-section {
+            padding: 1.1rem;
+            margin-bottom: 1rem;
+        }
+        .related-card {
+            padding: 0.9rem;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            display: block;
+        }
+        .related-card h4 {
+            margin: 0.35rem 0 0.45rem;
+            font-size: 0.98rem;
+            line-height: 1.3;
+        }
+        .loading-wrap,
+        .error-wrap {
+            padding: 5rem 1rem;
+            text-align: center;
+        }
+        @media (max-width: 1024px) {
+            .public-shell {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">SC</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <div class="nav-actions">
+                <a href="notes.html" class="btn btn-secondary btn-sm">Explore Ideas Feed</a>
+                <a href="register.html?redirect=notes.html" class="btn btn-primary btn-sm">Join Community</a>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div class="container">
+            <div id="loadingState" class="loading-wrap">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem;">Loading shared idea...</p>
+            </div>
+
+            <div id="errorState" class="error-wrap" style="display:none;">
+                <h2>Shared Idea Not Available</h2>
+                <p style="color: var(--text-secondary);">This idea is private, missing, or the share link is no longer valid.</p>
+                <a href="notes.html" class="btn btn-primary" style="margin-top: 1rem;">Browse Community Ideas</a>
+            </div>
+
+            <div id="publicState" style="display:none;">
+                <section class="public-shell">
+                    <article class="public-article">
+                        <div class="public-hero">
+                            <div style="display:flex; justify-content:space-between; gap:1rem; align-items:flex-start;">
+                                <span class="status-badge info" id="noteMarket">General</span>
+                                <span class="section-tag">Shared Idea</span>
+                            </div>
+                            <div>
+                                <h1 class="public-title" id="noteTitle">Idea title</h1>
+                                <div class="public-meta">
+                                    <span id="noteAuthor">By Community Member</span>
+                                    <span id="noteDate">Published --</span>
+                                    <span id="noteReadTime">1 min read</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="public-content">
+                            <div class="public-tags" id="tagList" style="margin-bottom: 1rem;"></div>
+                            <div class="public-body" id="noteBody"></div>
+                        </div>
+                    </article>
+
+                    <aside>
+                        <section class="public-side public-section">
+                            <h3 style="margin:0 0 0.85rem;">Why this page is shareable</h3>
+                            <p style="color: var(--text-secondary); line-height: 1.7; margin:0;">
+                                Public ideas are readable without signing in. Private drafts stay inside the author's own workspace until they choose to publish them.
+                            </p>
+                        </section>
+
+                        <section class="public-side public-section">
+                            <h3 style="margin:0 0 0.85rem;">Related ideas</h3>
+                            <div class="related-list" id="relatedIdeas">
+                                <span style="color: var(--text-secondary);">Loading related ideas...</span>
+                            </div>
+                        </section>
+                    </aside>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/markdown.js"></script>
+    <script src="js/note-view.js"></script>
+</body>
+</html>

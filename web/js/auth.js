@@ -1,46 +1,116 @@
 (function initAuthModule() {
-    const AUTH_BASE = `${window.location.origin}/api/auth`;
-    let currentUser = null;
-    let mePromise = null;
+    'use strict';
 
-    async function request(endpoint, options = {}) {
-        const response = await fetch(`${AUTH_BASE}${endpoint}`, {
-            method: options.method || 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(options.headers || {})
-            },
-            credentials: 'same-origin',
-            body: options.body ? JSON.stringify(options.body) : undefined
-        });
+    const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+    const SUPABASE_CLIENT_URL = 'js/supabase-client.js';
+    const LEGACY_AUTH_BASE_URL = `${window.location.origin}/api/auth`;
+    const LEGACY_AUTH_ME_URL = `${LEGACY_AUTH_BASE_URL}/me?optional=1`;
+    const LEGACY_AUTH_LOGOUT_URL = `${LEGACY_AUTH_BASE_URL}/logout`;
 
-        let data = {};
-        try {
-            data = await response.json();
-        } catch (error) {
-            data = { success: false, error: 'INVALID_RESPONSE', message: 'Unexpected response format.' };
-        }
+    const authState = {
+        ready: false,
+        loading: false,
+        user: null,
+        session: null,
+        legacyUser: null,
+        legacyMismatch: false
+    };
 
-        if (!response.ok) {
-            const err = new Error(data.message || data.error || `HTTP ${response.status}`);
-            err.status = response.status;
-            err.payload = data;
-            throw err;
-        }
+    let initPromise = null;
+    let authSubscription = null;
 
-        return data;
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
-    function emitAuthChanged() {
-        window.dispatchEvent(new CustomEvent('auth:changed', {
-            detail: { user: currentUser }
-        }));
+    function getBaseFileName(pathname = window.location.pathname) {
+        const fileName = pathname.split('/').pop();
+        return fileName || 'index.html';
+    }
+
+    function isAuthPage() {
+        const page = getBaseFileName();
+        return page === 'login.html' || page === 'register.html';
+    }
+
+    function getRedirectTarget() {
+        const params = new URLSearchParams(window.location.search);
+        const redirect = params.get('redirect');
+        return redirect || 'index.html';
+    }
+
+    function getDisplayName(user = authState.user) {
+        if (!user && authState.legacyUser) {
+            return authState.legacyUser.displayName || authState.legacyUser.email?.split('@')[0] || 'User';
+        }
+        if (!user) return '';
+        const metadata = user.user_metadata || {};
+        return metadata.full_name
+            || metadata.username
+            || metadata.name
+            || user.email?.split('@')[0]
+            || 'User';
     }
 
     function notify(type, message) {
         if (window.showToast?.[type]) {
             window.showToast[type](message, 2800);
         }
+    }
+
+    async function requestLegacy(endpoint, options = {}) {
+        const response = await fetch(`${LEGACY_AUTH_BASE_URL}${endpoint}`, {
+            method: options.method || 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                ...(options.headers || {})
+            },
+            credentials: 'same-origin',
+            body: options.body ? JSON.stringify(options.body) : undefined
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const error = new Error(payload.message || payload.error || `Legacy auth HTTP ${response.status}`);
+            error.status = response.status;
+            error.payload = payload;
+            throw error;
+        }
+        return payload;
+    }
+
+    function normalizeAuthError(error, mode = 'login') {
+        const raw = error?.message || error?.error_description || error?.description || 'Authentication failed.';
+        const message = String(raw);
+        const lower = message.toLowerCase();
+
+        if (lower.includes('email address') && lower.includes('invalid')) {
+            return 'Use a real deliverable email address. Demo or fake domains may be rejected by Supabase.';
+        }
+
+        if (lower.includes('invalid login credentials')) {
+            return 'Invalid login credentials. If this account was created in the older site auth flow, create a new account in Supabase or sign in with a migrated account.';
+        }
+
+        if (lower.includes('email not confirmed')) {
+            return 'Check your inbox and confirm the email address before signing in.';
+        }
+
+        if (lower.includes('email rate limit exceeded')) {
+            return 'Too many confirmation emails were requested. Wait a few minutes before trying again.';
+        }
+
+        if (mode === 'register' && lower.includes('user already registered')) {
+            return 'This email is already registered. Try signing in instead.';
+        }
+
+        return message;
     }
 
     function ensureMessageContainer(form) {
@@ -67,7 +137,7 @@
         }
         container.textContent = message;
         container.style.display = 'block';
-        if (type === 'success') {
+        if (type === 'success' || type === 'info') {
             container.style.border = '1px solid rgba(16, 185, 129, 0.35)';
             container.style.background = 'rgba(16, 185, 129, 0.12)';
             container.style.color = '#A7F3D0';
@@ -90,106 +160,381 @@
         button.disabled = false;
     }
 
+    function dispatchAuthChange() {
+        const detail = {
+            ...authState,
+            displayName: getDisplayName()
+        };
+        window.dispatchEvent(new CustomEvent('auth:changed', { detail }));
+        window.dispatchEvent(new CustomEvent('auth:state-changed', { detail }));
+    }
+
     function renderNavActions() {
-        const navActions = document.querySelectorAll('.nav-actions');
-        if (!navActions.length) {
-            return;
+        const containers = document.querySelectorAll('.nav-actions');
+        if (!containers.length) return;
+
+        const displayName = escapeHtml(getDisplayName());
+        containers.forEach((container) => {
+            if (authState.user) {
+                container.innerHTML = `
+                    <a href="profile.html" class="btn btn-secondary btn-sm" id="profileBtn">Hi, ${displayName}</a>
+                    <button type="button" class="btn btn-primary btn-sm" id="logoutBtn" data-auth-logout>Logout</button>
+                `;
+                return;
+            }
+
+            if (authState.legacyMismatch) {
+                container.innerHTML = `
+                    <span class="btn btn-secondary btn-sm" style="pointer-events:none; opacity:0.95;" id="profileBtn">Hi, ${displayName} (Legacy)</span>
+                    <a href="login.html?reason=legacy-session" class="btn btn-secondary btn-sm" id="loginBtn">Upgrade Sign In</a>
+                    <button type="button" class="btn btn-primary btn-sm" id="logoutBtn" data-auth-logout>Logout</button>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <a href="login.html" class="btn btn-secondary btn-sm" id="loginBtn">Login</a>
+                <a href="register.html" class="btn btn-primary btn-sm">Sign Up</a>
+            `;
+        });
+    }
+
+    function getSupabaseClient() {
+        if (window.SupabaseClient?.supabase) {
+            return window.SupabaseClient.supabase;
+        }
+        if (typeof window.SupabaseClient?.getSupabase === 'function') {
+            return window.SupabaseClient.getSupabase();
+        }
+        return null;
+    }
+
+    function waitFor(predicate, timeout = 10000, intervalMs = 100) {
+        return new Promise((resolve, reject) => {
+            const existing = predicate();
+            if (existing) {
+                resolve(existing);
+                return;
+            }
+
+            const startedAt = Date.now();
+            const timer = window.setInterval(() => {
+                const result = predicate();
+                if (result) {
+                    window.clearInterval(timer);
+                    resolve(result);
+                    return;
+                }
+
+                if (Date.now() - startedAt > timeout) {
+                    window.clearInterval(timer);
+                    reject(new Error('Timed out while waiting for auth dependencies.'));
+                }
+            }, intervalMs);
+        });
+    }
+
+    function injectScript(src, id) {
+        return new Promise((resolve, reject) => {
+            if (id && document.getElementById(id)) {
+                resolve();
+                return;
+            }
+
+            const script = document.createElement('script');
+            if (id) script.id = id;
+            script.src = src;
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function ensureSupabaseDependencies() {
+        if (!(window.supabase && typeof window.supabase.createClient === 'function')) {
+            await injectScript(SUPABASE_SDK_URL, 'supabase-sdk');
+            await waitFor(() => window.supabase && typeof window.supabase.createClient === 'function');
         }
 
-        navActions.forEach((container) => {
-            if (currentUser) {
-                container.innerHTML = `
-                    <span class="btn btn-secondary btn-sm" style="pointer-events:none; opacity:0.95;">Hi, ${escapeHtml(currentUser.displayName || currentUser.email)}</span>
-                    <button type="button" class="btn btn-primary btn-sm" data-auth-logout>Logout</button>
-                `;
-            } else {
-                container.innerHTML = `
-                    <a href="login.html" class="btn btn-secondary btn-sm">Login</a>
-                    <a href="register.html" class="btn btn-primary btn-sm">Sign Up</a>
-                `;
+        if (!window.SupabaseClient) {
+            const clientUrl = new URL(SUPABASE_CLIENT_URL, document.baseURI).href;
+            await injectScript(clientUrl, 'supabase-client-script');
+            await waitFor(() => window.SupabaseClient);
+        }
+
+        if (typeof window.SupabaseClient.init === 'function') {
+            await window.SupabaseClient.init();
+        }
+
+        return window.SupabaseClient;
+    }
+
+    async function fetchLegacyUser() {
+        try {
+            const response = await fetch(LEGACY_AUTH_ME_URL, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json' }
+            });
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const payload = await response.json().catch(() => ({}));
+            return payload.user || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    async function clearLegacySession() {
+        try {
+            await fetch(LEGACY_AUTH_LOGOUT_URL, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                body: '{}'
+            });
+        } catch (error) {
+            // Legacy session cleanup is best-effort only.
+        }
+    }
+
+    async function legacyLogin(email, password, rememberMe = false) {
+        return requestLegacy('/login', {
+            method: 'POST',
+            body: { email, password, rememberMe }
+        });
+    }
+
+    async function legacyRegister(fullName, email, password, confirmPassword) {
+        return requestLegacy('/register', {
+            method: 'POST',
+            body: { fullName, email, password, confirmPassword }
+        });
+    }
+
+    async function ensureLegacySession({ fullName, email, password, rememberMe = false }) {
+        try {
+            const response = await legacyLogin(email, password, rememberMe);
+            authState.legacyUser = response.user || null;
+            authState.legacyMismatch = !authState.user && Boolean(authState.legacyUser);
+            return { mode: 'login', user: authState.legacyUser };
+        } catch (loginError) {
+            const status = Number(loginError?.status || 0);
+            if (status !== 401) {
+                throw loginError;
+            }
+        }
+
+        try {
+            const registration = await legacyRegister(
+                fullName || email.split('@')[0],
+                email,
+                password,
+                password
+            );
+            authState.legacyUser = registration.user || null;
+            authState.legacyMismatch = !authState.user && Boolean(authState.legacyUser);
+            return { mode: 'register', user: authState.legacyUser };
+        } catch (registerError) {
+            const payloadError = String(registerError?.payload?.error || '');
+            if (payloadError !== 'EMAIL_ALREADY_EXISTS') {
+                throw registerError;
+            }
+
+            const response = await legacyLogin(email, password, rememberMe);
+            authState.legacyUser = response.user || null;
+            authState.legacyMismatch = !authState.user && Boolean(authState.legacyUser);
+            return { mode: 'login', user: authState.legacyUser };
+        }
+    }
+
+    function isInvalidCredentialsError(error) {
+        const message = String(error?.message || '').toLowerCase();
+        return message.includes('invalid login credentials');
+    }
+
+    async function tryLegacyMigration(email, password, fullName = '') {
+        try {
+            const result = await signUpWithSupabase({ fullName, email, password });
+            if (result.pendingConfirmation) {
+                return { status: 'pending_confirmation' };
+            }
+            return { status: 'complete' };
+        } catch (error) {
+            const normalized = String(error?.message || '').toLowerCase();
+
+            if (normalized.includes('user already registered')) {
+                try {
+                    await signInWithSupabase(email, password);
+                    return { status: 'complete' };
+                } catch (signInError) {
+                    return { status: 'registered_but_password_mismatch', error: signInError };
+                }
+            }
+
+            if (normalized.includes('email rate limit exceeded')) {
+                return { status: 'rate_limited', error };
+            }
+
+            if (normalized.includes('email not confirmed')) {
+                return { status: 'pending_confirmation', error };
+            }
+
+            return { status: 'failed', error };
+        }
+    }
+
+    async function subscribeToSupabaseAuth() {
+        if (authSubscription) return;
+
+        const supabase = getSupabaseClient();
+        if (!supabase?.auth?.onAuthStateChange) return;
+
+        const subscriptionPayload = supabase.auth.onAuthStateChange(async () => {
+            await syncAuthState(false);
+        });
+
+        authSubscription = subscriptionPayload?.data?.subscription || subscriptionPayload?.subscription || null;
+    }
+
+    async function syncAuthState(includeLegacy = true) {
+        authState.loading = true;
+
+        try {
+            const supabase = getSupabaseClient();
+            if (!supabase?.auth) {
+                throw new Error('Supabase auth client is unavailable.');
+            }
+
+            const [{ data: sessionData }, { data: userData }, legacyUser] = await Promise.all([
+                supabase.auth.getSession(),
+                supabase.auth.getUser(),
+                includeLegacy ? fetchLegacyUser() : Promise.resolve(authState.legacyUser)
+            ]);
+
+            authState.session = sessionData?.session || null;
+            authState.user = userData?.user || null;
+            authState.legacyUser = legacyUser || null;
+            authState.legacyMismatch = !authState.user && Boolean(authState.legacyUser);
+            authState.ready = true;
+            authState.loading = false;
+
+            renderNavActions();
+            dispatchAuthChange();
+            return { ...authState };
+        } catch (error) {
+            authState.session = null;
+            authState.user = null;
+            authState.ready = true;
+            authState.loading = false;
+            authState.legacyUser = includeLegacy ? await fetchLegacyUser() : authState.legacyUser;
+            authState.legacyMismatch = Boolean(authState.legacyUser);
+            renderNavActions();
+            dispatchAuthChange();
+            return { ...authState };
+        }
+    }
+
+    async function ready() {
+        if (initPromise) {
+            return initPromise;
+        }
+
+        initPromise = (async () => {
+            await ensureSupabaseDependencies();
+            await subscribeToSupabaseAuth();
+            return syncAuthState(true);
+        })();
+
+        return initPromise;
+    }
+
+    async function signInWithSupabase(email, password) {
+        const supabase = getSupabaseClient();
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        await syncAuthState(true);
+        return data;
+    }
+
+    async function signUpWithSupabase({ fullName, email, password }) {
+        const supabase = getSupabaseClient();
+        const username = (fullName || '').trim() || email.split('@')[0];
+        const { data, error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: {
+                    username,
+                    full_name: (fullName || '').trim()
+                }
             }
         });
-    }
 
-    function escapeHtml(value) {
-        return String(value || '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
+        if (error) throw error;
 
-    async function me(force = false) {
-        if (currentUser && !force) {
-            return currentUser;
+        if (!data.session) {
+            await syncAuthState(true);
+            return {
+                ...data,
+                pendingConfirmation: true
+            };
         }
-        if (mePromise && !force) {
-            return mePromise;
-        }
-        mePromise = request('/me?optional=1')
-            .then((payload) => {
-                currentUser = payload.user || null;
-                renderNavActions();
-                emitAuthChanged();
-                return currentUser;
-            })
-            .catch((error) => {
-                throw error;
-            })
-            .finally(() => {
-                mePromise = null;
-            });
-        return mePromise;
-    }
 
-    async function login(payload) {
-        const response = await request('/login', {
-            method: 'POST',
-            body: payload
-        });
-        currentUser = response.user || null;
-        renderNavActions();
-        emitAuthChanged();
-        return response;
-    }
-
-    async function register(payload) {
-        const response = await request('/register', {
-            method: 'POST',
-            body: payload
-        });
-        currentUser = response.user || null;
-        renderNavActions();
-        emitAuthChanged();
-        return response;
+        await syncAuthState(true);
+        return data;
     }
 
     async function logout() {
-        await request('/logout', {
-            method: 'POST',
-            body: {}
-        });
-        currentUser = null;
+        const supabase = getSupabaseClient();
+        if (supabase?.auth) {
+            const { error } = await supabase.auth.signOut();
+            if (error) throw error;
+        }
+
+        await clearLegacySession();
+        authState.user = null;
+        authState.session = null;
+        authState.legacyUser = null;
+        authState.legacyMismatch = false;
         renderNavActions();
-        emitAuthChanged();
+        dispatchAuthChange();
+    }
+
+    function renderAuthPageNotice(form, state) {
+        if (!form) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const reason = params.get('reason');
+        if (reason === 'legacy-session' || state?.legacyMismatch) {
+            renderFormMessage(
+                form,
+                'Your site session is from an older login flow. Please sign in again to access Notes and Chat.',
+                'info'
+            );
+        }
     }
 
     function bindLogoutAction() {
         document.addEventListener('click', async (event) => {
             const target = event.target.closest('[data-auth-logout]');
-            if (!target) {
-                return;
-            }
+            if (!target) return;
+
             event.preventDefault();
             target.disabled = true;
+
             try {
                 await logout();
                 notify('success', 'Signed out.');
-                if (window.location.pathname.endsWith('/login.html') || window.location.pathname.endsWith('/register.html')) {
-                    return;
-                }
-                window.location.reload();
+                if (isAuthPage()) return;
+                window.location.href = 'index.html';
             } catch (error) {
                 target.disabled = false;
                 notify('error', error.message || 'Failed to sign out.');
@@ -199,25 +544,76 @@
 
     function bindLoginForm() {
         const form = document.getElementById('loginForm');
-        if (!form) {
-            return;
-        }
+        if (!form) return;
 
         const submitButton = form.querySelector('button[type="submit"]');
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             renderFormMessage(form, '');
             setButtonBusy(submitButton, true, 'Signing In...');
+
             try {
-                await login({
-                    email: form.querySelector('#email')?.value || '',
-                    password: form.querySelector('#password')?.value || '',
-                    rememberMe: Boolean(form.querySelector('#remember')?.checked)
-                });
+                await ready();
+                const email = form.querySelector('#email')?.value?.trim() || '';
+                const password = form.querySelector('#password')?.value || '';
+                const rememberMe = Boolean(form.querySelector('#remember')?.checked);
+
+                try {
+                    await signInWithSupabase(email, password);
+                    try {
+                        await ensureLegacySession({
+                            email,
+                            password,
+                            rememberMe
+                        });
+                    } catch (legacySyncError) {
+                        console.warn('Legacy session sync skipped after Supabase sign-in:', legacySyncError);
+                    }
+                } catch (error) {
+                    const lowerMessage = String(error?.message || '').toLowerCase();
+                    const shouldTryLegacy = isInvalidCredentialsError(error) || lowerMessage.includes('email not confirmed');
+                    if (!shouldTryLegacy) {
+                        throw error;
+                    }
+
+                    const legacyResponse = await legacyLogin(email, password, rememberMe);
+                    authState.legacyUser = legacyResponse.user || null;
+                    authState.legacyMismatch = Boolean(authState.legacyUser);
+                    renderNavActions();
+                    dispatchAuthChange();
+
+                    const migration = await tryLegacyMigration(
+                        email,
+                        password,
+                        legacyResponse.user?.displayName || ''
+                    );
+
+                    if (migration.status === 'complete') {
+                        renderFormMessage(form, 'Legacy account migrated. Redirecting...', 'success');
+                        window.location.href = getRedirectTarget();
+                        return;
+                    }
+
+                    if (migration.status === 'pending_confirmation') {
+                        renderFormMessage(form, 'Legacy account signed in. Check your inbox to confirm community access, then sign in again.', 'success');
+                    } else if (migration.status === 'rate_limited') {
+                        renderFormMessage(form, 'Legacy account signed in. Community migration is temporarily rate-limited. Try again in a few minutes.', 'success');
+                    } else if (migration.status === 'registered_but_password_mismatch') {
+                        renderFormMessage(form, 'Legacy account signed in. A Supabase account already exists for this email with a different password. Use the community password to access Notes and Chat.', 'success');
+                    } else {
+                        renderFormMessage(form, 'Legacy account signed in. Notes and Chat may still require a refreshed community sign-in.', 'success');
+                    }
+
+                    window.setTimeout(() => {
+                        window.location.href = getRedirectTarget();
+                    }, 1200);
+                    return;
+                }
+
                 renderFormMessage(form, 'Signed in. Redirecting...', 'success');
-                window.location.href = 'index.html';
+                window.location.href = getRedirectTarget();
             } catch (error) {
-                renderFormMessage(form, error.payload?.message || error.message || 'Login failed.');
+                renderFormMessage(form, normalizeAuthError(error, 'login'));
             } finally {
                 setButtonBusy(submitButton, false);
             }
@@ -226,41 +622,80 @@
 
     function bindRegisterForm() {
         const form = document.getElementById('registerForm');
-        if (!form) {
-            return;
-        }
+        if (!form) return;
 
         const submitButton = form.querySelector('button[type="submit"]');
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             renderFormMessage(form, '');
+
+            const fullName = form.querySelector('#fullname')?.value?.trim() || '';
+            const email = form.querySelector('#email')?.value?.trim() || '';
+            const password = form.querySelector('#password')?.value || '';
+            const confirmPassword = form.querySelector('#confirmPassword')?.value || '';
+
+            if (password !== confirmPassword) {
+                renderFormMessage(form, 'Passwords do not match.');
+                return;
+            }
+
             setButtonBusy(submitButton, true, 'Creating Account...');
+
             try {
-                await register({
-                    fullName: form.querySelector('#fullname')?.value || '',
-                    email: form.querySelector('#email')?.value || '',
-                    password: form.querySelector('#password')?.value || '',
-                    confirmPassword: form.querySelector('#confirmPassword')?.value || ''
-                });
+                await ready();
+                const result = await signUpWithSupabase({ fullName, email, password });
+                try {
+                    await ensureLegacySession({ fullName, email, password });
+                } catch (legacySyncError) {
+                    console.warn('Legacy session sync skipped after Supabase sign-up:', legacySyncError);
+                }
+
+                if (result.pendingConfirmation) {
+                    renderFormMessage(form, 'Account created. You can use Notes with your site session now. Check your inbox to confirm community access later.', 'success');
+                    window.setTimeout(() => {
+                        window.location.href = getRedirectTarget();
+                    }, 1200);
+                    return;
+                }
+
                 renderFormMessage(form, 'Account created. Redirecting...', 'success');
-                window.location.href = 'index.html';
+                window.location.href = getRedirectTarget();
             } catch (error) {
-                renderFormMessage(form, error.payload?.message || error.message || 'Registration failed.');
+                const normalizedMessage = normalizeAuthError(error, 'register');
+
+                if (String(error?.message || '').toLowerCase().includes('email rate limit exceeded')) {
+                    try {
+                        const legacyResponse = await legacyRegister(fullName, email, password, confirmPassword);
+                        authState.legacyUser = legacyResponse.user || null;
+                        authState.legacyMismatch = Boolean(authState.legacyUser);
+                        renderNavActions();
+                        dispatchAuthChange();
+                        renderFormMessage(
+                            form,
+                            'Legacy account created. You can use the main site now. Community access will require a later Supabase sign-up after the rate limit clears.',
+                            'success'
+                        );
+                        window.setTimeout(() => {
+                            window.location.href = getRedirectTarget();
+                        }, 1400);
+                        return;
+                    } catch (legacyError) {
+                        renderFormMessage(form, legacyError?.payload?.message || normalizedMessage);
+                        return;
+                    }
+                }
+
+                renderFormMessage(form, normalizedMessage);
             } finally {
                 setButtonBusy(submitButton, false);
             }
         });
     }
 
-    async function redirectIfAuthenticated() {
-        const page = window.location.pathname.split('/').pop();
-        if (page !== 'login.html' && page !== 'register.html') {
-            return;
-        }
-        const user = await me();
-        if (user) {
-            window.location.replace('index.html');
-        }
+    async function redirectIfAuthenticated(state) {
+        if (!isAuthPage()) return;
+        if (!state?.user) return;
+        window.location.replace(getRedirectTarget());
     }
 
     async function init() {
@@ -268,20 +703,48 @@
         bindLoginForm();
         bindRegisterForm();
         renderNavActions();
-        await me().catch(() => {
-            currentUser = null;
-            renderNavActions();
-        });
-        await redirectIfAuthenticated().catch(() => {});
+
+        const state = await ready();
+
+        if (isAuthPage()) {
+            const form = document.getElementById('loginForm') || document.getElementById('registerForm');
+            renderAuthPageNotice(form, state);
+        }
+
+        await redirectIfAuthenticated(state);
     }
 
     window.Auth = {
-        me,
-        login,
-        register,
+        ready,
+        async refresh() {
+            await ready();
+            return syncAuthState(true);
+        },
+        async me() {
+            const state = await ready();
+            return state.user;
+        },
+        async login(payload) {
+            await ready();
+            return signInWithSupabase(payload.email, payload.password);
+        },
+        async register(payload) {
+            await ready();
+            return signUpWithSupabase({
+                fullName: payload.fullName,
+                email: payload.email,
+                password: payload.password
+            });
+        },
         logout,
         getCurrentUser() {
-            return currentUser;
+            return authState.user;
+        },
+        getState() {
+            return { ...authState, displayName: getDisplayName() };
+        },
+        isLegacyMismatch() {
+            return authState.legacyMismatch;
         },
         renderNavActions
     };

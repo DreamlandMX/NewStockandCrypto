@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profile - StockandCrypto</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <style>
+        .profile-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .profile-header {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: rgba(8, 12, 29, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+        }
+        .profile-avatar-section {
+            text-align: center;
+        }
+        .profile-avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .profile-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .avatar-upload-btn {
+            position: relative;
+            overflow: hidden;
+        }
+        .avatar-upload-btn input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .profile-info-section {
+            flex: 1;
+        }
+        .profile-username {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .profile-email {
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+        .profile-bio {
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+        .profile-stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 1.5rem;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-accent);
+        }
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .profile-edit-form {
+            display: none;
+        }
+        .profile-edit-form.active {
+            display: block;
+        }
+        .profile-view-mode.hidden {
+            display: none;
+        }
+        .profile-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 1rem;
+        }
+        .profile-tab {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: var(--radius-md);
+            transition: all 0.2s;
+        }
+        .profile-tab:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .profile-tab.active {
+            background: rgba(0, 229, 255, 0.1);
+            color: var(--primary-accent);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .dm-list {
+            background: rgba(8, 12, 29, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+        }
+        .dm-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .dm-item:hover {
+            background: rgba(0, 229, 255, 0.08);
+        }
+        .dm-item:last-child {
+            border-bottom: none;
+        }
+        .dm-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-accent), var(--success));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+        .dm-preview {
+            flex: 1;
+        }
+        .dm-preview-header {
+            display: flex;
+            justify-content: space-between;
+        }
+        .dm-username {
+            font-weight: 600;
+        }
+        .dm-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .dm-message {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .dm-unread {
+            background: var(--primary-accent);
+            color: white;
+            font-size: 0.7rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 10px;
+            min-width: 20px;
+            text-align: center;
+        }
+        .online-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 2px solid var(--bg-primary);
+        }
+        .online-status.online { background: var(--success); }
+        .online-status.away { background: var(--warning); }
+        .online-status.offline { background: var(--text-muted); }
+        @media (max-width: 600px) {
+            .profile-header {
+                flex-direction: column;
+                text-align: center;
+            }
+            .profile-stats {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <a href="index.html">
+                    <span class="logo-icon">◇</span>
+                    <span class="logo-text">StockandCrypto</span>
+                </a>
+            </div>
+            <nav class="nav">
+                <ul class="nav-menu">
+                    <li><a href="index.html" class="nav-link">Home</a></li>
+                    <li><a href="notes.html" class="nav-link">Notes</a></li>
+                    <li><a href="chat.html" class="nav-link">Chat</a></li>
+                </ul>
+            </nav>
+            <div class="nav-actions">
+                <button class="btn btn-secondary btn-sm" id="logoutBtn">Logout</button>
+            </div>
+        </div>
+    </header>
+
+    <main style="padding-top: 100px; min-height: 100vh;">
+        <div class="profile-container">
+            <!-- Profile Header -->
+            <div class="profile-header">
+                <div class="profile-avatar-section">
+                    <div class="profile-avatar" id="profileAvatar">
+                        <span id="avatarLetter">U</span>
+                    </div>
+                    <div class="avatar-upload-btn" id="avatarUploadWrapper" style="display: none;">
+                        <input type="file" accept="image/*" id="avatarInput">
+                        <button class="btn btn-secondary btn-sm">Upload Photo</button>
+                    </div>
+                </div>
+
+                <div class="profile-info-section">
+                    <!-- View Mode -->
+                    <div class="profile-view-mode" id="viewMode">
+                        <div class="profile-username" id="displayUsername">Username</div>
+                        <div class="profile-email" id="displayEmail">email@example.com</div>
+                        <div class="profile-bio" id="displayBio">No bio yet...</div>
+                        
+                        <button class="btn btn-primary btn-sm" id="editProfileBtn" style="margin-top: 1rem;">
+                            ✏️ Edit Profile
+                        </button>
+                    </div>
+
+                    <!-- Edit Mode -->
+                    <div class="profile-edit-form" id="editMode">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" class="form-input" id="editUsername" placeholder="Your username">
+                        </div>
+                        <div class="form-group">
+                            <label>Bio</label>
+                            <textarea class="form-textarea" id="editBio" rows="3" placeholder="Tell us about yourself..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Website</label>
+                            <input type="url" class="form-input" id="editWebsite" placeholder="https://your-website.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Location</label>
+                            <input type="text" class="form-input" id="editLocation" placeholder="Your location">
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                            <button class="btn btn-primary" id="saveProfileBtn">Save Changes</button>
+                            <button class="btn btn-secondary" id="cancelEditBtn">Cancel</button>
+                        </div>
+                    </div>
+
+                    <div class="profile-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="notesCount">0</div>
+                            <div class="stat-label">Notes</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="messagesCount">0</div>
+                            <div class="stat-label">Messages</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="memberSince">--</div>
+                            <div class="stat-label">Member Since</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="profile-tabs">
+                <button class="profile-tab active" data-tab="activity">📊 Activity</button>
+                <button class="profile-tab" data-tab="messages">💬 Messages</button>
+                <button class="profile-tab" data-tab="settings">⚙️ Settings</button>
+            </div>
+
+            <!-- Activity Tab -->
+            <div class="tab-content active" id="activityTab">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Recent Activity</h3>
+                    </div>
+                    <div class="card-body" id="activityList">
+                        <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                            Loading activity...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Tab -->
+            <div class="tab-content" id="messagesTab">
+                <div class="dm-list" id="dmList">
+                    <div style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                        Loading conversations...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div class="tab-content" id="settingsTab">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Account Settings</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>Email Notifications</label>
+                            <label class="switch">
+                                <input type="checkbox" id="emailNotifications" checked>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Browser Notifications</label>
+                            <label class="switch">
+                                <input type="checkbox" id="browserNotifications">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>Online Status</label>
+                            <select class="form-select" id="onlineStatus">
+                                <option value="online">Show Online</option>
+                                <option value="away">Show Away</option>
+                                <option value="offline">Appear Offline</option>
+                            </select>
+                        </div>
+                        <hr style="border-color: rgba(255,255,255,0.1); margin: 1.5rem 0;">
+                        <div class="form-group">
+                            <label style="color: var(--error);">Danger Zone</label>
+                            <button class="btn btn-danger btn-sm" id="deleteAccountBtn">Delete Account</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/supabase-client.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/profile.js"></script>
+</body>
+</html>
