@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "main": "unified-server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node unified-server.js",
     "position-server": "node server/position-server.js",
-    "start:all": "concurrently \"npm start\" \"npm run position-server\""
+    "start:all": "concurrently \"npm start\" \"npm run position-server\"",
+    "postinstall": "npm rebuild better-sqlite3 || true"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

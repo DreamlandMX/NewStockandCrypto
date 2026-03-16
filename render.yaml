@@ -4,13 +4,17 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npm rebuild better-sqlite3
     startCommand: npm start
     healthCheckPath: /
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: "20"
       - key: HOST
-        value: 0.0.0.0
+        value: "0.0.0.0"
       - key: PORT
-        value: 10000
+        value: "10000"
