@@ -14,9 +14,16 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 9000);
 const API_HOST = process.env.API_HOST || '127.0.0.1';
 const API_PORT = Number(process.env.API_PORT || 5001);
-const MODEL_EXPLORER_SCHEME = String(process.env.MODEL_EXPLORER_SCHEME || 'http').trim().toLowerCase() === 'https' ? 'https' : 'http';
-const MODEL_EXPLORER_HOST = process.env.MODEL_EXPLORER_HOST || '127.0.0.1';
-const MODEL_EXPLORER_PORT = Number(process.env.MODEL_EXPLORER_PORT || 8000);
+const IS_RENDER_RUNTIME = Boolean(process.env.RENDER || process.env.RENDER_EXTERNAL_URL);
+const MODEL_EXPLORER_SCHEME = String(
+    process.env.MODEL_EXPLORER_SCHEME || (IS_RENDER_RUNTIME ? 'https' : 'http')
+).trim().toLowerCase() === 'https' ? 'https' : 'http';
+const MODEL_EXPLORER_HOST = process.env.MODEL_EXPLORER_HOST || (
+    IS_RENDER_RUNTIME ? 'newstockandcrypto-ml.onrender.com' : '127.0.0.1'
+);
+const MODEL_EXPLORER_PORT = Number(
+    process.env.MODEL_EXPLORER_PORT || (IS_RENDER_RUNTIME ? 443 : 8000)
+);
 const WEB_ROOT = path.join(__dirname, 'web');
 
 const CRYPTO_CACHE_TTL_MS = Number(process.env.CRYPTO_CACHE_TTL_MS || 9000);
