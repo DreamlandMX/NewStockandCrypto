@@ -8,6 +8,7 @@ const path = require('path');
 const { createAuthStore } = require('./server/auth-store');
 const { createNotesStore } = require('./server/notes-store');
 const { createPositionsStore } = require('./server/positions-store');
+const { buildPolicyPacket, deriveLegacyPolicy, deriveLegacyTpSl } = require('./server/policy-engine');
 
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 9000);
@@ -1429,33 +1430,31 @@ function buildCryptoPredictionPayloadFromTrackingRow(symbol, trackingRow, stale 
                 ? 'Within 2 hours'
                 : 'Within 3 hours';
 
-    const action = resolveCryptoTradeSignal(pUp, confidence);
-    const actionable = action !== 'FLAT';
-    const positionSize = actionable
-        ? clamp((confidence - CRYPTO_MIN_ACTIONABLE_CONFIDENCE) / (1 - CRYPTO_MIN_ACTIONABLE_CONFIDENCE), 0, 1) * 2
-        : 0;
-    const stopLoss = actionable
-        ? action === 'LONG'
-            ? price * (1 + q10 * 0.8)
-            : price * (1 + Math.abs(q90) * 0.8)
-        : null;
-    const takeProfit1 = actionable
-        ? action === 'LONG'
-            ? price * (1 + q50 * 0.8)
-            : price * (1 - Math.abs(q50) * 0.8)
-        : null;
-    const takeProfit2 = actionable
-        ? action === 'LONG'
-            ? price * (1 + q90 * 0.8)
-            : price * (1 - Math.abs(q10) * 0.8)
-        : null;
-    const rr1 = actionable ? Number(calculateRiskReward(price, stopLoss, takeProfit1).toFixed(4)) : null;
-    const rr2 = actionable ? Number(calculateRiskReward(price, stopLoss, takeProfit2).toFixed(4)) : null;
+    const estimatedOpen = price / Math.max(0.01, 1 + rawChangePct / 100);
+    const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+        market: 'crypto',
+        symbol,
+        price,
+        changePct: rawChangePct,
+        open: estimatedOpen,
+        high: price * (1 + Math.max(q90, 0)),
+        low: price * (1 + Math.min(q10, 0)),
+        volume: parseNumber(trackingRow?.meta?.totalVolume) ?? parseNumber(trackingRow?.liquidityProxy) ?? 0,
+        pUp,
+        confidence,
+        q10,
+        q50,
+        q90,
+        forecastTimestamp: new Date().toISOString(),
+        inputSource: 'tracking-crypto-top50'
+    });
+    const action = derivePolicySignal(policyPacket.action);
+    const actionable = action === 'LONG' || action === 'SHORT';
     const bandWidth = Math.max(q90 - q10, 0.0001);
     const sharpeRatio = clamp((q50 / bandWidth) * 0.9, -2.5, 2.5);
     const driftAlerts = Math.max(0, Math.round((0.65 - confidence) * 40));
     const healthStatus = stale ? 'IN REVIEW' : (driftAlerts > 12 ? 'IN REVIEW' : 'MONITORED');
-    const reasonCodes = resolveCryptoReasonCodes(action, pUp, confidence);
+    const reasonCodes = resolveCryptoReasonCodes(action === 'WAIT' ? 'FLAT' : action, pUp, confidence);
     const topFeatures = buildCryptoTopFeaturesFromTrackingRow(trackingRow).slice(0, 5);
     const summary = trackingRow?.actionTooltip
         ? `${trackingRow.actionTooltip}. Live top-50 ex-stablecoins universe context applied.`
@@ -1491,17 +1490,20 @@ function buildCryptoPredictionPayloadFromTrackingRow(symbol, trackingRow, stale 
             action,
             actionable,
             presentation: actionable ? 'TRADE' : 'NO_TRADE',
-            position_size: Number(positionSize.toFixed(4)),
+            position_size: Number((policy.positionSize || 0).toFixed(4)),
             entry_price: Number(price.toFixed(4)),
             reference_price: Number(price.toFixed(4)),
             long_trigger_p_up: CRYPTO_LONG_TRIGGER_P_UP,
             short_trigger_p_up: CRYPTO_SHORT_TRIGGER_P_UP,
-            stop_loss: actionable ? Number(stopLoss.toFixed(4)) : null,
-            take_profit_1: actionable ? Number(takeProfit1.toFixed(4)) : null,
-            take_profit_2: actionable ? Number(takeProfit2.toFixed(4)) : null,
-            rr_1: rr1,
-            rr_2: rr2
+            stop_loss: actionable ? tpSl.stopLoss : null,
+            take_profit_1: actionable ? tpSl.takeProfit1 : null,
+            take_profit_2: actionable ? tpSl.takeProfit2 : null,
+            rr_1: actionable ? tpSl.rewardRisk1 : null,
+            rr_2: actionable ? tpSl.rewardRisk2 : null
         },
+        policyPacket,
+        policy,
+        tpSl,
         explanation: {
             summary,
             top_features: topFeatures,
@@ -1605,6 +1607,52 @@ function normalizeWindow(w0, w1, w2, w3) {
     };
 }
 
+function normalizePolicyMarketName(rawMarket) {
+    const candidate = String(rawMarket || '').trim().toLowerCase();
+    if (candidate === 'cn' || candidate === 'cn_equity') return 'cn_equity';
+    if (candidate === 'us' || candidate === 'us_equity') return 'us_equity';
+    if (candidate === 'crypto') return 'crypto';
+    if (candidate.startsWith('session_')) return candidate;
+    if (candidate === 'session') return 'session';
+    return candidate || 'session';
+}
+
+function derivePolicySignal(packetAction) {
+    const normalized = String(packetAction || '').trim().toUpperCase();
+    if (normalized.includes('LONG')) return 'LONG';
+    if (normalized.includes('SHORT')) return 'SHORT';
+    if (normalized === 'WAIT') return 'WAIT';
+    return 'FLAT';
+}
+
+function buildUnifiedPolicyArtifacts(input = {}) {
+    const market = normalizePolicyMarketName(input.market);
+    const policyPacket = buildPolicyPacket({
+        market,
+        symbol: input.symbol,
+        price: input.price,
+        changePct: input.changePct,
+        open: input.open,
+        high: input.high,
+        low: input.low,
+        volume: input.volume,
+        pUp: input.pUp,
+        confidence: input.confidence,
+        q10: input.q10,
+        q50: input.q50,
+        q90: input.q90,
+        forecastTimestamp: input.forecastTimestamp || new Date().toISOString(),
+        inputSource: input.inputSource || 'unknown',
+        sessionMeta: input.sessionMeta,
+        regimeHints: input.regimeHints
+    });
+    return {
+        policyPacket,
+        policy: deriveLegacyPolicy(policyPacket, { market }),
+        tpSl: deriveLegacyTpSl(policyPacket, input.price)
+    };
+}
+
 function calculateRiskReward(entryPrice, stopLoss, takeProfit) {
     const risk = Math.abs(entryPrice - stopLoss);
     const reward = Math.abs(takeProfit - entryPrice);
@@ -1691,24 +1739,27 @@ function buildCryptoPredictionPayload(symbol, row, stale = false, staleReason = 
                 ? 'Within 2 hours'
                 : 'Within 3 hours';
 
-    const action = resolveCryptoTradeSignal(pUp, confidence);
-    const positionSize = action === 'FLAT'
-        ? 0
-        : clamp((confidence - 0.45) / 0.55, 0, 1) * 2;
     const entryPrice = row.price;
-
-    let stopLoss = null;
-    let takeProfit1 = null;
-    let takeProfit2 = null;
-    if (action === 'LONG') {
-        stopLoss = entryPrice * (1 + q10 * 0.8);
-        takeProfit1 = entryPrice * (1 + q50 * 0.8);
-        takeProfit2 = entryPrice * (1 + q90 * 0.8);
-    } else if (action === 'SHORT') {
-        stopLoss = entryPrice * (1 + Math.abs(q90) * 0.8);
-        takeProfit1 = entryPrice * (1 - Math.abs(q50) * 0.8);
-        takeProfit2 = entryPrice * (1 - Math.abs(q10) * 0.8);
-    }
+    const estimatedOpen = entryPrice / Math.max(0.01, 1 + changePct / 100);
+    const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+        market: 'crypto',
+        symbol,
+        price: entryPrice,
+        changePct,
+        open: estimatedOpen,
+        high: entryPrice * (1 + Math.max(q90, 0)),
+        low: entryPrice * (1 + Math.min(q10, 0)),
+        volume,
+        pUp,
+        confidence,
+        q10,
+        q50,
+        q90,
+        forecastTimestamp: new Date().toISOString(),
+        inputSource: 'binance-us-derived'
+    });
+    const action = derivePolicySignal(policyPacket.action);
+    const actionable = action === 'LONG' || action === 'SHORT';
 
     const sharpeRatio = clamp((q50 / Math.max(spread, 0.001)) * 0.9, -2.5, 2.5);
     const driftAlerts = Math.max(0, Math.round((0.65 - confidence) * 40));
@@ -1717,10 +1768,7 @@ function buildCryptoPredictionPayload(symbol, row, stale = false, staleReason = 
     const trendShap = Number((trendComponent * 0.32).toFixed(3));
     const volumeShap = Number((volumeComponent * 0.14).toFixed(3));
     const volatilityShap = Number((-(volatilityProxy - 0.02) * 7).toFixed(3));
-    const reasonCodes = resolveCryptoReasonCodes(action, pUp, confidence);
-    const actionable = action !== 'FLAT';
-    const rr1 = actionable ? Number(calculateRiskReward(entryPrice, stopLoss, takeProfit1).toFixed(4)) : null;
-    const rr2 = actionable ? Number(calculateRiskReward(entryPrice, stopLoss, takeProfit2).toFixed(4)) : null;
+    const reasonCodes = resolveCryptoReasonCodes(action === 'WAIT' ? 'FLAT' : action, pUp, confidence);
 
     const payload = {
         meta: {
@@ -1752,17 +1800,20 @@ function buildCryptoPredictionPayload(symbol, row, stale = false, staleReason = 
             action,
             actionable,
             presentation: actionable ? 'TRADE' : 'NO_TRADE',
-            position_size: Number(positionSize.toFixed(4)),
+            position_size: Number((policy.positionSize || 0).toFixed(4)),
             entry_price: Number(entryPrice.toFixed(4)),
             reference_price: Number(entryPrice.toFixed(4)),
             long_trigger_p_up: CRYPTO_LONG_TRIGGER_P_UP,
             short_trigger_p_up: CRYPTO_SHORT_TRIGGER_P_UP,
-            stop_loss: actionable ? Number(stopLoss.toFixed(4)) : null,
-            take_profit_1: actionable ? Number(takeProfit1.toFixed(4)) : null,
-            take_profit_2: actionable ? Number(takeProfit2.toFixed(4)) : null,
-            rr_1: rr1,
-            rr_2: rr2
+            stop_loss: actionable ? tpSl.stopLoss : null,
+            take_profit_1: actionable ? tpSl.takeProfit1 : null,
+            take_profit_2: actionable ? tpSl.takeProfit2 : null,
+            rr_1: actionable ? tpSl.rewardRisk1 : null,
+            rr_2: actionable ? tpSl.rewardRisk2 : null
         },
+        policyPacket,
+        policy,
+        tpSl,
         explanation: {
             summary: 'Generated from live market regime and momentum factors.',
             top_features: [
@@ -2225,9 +2276,24 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
             ? 'us'
             : 'asia';
     const nextSession = sessions.find((row) => row.code === nextSessionCode) || sessions[0];
-    const costPct = Number(clamp(activeSession.volatilityPct * 0.16, 0.18, 1.5).toFixed(2));
+    const sessionPolicyPacket = predictionPayload?.policyPacket || null;
+    const sessionPacketGates = Array.isArray(sessionPolicyPacket?.gates) ? sessionPolicyPacket.gates : [];
+    const sessionPacketReasons = Array.isArray(sessionPolicyPacket?.reasons) ? sessionPolicyPacket.reasons : [];
+    const sessionBlockingGates = [];
+    if (sessionPolicyPacket) {
+        if (!sessionPacketGates.includes('cost_ok') || Number(sessionPolicyPacket.expectedNetEdgePct) <= 0) {
+            sessionBlockingGates.push('net_edge');
+        }
+        if (!sessionPacketGates.includes('confidence_ok')) sessionBlockingGates.push('confidence');
+        if (!sessionPacketGates.includes('regime_ok')) sessionBlockingGates.push('regime');
+        if (!sessionPacketGates.includes('liquidity_ok')) sessionBlockingGates.push('liquidity');
+        if ((sessionPolicyPacket.action === 'WAIT' || sessionPolicyPacket.action === 'FLAT') && Number(sessionPolicyPacket.expectedNetEdgePct) > 0) {
+            sessionBlockingGates.push('policy_threshold');
+        }
+    }
+    const costPct = Number(sessionPolicyPacket?.costPct ?? clamp(activeSession.volatilityPct * 0.16, 0.18, 1.5).toFixed(2));
     const grossReturnPct = Number((basePrediction.q50 * 100).toFixed(2));
-    const action = String(predictionPayload?.signal?.action || prediction.signal || 'FLAT').toUpperCase();
+    const action = String(predictionPayload?.signal?.action || derivePolicySignal(sessionPolicyPacket?.action) || prediction.signal || 'FLAT').toUpperCase();
     const actionable = action.includes('LONG') || action.includes('SHORT');
     const referencePrice = Number(Number(quoteRow.price).toFixed(4));
 
@@ -2240,16 +2306,23 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
         referencePrice,
         longTriggerPUp: 0.55,
         shortTriggerPUp: 0.45,
-        stopLoss: actionable ? Number(Number(predictionPayload?.signal?.stop_loss ?? quoteRow.price).toFixed(4)) : null,
-        takeProfit1: actionable ? Number(Number(predictionPayload?.signal?.take_profit_1 ?? quoteRow.price).toFixed(4)) : null,
-        takeProfit2: actionable ? Number(Number(predictionPayload?.signal?.take_profit_2 ?? quoteRow.price).toFixed(4)) : null,
+        stopLoss: actionable ? Number(Number(predictionPayload?.signal?.stop_loss ?? sessionPolicyPacket?.stopLoss ?? quoteRow.price).toFixed(4)) : null,
+        takeProfit1: actionable ? Number(Number(predictionPayload?.signal?.take_profit_1 ?? sessionPolicyPacket?.takeProfit1 ?? quoteRow.price).toFixed(4)) : null,
+        takeProfit2: actionable ? Number(Number(predictionPayload?.signal?.take_profit_2 ?? sessionPolicyPacket?.takeProfit2 ?? quoteRow.price).toFixed(4)) : null,
         grossReturnPct,
         costPct,
-        netEdgePct: Number((grossReturnPct - costPct).toFixed(2)),
+        netEdgePct: Number(sessionPolicyPacket?.expectedNetEdgePct ?? (grossReturnPct - costPct).toFixed(2)),
         riskLevel: activeSession.riskLevel,
-        rr1: actionable ? Number(predictionPayload?.signal?.rr_1 ?? 0) : null,
-        rr2: actionable ? Number(predictionPayload?.signal?.rr_2 ?? 0) : null,
-        reason: predictionPayload?.explanation?.summary || 'Generated from live model session engine.'
+        rr1: actionable ? Number(predictionPayload?.signal?.rr_1 ?? sessionPolicyPacket?.rewardRisk1 ?? 0) : null,
+        rr2: actionable ? Number(predictionPayload?.signal?.rr_2 ?? sessionPolicyPacket?.rewardRisk2 ?? 0) : null,
+        regime: sessionPolicyPacket?.regime || null,
+        tradeQualityScore: Number(sessionPolicyPacket?.tradeQualityScore ?? 0),
+        tradeQualityBand: sessionPolicyPacket?.tradeQualityBand || null,
+        previewPlan: sessionPolicyPacket?.previewPlan || null,
+        passedGates: sessionPacketGates,
+        blockingGates: sessionBlockingGates,
+        engineVersion: sessionPolicyPacket?.engineVersion || null,
+        reason: sessionPacketReasons.join(' ') || predictionPayload?.explanation?.summary || 'Generated from live model session engine.'
     };
 
     const tradeLog = buildSessionTradeLog(sessions);
@@ -2284,6 +2357,7 @@ function buildCryptoSessionPayload(symbol, quoteRow, predictionPayload, history7
         },
         sessions,
         decision,
+        policyPacket: sessionPolicyPacket,
         decisionByLeverage: buildDecisionByLeverage(decision),
         hourly: buildHourlyRows(
             symbol,
@@ -3677,7 +3751,23 @@ function asUniverseRow(constituent, quote) {
         peTtm: null
     };
     const prediction = calculatePrediction(merged);
-    const policy = calculatePolicy(prediction);
+    const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+        market: 'cn_equity',
+        symbol: constituent.code,
+        price: merged.price,
+        changePct: merged.changePct,
+        open: merged.open,
+        high: merged.high,
+        low: merged.low,
+        volume: merged.volume || merged.turnover,
+        pUp: prediction.pUp,
+        confidence: prediction.confidence,
+        q10: prediction.q10,
+        q50: prediction.q50,
+        q90: prediction.q90,
+        forecastTimestamp: new Date().toISOString(),
+        inputSource: 'cn-universe-derived'
+    });
     const boardType = detectBoardType(constituent.code);
     const isSt = detectStFlag(merged.name || constituent.name);
     const limitPct = resolveLimitPct(boardType, isSt);
@@ -3730,9 +3820,9 @@ function asUniverseRow(constituent, quote) {
             q50: prediction.q50,
             q90: prediction.q90
         },
+        policyPacket,
         policy: {
-            action: policy.action,
-            positionSize: policy.positionSize,
+            ...policy,
             shortAllowed: false,
             leverage: 1.0,
             shortEligible: false,
@@ -3740,6 +3830,7 @@ function asUniverseRow(constituent, quote) {
             shortReason: CN_POLICY_SHORT_REASON,
             tPlusOneApplied: true
         },
+        tpSl,
         totalScore: Number(totalScore.toFixed(4)),
         status: Number.isFinite(merged.price) ? 'LIVE' : 'ERROR'
     };
@@ -4114,8 +4205,23 @@ async function handleCnIndexPrediction(req, res, rawIndexCode) {
             prevClose: indexData.prevClose
         };
         const prediction = calculatePrediction(quoteLike);
-        const policy = calculatePolicy(prediction);
-        const tpSl = calculateTpSl(indexData.price || 0, prediction, policy.signal);
+        const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+            market: 'cn_equity',
+            symbol: indexCode,
+            price: indexData.price,
+            changePct: indexData.changePct,
+            open: indexData.open,
+            high: indexData.high,
+            low: indexData.low,
+            volume: indexData.volume || indexData.turnover,
+            pUp: prediction.pUp,
+            confidence: prediction.confidence,
+            q10: prediction.q10,
+            q50: prediction.q50,
+            q90: prediction.q90,
+            forecastTimestamp: payload.meta?.timestamp || new Date().toISOString(),
+            inputSource: 'cn-index-derived'
+        });
 
         sendJson(res, 200, {
             meta: payload.meta,
@@ -4138,10 +4244,9 @@ async function handleCnIndexPrediction(req, res, rawIndexCode) {
                     q90: prediction.q90
                 }
             },
+            policyPacket,
             policy: {
-                action: policy.action,
-                signal: policy.signal,
-                positionSize: policy.positionSize,
+                ...policy,
                 shortAllowed: false,
                 leverage: 1.0,
                 shortEligible: false,
@@ -4188,9 +4293,6 @@ async function handleCnStock(req, res, rawStockCode) {
             return;
         }
 
-        const policySignal = row.policy.action.includes('Buy') ? 'LONG' : 'FLAT';
-        const tpSl = calculateTpSl(row.price || 0, row.prediction, policySignal);
-
         sendJson(res, 200, {
             meta: payload.meta,
             marketSession: payload.marketSession,
@@ -4213,7 +4315,8 @@ async function handleCnStock(req, res, rawStockCode) {
             valuation: row.valuation,
             prediction: row.prediction,
             policy: row.policy,
-            tpSl
+            policyPacket: row.policyPacket || null,
+            tpSl: row.tpSl || null
         });
     } catch (error) {
         sendJson(res, 502, {
@@ -4542,7 +4645,23 @@ function asUsUniverseRow(constituent, stooqRow, status) {
         open: null, high: null, low: null, price: null, volume: null, changePct: null
     };
     const prediction = calculateUsPrediction(quote);
-    const policy = calculateUsPolicy(prediction);
+    const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+        market: 'us_equity',
+        symbol: constituent.symbol,
+        price: quote.price,
+        changePct: quote.changePct,
+        open: quote.open,
+        high: quote.high,
+        low: quote.low,
+        volume: quote.volume,
+        pUp: prediction.pUp,
+        confidence: prediction.confidence,
+        q10: prediction.q10,
+        q50: prediction.q50,
+        q90: prediction.q90,
+        forecastTimestamp: new Date().toISOString(),
+        inputSource: 'us-universe-derived'
+    });
     return {
         symbol: constituent.symbol,
         name: constituent.name,
@@ -4564,7 +4683,9 @@ function asUsUniverseRow(constituent, stooqRow, status) {
             q90: prediction.q90,
             window: prediction.window
         },
+        policyPacket,
         policy,
+        tpSl,
         valuation: {
             marketCap: null,
             peTtm: null
@@ -5204,8 +5325,23 @@ async function handleUsIndexPrediction(req, res, rawIndexSymbol) {
         }
 
         const prediction = calculateUsPrediction(indexData);
-        const policy = calculateUsPolicy(prediction);
-        const tpSl = calculateUsTpSl(indexData.price || 0, prediction, policy.signal);
+        const { policyPacket, policy, tpSl } = buildUnifiedPolicyArtifacts({
+            market: 'us_equity',
+            symbol: canonical,
+            price: indexData.price,
+            changePct: indexData.changePct,
+            open: indexData.open,
+            high: indexData.high,
+            low: indexData.low,
+            volume: indexData.volume,
+            pUp: prediction.pUp,
+            confidence: prediction.confidence,
+            q10: prediction.q10,
+            q50: prediction.q50,
+            q90: prediction.q90,
+            forecastTimestamp: payload.meta?.timestamp || new Date().toISOString(),
+            inputSource: 'us-index-derived'
+        });
 
         sendJson(res, 200, {
             meta: payload.meta,
@@ -5228,6 +5364,7 @@ async function handleUsIndexPrediction(req, res, rawIndexSymbol) {
                     q90: prediction.q90
                 }
             },
+            policyPacket,
             policy,
             tpSl
         });
@@ -5270,10 +5407,6 @@ async function handleUsStock(req, res, rawSymbol) {
             return;
         }
 
-        const prediction = calculateUsPrediction(row);
-        const policy = calculateUsPolicy(prediction);
-        const tpSl = calculateUsTpSl(row.price || 0, prediction, policy.signal);
-
         sendJson(res, 200, {
             meta: payload.meta,
             marketSession: payload.marketSession,
@@ -5288,17 +5421,18 @@ async function handleUsStock(req, res, rawSymbol) {
             low: row.low,
             volume: row.volume,
             prediction: {
-                pUp: prediction.pUp,
-                pDown: prediction.pDown,
-                confidence: prediction.confidence,
-                signal: prediction.signal,
-                q10: prediction.q10,
-                q50: prediction.q50,
-                q90: prediction.q90,
-                window: prediction.window
+                pUp: row.prediction?.pUp,
+                pDown: row.prediction?.pDown,
+                confidence: row.prediction?.confidence,
+                signal: row.prediction?.signal,
+                q10: row.prediction?.q10,
+                q50: row.prediction?.q50,
+                q90: row.prediction?.q90,
+                window: row.prediction?.window
             },
-            policy,
-            tpSl,
+            policyPacket: row.policyPacket || null,
+            policy: row.policy,
+            tpSl: row.tpSl || null,
             valuation: row.valuation,
             status: row.price === null ? 'UNAVAILABLE' : (payload.meta.stale ? 'STALE' : 'LIVE')
         });
@@ -5423,6 +5557,11 @@ function normalizeTrackingSortBy(raw) {
     if (candidate === 'market') return 'market';
     if (candidate === 'pup' || candidate === 'p_up') return 'pUp';
     if (candidate === 'factorscore' || candidate === 'factor_score') return 'factorScore';
+    if (candidate === 'netedge' || candidate === 'net_edge' || candidate === 'expectednetedgepct') return 'expectedNetEdgePct';
+    if (candidate === 'tradequality' || candidate === 'trade_quality' || candidate === 'tradequalityscore') return 'tradeQualityScore';
+    if (candidate === 'regime') return 'regime';
+    if (candidate === 'cost' || candidate === 'costpct') return 'costPct';
+    if (candidate === 'rr' || candidate === 'rewardrisk2') return 'rewardRisk2';
     return 'totalScore';
 }
 
@@ -5539,6 +5678,24 @@ function trackingActionPriority(actionKey) {
 }
 
 function resolveTrackingActionDescriptor(row) {
+    if (row.policyPacket) {
+        const packetAction = String(row.policyPacket.action || 'FLAT').toUpperCase();
+        const packetReasons = Array.isArray(row.policyPacket.reasons) ? row.policyPacket.reasons : [];
+        const tooltip = packetReasons.length
+            ? packetReasons.join(' ')
+            : `Policy packet action ${packetAction}.`;
+        if (packetAction === 'STRONG_LONG') {
+            return { action: 'STRONG BUY', actionKey: 'strong_buy', actionTone: 'success', actionTooltip: tooltip };
+        }
+        if (packetAction === 'LONG') {
+            return { action: 'BUY', actionKey: 'buy', actionTone: 'success', actionTooltip: tooltip };
+        }
+        if (packetAction === 'SHORT' || packetAction === 'STRONG_SHORT') {
+            return { action: 'REDUCE', actionKey: 'reduce', actionTone: 'danger', actionTooltip: tooltip };
+        }
+        return { action: 'HOLD', actionKey: 'hold', actionTone: 'warning', actionTooltip: tooltip };
+    }
+
     let action = 'HOLD';
     let actionKey = 'hold';
     let actionTone = 'warning';
@@ -5569,6 +5726,30 @@ function resolveTrackingActionDescriptor(row) {
 
 function buildTrackingRow(base) {
     const factorBundle = computeTrackingFactors(base);
+    const policyPacket = base.policyPacket || null;
+    const expectedNetEdgePct = roundTrackingNumber(policyPacket?.expectedNetEdgePct ?? null, 2);
+    const tradeQualityScore = roundTrackingNumber(policyPacket?.tradeQualityScore ?? null, 1);
+    const tradeQualityBand = policyPacket?.tradeQualityBand || null;
+    const regime = policyPacket?.regime || null;
+    const costPct = roundTrackingNumber(policyPacket?.costPct ?? null, 2);
+    const rewardRisk2 = roundTrackingNumber(policyPacket?.rewardRisk2 ?? null, 2);
+    const regimeScore = roundTrackingNumber(policyPacket?.regimeScore ?? null, 4);
+    const edgeRank = clamp(((policyPacket?.expectedNetEdgePct ?? 0) + 0.5) / 1.5, 0, 1);
+    const rrRank = clamp((policyPacket?.rewardRisk2 ?? 0) / 4, 0, 1);
+    const qualityRank = clamp((policyPacket?.tradeQualityScore ?? 0) / 100, 0, 1);
+    const packetRankScore = policyPacket
+        ? roundTrackingNumber(
+            clamp(
+                qualityRank * 0.45
+                + edgeRank * 0.35
+                + rrRank * 0.10
+                + clamp(policyPacket?.regimeScore ?? 0, 0, 1) * 0.10,
+                0,
+                1
+            ),
+            4
+        )
+        : null;
     const row = {
         symbol: base.symbol,
         name: base.name,
@@ -5585,7 +5766,8 @@ function buildTrackingRow(base) {
         bandWidth: roundTrackingNumber(base.bandWidth, 4),
         factors: factorBundle.factors,
         factorScore: factorBundle.factorScore,
-        totalScore: factorBundle.totalScore,
+        legacyTotalScore: factorBundle.totalScore,
+        totalScore: packetRankScore ?? factorBundle.totalScore,
         contribution: factorBundle.contribution,
         signalSource: base.signalSource,
         timestamp: base.timestamp,
@@ -5593,6 +5775,15 @@ function buildTrackingRow(base) {
         staleReason: base.staleReason || null,
         status: base.status,
         liquidityProxy: roundTrackingNumber(base.liquidityProxy, 2),
+        policyPacket,
+        expectedNetEdgePct,
+        tradeQualityScore,
+        tradeQualityBand,
+        regime,
+        regimeScore,
+        costPct,
+        rewardRisk2,
+        packetRankScore,
         meta: base.meta || {}
     };
     row.factorExplanations = buildTrackingFactorExplanations(row, row.factors);
@@ -5625,6 +5816,7 @@ function buildTrackingCryptoRow(coin, stale = false, staleReason = null, timesta
         q90: predictionPayload.prediction.magnitude.q90,
         bandWidth: predictionPayload.prediction.magnitude.q90 - predictionPayload.prediction.magnitude.q10,
         liquidityProxy: marketCap || volume,
+        policyPacket: predictionPayload.policyPacket || null,
         coverageInputs: [price, volume, marketCap, changePct, predictionPayload.prediction.p_up, predictionPayload.prediction.confidence],
         signalSource: 'derived_live',
         stale,
@@ -5655,6 +5847,7 @@ function buildTrackingCnRow(row, stale = false, timestamp = new Date().toISOStri
         q90: row.prediction?.q90 ?? 0.01,
         bandWidth: (row.prediction?.q90 ?? 0.01) - (row.prediction?.q10 ?? -0.01),
         liquidityProxy: row.turnover || row.valuation?.marketCap || row.volume || 0,
+        policyPacket: row.policyPacket || null,
         coverageInputs: [row.price, row.changePct, row.volume, row.turnover, row.prediction?.pUp, row.prediction?.confidence],
         signalSource: 'derived_live',
         stale,
@@ -5686,6 +5879,7 @@ function buildTrackingUsRow(row, stale = false, timestamp = new Date().toISOStri
         q90: row.prediction?.q90 ?? 0.01,
         bandWidth: (row.prediction?.q90 ?? 0.01) - (row.prediction?.q10 ?? -0.01),
         liquidityProxy,
+        policyPacket: row.policyPacket || null,
         coverageInputs: [row.price, row.changePct, row.volume, liquidityProxy, row.prediction?.pUp, row.prediction?.confidence],
         signalSource: 'derived_live',
         stale,
@@ -5781,6 +5975,11 @@ function getTrackingSortValue(row, sortBy) {
     case 'market': return row.marketLabel;
     case 'factorScore': return row.factorScore;
     case 'pUp': return row.pUp;
+    case 'expectedNetEdgePct': return row.expectedNetEdgePct ?? -Infinity;
+    case 'tradeQualityScore': return row.tradeQualityScore ?? -Infinity;
+    case 'regime': return row.regime || '';
+    case 'costPct': return row.costPct ?? Infinity;
+    case 'rewardRisk2': return row.rewardRisk2 ?? -Infinity;
     case 'totalScore':
     default:
         return row.totalScore;

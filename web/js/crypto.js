@@ -42,6 +42,15 @@ const REASON_CODE_TEXT = {
     risk_cap: 'Position size capped by risk controls.'
 };
 
+const POLICY_GATE_TEXT = {
+    cost_ok: 'Cost',
+    confidence_ok: 'Confidence',
+    regime_ok: 'Regime',
+    liquidity_ok: 'Liquidity',
+    net_edge: 'Net Edge',
+    policy_threshold: 'Edge Threshold'
+};
+
 const state = {
     selectedSymbol: 'BTCUSDT',
     timeframe: '7d',
@@ -207,6 +216,20 @@ function cacheElements() {
         rrRatio1: byId('rrRatio1'),
         rrRatio2Label: byId('rrRatio2Label'),
         rrRatio2: byId('rrRatio2'),
+        previewPlanSection: byId('previewPlanSection'),
+        previewEntryLabel: byId('previewEntryLabel'),
+        previewEntryPrice: byId('previewEntryPrice'),
+        previewStopLabel: byId('previewStopLabel'),
+        previewStopLoss: byId('previewStopLoss'),
+        previewTp1Label: byId('previewTp1Label'),
+        previewTakeProfit1: byId('previewTakeProfit1'),
+        previewTp2Label: byId('previewTp2Label'),
+        previewTakeProfit2: byId('previewTakeProfit2'),
+        previewRr1Label: byId('previewRr1Label'),
+        previewRrRatio1: byId('previewRrRatio1'),
+        previewRr2Label: byId('previewRr2Label'),
+        previewRrRatio2: byId('previewRrRatio2'),
+        previewPlanNote: byId('previewPlanNote'),
         explanationSummary: byId('explanationSummary'),
         topFeaturesList: byId('topFeaturesList'),
         reasonCodesList: byId('reasonCodesList'),
@@ -796,6 +819,8 @@ function normalizePrediction(payload, symbol) {
 
     const predictionRaw = payload.prediction && typeof payload.prediction === 'object' ? payload.prediction : payload;
     const signalRaw = payload.signal && typeof payload.signal === 'object' ? payload.signal : {};
+    const policyPacket = normalizePolicyPacket(payload.policyPacket);
+    const policy = payload.policy && typeof payload.policy === 'object' ? payload.policy : {};
 
     const pUpRaw = asNumber(
         predictionRaw.p_up
@@ -820,7 +845,7 @@ function normalizePrediction(payload, symbol) {
         ?? predictionRaw.direction?.confidence,
         Math.abs(pUp - 0.5) * 2
     ));
-    const signal = String(predictionRaw.signal ?? signalRaw.action ?? resolveTradeSignal(pUp, confidence)).toUpperCase();
+    const signal = String(policyPacket?.action ?? predictionRaw.signal ?? signalRaw.action ?? resolveTradeSignal(pUp, confidence)).toUpperCase();
 
     const startRaw = predictionRaw.start_window || predictionRaw.startWindow || {};
     const window = normalizeWindowFromPayload(startRaw, pUp, confidence);
@@ -841,12 +866,12 @@ function normalizePrediction(payload, symbol) {
         ?? currentPrice(symbol)
     );
     if (!Number.isFinite(entryPrice) || entryPrice <= 0) return null;
-    const action = String(signalRaw.action ?? signal ?? resolveTradeSignal(pUp, confidence)).toUpperCase();
+    const action = String(policyPacket?.action ?? signalRaw.action ?? signal ?? resolveTradeSignal(pUp, confidence)).toUpperCase();
     const actionable = typeof signalRaw.actionable === 'boolean'
         ? signalRaw.actionable
         : String(signalRaw.presentation || '').toUpperCase() === 'TRADE'
             ? true
-            : isActionableSignal(action);
+            : isActionableSignal(action) || action === 'STRONG LONG' || action === 'STRONG SHORT';
     const presentation = String(signalRaw.presentation || (actionable ? 'TRADE' : 'NO_TRADE')).toUpperCase();
     const referencePrice = nullableNumber(signalRaw.reference_price ?? signalRaw.referencePrice, entryPrice);
     const stopLoss = actionable
@@ -891,7 +916,7 @@ function normalizePrediction(payload, symbol) {
             action,
             actionable,
             presentation,
-            positionSize: asNumber(signalRaw.position_size ?? signalRaw.positionSize, actionable ? clamp((confidence - MIN_ACTIONABLE_CONFIDENCE) / (1 - MIN_ACTIONABLE_CONFIDENCE), 0, 1) * MAX_LEVERAGE : 0),
+            positionSize: asNumber(policyPacket?.positionSize ?? signalRaw.position_size ?? signalRaw.positionSize, actionable ? clamp((confidence - MIN_ACTIONABLE_CONFIDENCE) / (1 - MIN_ACTIONABLE_CONFIDENCE), 0, 1) * MAX_LEVERAGE : 0),
             entryPrice,
             referencePrice,
             longTriggerPUp,
@@ -907,6 +932,9 @@ function normalizePrediction(payload, symbol) {
             topFeatures,
             reasonCodes
         },
+        policyPacket,
+        previewPlan: policyPacket?.previewPlan || null,
+        policy,
         health: normalizeHealth(payload.health, {
             confidence,
             q10: sorted[0],
@@ -914,6 +942,45 @@ function normalizePrediction(payload, symbol) {
             q90: sorted[2],
             stale: Boolean(payload?.meta?.stale)
         })
+    };
+}
+
+function normalizePreviewPlan(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return null;
+    return {
+        available: Boolean(raw.available),
+        status: String(raw.status || 'preview').toLowerCase(),
+        direction: String(raw.direction || '').toUpperCase(),
+        entryPrice: nullableNumber(raw.entryPrice, null),
+        stopLoss: nullableNumber(raw.stopLoss, null),
+        stopLossPct: nullableNumber(raw.stopLossPct, null),
+        takeProfit1: nullableNumber(raw.takeProfit1, null),
+        takeProfit1Pct: nullableNumber(raw.takeProfit1Pct, null),
+        takeProfit2: nullableNumber(raw.takeProfit2, null),
+        takeProfit2Pct: nullableNumber(raw.takeProfit2Pct, null),
+        rewardRisk1: nullableNumber(raw.rewardRisk1, null),
+        rewardRisk2: nullableNumber(raw.rewardRisk2, null),
+        basis: String(raw.basis || 'reference_price')
+    };
+}
+
+function normalizePolicyPacket(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+        action: String(raw.action || 'FLAT').toUpperCase().replace(/_/g, ' '),
+        expectedNetEdgePct: asNumber(raw.expectedNetEdgePct, null),
+        tradeQualityScore: asNumber(raw.tradeQualityScore, null),
+        tradeQualityBand: raw.tradeQualityBand ? String(raw.tradeQualityBand) : null,
+        regime: raw.regime ? String(raw.regime) : null,
+        regimeScore: asNumber(raw.regimeScore, null),
+        costPct: asNumber(raw.costPct, null),
+        positionSize: asNumber(raw.positionSize, 0),
+        leverageCap: asNumber(raw.leverageCap, null),
+        rewardRisk2: nullableNumber(raw.rewardRisk2, null),
+        previewPlan: normalizePreviewPlan(raw.previewPlan),
+        reasons: Array.isArray(raw.reasons) ? raw.reasons.map((item) => String(item)) : [],
+        gates: Array.isArray(raw.gates) ? raw.gates.map((item) => String(item)) : [],
+        engineVersion: raw.engineVersion ? String(raw.engineVersion) : null
     };
 }
 
@@ -1242,6 +1309,7 @@ function renderPredictionPanel() {
         text(els.takeProfit2, '--');
         text(els.rrRatio1, '--');
         text(els.rrRatio2, '--');
+        renderPreviewPlanSection(null, false);
         if (els.predictionDataNote) {
             els.predictionDataNote.textContent = 'Live prediction data unavailable.';
         }
@@ -1268,6 +1336,7 @@ function renderPredictionPanel() {
     text(els.expectedReturn, formatSignedPercent(packet.magnitude.expectedReturn));
 
     setSignalPill(els.actionPill, packet.signal.action);
+    renderPolicyRegimeChip(packet.policyPacket);
     if (packet.signal.actionable) {
         applyRiskPacketLabels('TRADE');
         text(els.positionSize, `${packet.signal.positionSize.toFixed(2)}x`);
@@ -1279,34 +1348,69 @@ function renderPredictionPanel() {
         text(els.rrRatio2, formatNullableRatio(packet.signal.rr2));
     } else {
         applyRiskPacketLabels('NO_TRADE');
-        text(els.positionSize, `${packet.signal.positionSize.toFixed(2)}x`);
+        text(els.positionSize, formatPolicyPercent(packet.policyPacket?.expectedNetEdgePct));
         text(els.entryPrice, formatNullableCurrency(packet.signal.referencePrice ?? packet.signal.entryPrice));
-        text(els.stopLoss, formatNullableProbability(packet.signal.longTriggerPUp));
-        text(els.takeProfit1, formatNullableProbability(packet.signal.shortTriggerPUp));
-        text(els.takeProfit2, formatCurrentEdge(packet.direction.pUp, packet.direction.confidence));
-        text(els.rrRatio1, '--');
-        text(els.rrRatio2, '--');
+        text(els.stopLoss, formatPolicyQuality(packet.policyPacket));
+        text(els.takeProfit1, packet.policyPacket?.regime || 'Unavailable');
+        text(els.takeProfit2, formatPolicyGateList(packet.policyPacket?.gates || []));
+        text(els.rrRatio1, formatPolicyBlockingList(packet.policyPacket));
+        text(els.rrRatio2, buildPolicyReasonSummary(packet.policyPacket));
     }
+    renderPreviewPlanSection(packet.policyPacket?.previewPlan, !packet.signal.actionable);
     if (els.predictionDataNote) {
         const feedNote = state.dataMode === 'Stale Feed'
             ? 'Prediction derived from stale cache.'
             : 'Prediction sourced from live derived feed.';
         els.predictionDataNote.textContent = packet.signal.actionable
-            ? feedNote
-            : `${feedNote} NO TRADE until direction and confidence clear the execution gate.`;
+            ? `${feedNote} Policy Engine approved this setup after net-edge and regime gating.`
+            : `${feedNote} ${buildPolicyStandbyNote(packet.policyPacket)} Preview plan below is informational only until execution gates clear.`;
+    }
+}
+
+function renderPreviewPlanSection(previewPlan, visible) {
+    if (els.previewPlanSection) {
+        els.previewPlanSection.hidden = !(visible && previewPlan?.available);
+    }
+    if (!visible || !previewPlan?.available) {
+        text(els.previewEntryPrice, '--');
+        text(els.previewStopLoss, '--');
+        text(els.previewTakeProfit1, '--');
+        text(els.previewTakeProfit2, '--');
+        text(els.previewRrRatio1, '--');
+        text(els.previewRrRatio2, '--');
+        if (els.previewPlanNote) {
+            els.previewPlanNote.textContent = 'Preview only. Execution remains blocked until the policy packet becomes actionable.';
+        }
+        return;
+    }
+
+    text(els.previewEntryLabel, `Preview Entry (${previewPlan.direction || 'Plan'})`);
+    text(els.previewStopLabel, 'Preview Stop');
+    text(els.previewTp1Label, 'Preview TP1');
+    text(els.previewTp2Label, 'Preview TP2');
+    text(els.previewRr1Label, 'Preview R:R (TP1)');
+    text(els.previewRr2Label, 'Preview R:R (TP2)');
+    text(els.previewEntryPrice, formatNullableCurrency(previewPlan.entryPrice));
+    text(els.previewStopLoss, formatNullableCurrency(previewPlan.stopLoss));
+    text(els.previewTakeProfit1, formatNullableCurrency(previewPlan.takeProfit1));
+    text(els.previewTakeProfit2, formatNullableCurrency(previewPlan.takeProfit2));
+    text(els.previewRrRatio1, formatNullableRatio(previewPlan.rewardRisk1));
+    text(els.previewRrRatio2, formatNullableRatio(previewPlan.rewardRisk2));
+    if (els.previewPlanNote) {
+        els.previewPlanNote.textContent = 'Preview only. The plan is derived from the current reference price, but execution remains blocked until the packet turns actionable.';
     }
 }
 
 function applyRiskPacketLabels(mode) {
     const noTrade = mode === 'NO_TRADE';
     text(els.actionLabel, 'Action');
-    text(els.positionSizeLabel, 'Position Size');
+    text(els.positionSizeLabel, noTrade ? 'Expected Net Edge' : 'Position Size');
     text(els.entryPriceLabel, noTrade ? 'Reference Price' : 'Entry');
-    text(els.stopLossLabel, noTrade ? 'Long Trigger' : 'Stop Loss');
-    text(els.takeProfit1Label, noTrade ? 'Short Trigger' : 'Take Profit 1');
-    text(els.takeProfit2Label, noTrade ? 'Current Edge' : 'Take Profit 2');
-    text(els.rrRatio1Label, noTrade ? 'Stop / TP' : 'R:R (TP1)');
-    text(els.rrRatio2Label, noTrade ? 'Risk:Reward' : 'R:R (TP2)');
+    text(els.stopLossLabel, noTrade ? 'Trade Quality' : 'Stop Loss');
+    text(els.takeProfit1Label, noTrade ? 'Regime' : 'Take Profit 1');
+    text(els.takeProfit2Label, noTrade ? 'Passed Gates' : 'Take Profit 2');
+    text(els.rrRatio1Label, noTrade ? 'Blocking Gates' : 'R:R (TP1)');
+    text(els.rrRatio2Label, noTrade ? 'Policy Reason' : 'R:R (TP2)');
 }
 
 function updateConfidenceRing(confidence, signal) {
@@ -1435,7 +1539,9 @@ function renderHealth() {
         els.sharpeChart.setAttribute('title', 'Negative Sharpe indicates low volatility regime, strategy in review.');
     }
 
-    renderRegimeChip(health.sharpeRatio);
+    if (!state.prediction?.policyPacket?.regime) {
+        renderRegimeChip(health.sharpeRatio);
+    }
     updateSharpeChart(health.sharpeRatio);
 }
 
@@ -1449,6 +1555,67 @@ function renderRegimeChip(sharpeRatio) {
     const regime = computeRegimeFromSharpe(sharpeRatio);
     els.regimeChip.textContent = `Current Regime: ${regime.label}`;
     els.regimeChip.className = `regime-chip ${regime.className}`;
+}
+
+function renderPolicyRegimeChip(policyPacket) {
+    if (!els.regimeChip) return;
+    if (!policyPacket?.regime) {
+        els.regimeChip.textContent = 'Current Regime: Unavailable';
+        els.regimeChip.className = 'regime-chip defensive';
+        return;
+    }
+    const tone = policyPacket.regime.toLowerCase().includes('trend') ? 'balanced' : 'defensive';
+    els.regimeChip.textContent = `Current Regime: ${policyPacket.regime}`;
+    els.regimeChip.className = `regime-chip ${tone}`;
+    els.regimeChip.title = buildPolicyReasonSummary(policyPacket);
+}
+
+function formatPolicyPercent(value) {
+    const numeric = asNumber(value, NaN);
+    if (!Number.isFinite(numeric)) return '--';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}%`;
+}
+
+function formatPolicyQuality(policyPacket) {
+    if (!policyPacket || !Number.isFinite(policyPacket.tradeQualityScore)) return '--';
+    const band = policyPacket.tradeQualityBand ? ` (${policyPacket.tradeQualityBand})` : '';
+    return `${policyPacket.tradeQualityScore.toFixed(1)}${band}`;
+}
+
+function formatPolicyGateList(gates) {
+    if (!Array.isArray(gates) || !gates.length) return 'None';
+    return gates.map((gate) => POLICY_GATE_TEXT[gate] || gate).join(', ');
+}
+
+function formatPolicyBlockingList(policyPacket) {
+    const blocking = buildPolicyBlockingList(policyPacket);
+    return blocking.length ? blocking.map((gate) => POLICY_GATE_TEXT[gate] || gate).join(', ') : 'None';
+}
+
+function buildPolicyBlockingList(policyPacket) {
+    if (!policyPacket) return ['net_edge'];
+    const gates = Array.isArray(policyPacket.gates) ? policyPacket.gates : [];
+    const blocking = [];
+    if (!gates.includes('cost_ok') || asNumber(policyPacket.expectedNetEdgePct, 0) <= 0) blocking.push('net_edge');
+    if (!gates.includes('confidence_ok')) blocking.push('confidence_ok');
+    if (!gates.includes('regime_ok')) blocking.push('regime_ok');
+    if (!gates.includes('liquidity_ok')) blocking.push('liquidity_ok');
+    const action = String(policyPacket.action || '').toUpperCase();
+    if ((action === 'WAIT' || action === 'FLAT') && asNumber(policyPacket.expectedNetEdgePct, 0) > 0 && blocking.length === 0) {
+        blocking.push('policy_threshold');
+    }
+    return blocking;
+}
+
+function buildPolicyReasonSummary(policyPacket) {
+    const reasons = Array.isArray(policyPacket?.reasons) ? policyPacket.reasons.filter(Boolean) : [];
+    return reasons.length ? reasons.join(' ') : 'Policy Engine is waiting for cleaner execution conditions.';
+}
+
+function buildPolicyStandbyNote(policyPacket) {
+    const reason = buildPolicyReasonSummary(policyPacket);
+    const blocking = formatPolicyBlockingList(policyPacket);
+    return `${reason} Blocking: ${blocking}.`;
 }
 
 function updateSharpeChart(currentSharpe) {
@@ -1527,7 +1694,7 @@ function renderSizer() {
     if (els.sizerAvailabilityNote) {
         els.sizerAvailabilityNote.textContent = result.actionable
             ? ''
-            : 'NO TRADE until P(UP) and confidence clear the execution thresholds.';
+            : 'NO TRADE until the setup clears the policy engine edge and execution gates.';
     }
 }
 
@@ -2078,15 +2245,16 @@ function renderWindow(fillEl, valueEl, value) {
 
 function setSignalPill(element, signal) {
     if (!element) return;
-    const normalized = (signal || 'FLAT').toUpperCase();
-    const type = normalized === 'LONG' ? 'long' : normalized === 'SHORT' ? 'short' : 'flat';
+    const normalized = String(signal || 'FLAT').toUpperCase().replace(/_/g, ' ');
+    const type = normalized.includes('LONG') ? 'long' : normalized.includes('SHORT') ? 'short' : 'flat';
     element.textContent = displaySignalLabel(normalized);
     element.className = `signal-pill ${type}`;
 }
 
 function signalBadgeClass(signal) {
-    if (signal === 'LONG') return 'success';
-    if (signal === 'SHORT') return 'danger';
+    const normalized = String(signal || '').toUpperCase();
+    if (normalized.includes('LONG')) return 'success';
+    if (normalized.includes('SHORT')) return 'danger';
     return 'warning';
 }
 
@@ -2295,7 +2463,7 @@ function setLastUpdated(timestamp) {
 }
 
 function displaySignalLabel(signal) {
-    const normalized = String(signal || 'FLAT').toUpperCase();
+    const normalized = String(signal || 'FLAT').toUpperCase().replace(/_/g, ' ');
     return normalized === 'FLAT' ? 'NO TRADE' : normalized;
 }
 
@@ -2305,8 +2473,8 @@ function formatSignalFilterLabel(signal) {
 }
 
 function isActionableSignal(signal) {
-    const normalized = String(signal || '').toUpperCase();
-    return normalized === 'LONG' || normalized === 'SHORT';
+    const normalized = String(signal || '').toUpperCase().replace(/_/g, ' ');
+    return normalized.includes('LONG') || normalized.includes('SHORT');
 }
 
 function resolveTradeSignal(pUp, confidence = 1) {

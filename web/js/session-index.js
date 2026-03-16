@@ -78,6 +78,9 @@ function cacheElements() {
         'noGoReason', 'quickDecisionPill', 'quickDecisionMode', 'quickEntryLabel',
         'quickStopLabel', 'quickTakeProfitLabel', 'quickNetEdgeLabel', 'quickEntry',
         'quickStop', 'quickTakeProfit', 'quickNetEdge', 'quickDecisionNote', 'quickDecisionCard',
+        'previewPlanSection', 'previewEntryLabel', 'previewEntry', 'previewStopLabel', 'previewStop',
+        'previewTakeProfit1Label', 'previewTakeProfit1', 'previewTakeProfit2Label', 'previewTakeProfit2',
+        'previewRr1Label', 'previewRr1', 'previewRr2Label', 'previewRr2', 'previewPlanNote',
         'leverageSelector', 'quickExposureText', 'quickTPlusOneNote', 'executeBtnWrap',
         'executeBtn', 'executeHint',
         'chartModeDirection', 'chartModeVolatility', 'sessionChart', 'sessionChartNote',
@@ -389,7 +392,8 @@ function buildViewModel(pricesPayload, predictionPayload, historyPayload, indexM
     const focusRow = resolveFocusRow(rows, phase);
     const accuracy = deriveAccuracy(direction, magnitude);
     const limitInfo = buildLimitInfo(magnitude, focusRow, resolvedIndexMeta);
-    const quickDecision = buildQuickDecision(predictionPayload?.currentValue ?? indexQuote.price, direction, magnitude, predictionPayload?.tpSl || {}, phase, focusRow, resolvedIndexMeta);
+    const policyPacket = normalizePolicyPacket(predictionPayload?.policyPacket);
+    const quickDecision = buildQuickDecision(predictionPayload?.currentValue ?? indexQuote.price, direction, magnitude, predictionPayload?.tpSl || {}, policyPacket, phase, focusRow, resolvedIndexMeta);
     const noGoReason = buildNoGoReason(quickDecision, direction, magnitude, phase, limitInfo, resolvedIndexMeta);
 
     return {
@@ -399,6 +403,7 @@ function buildViewModel(pricesPayload, predictionPayload, historyPayload, indexM
         direction,
         magnitude,
         windowForecast,
+        policyPacket,
         tpSl: predictionPayload?.tpSl || {},
         phase,
         rows,
@@ -808,6 +813,7 @@ function renderOverview() {
     text(els.quickTakeProfit, displayDecision.takeProfitValue);
     text(els.quickNetEdge, displayDecision.netEdgeValue);
     text(els.quickDecisionNote, displayDecision.note);
+    renderPreviewPlan(displayDecision.previewPlan, !displayDecision.actionable);
     text(els.quickExposureText, `Mock exposure: ${state.mockLeverage}x`);
     text(els.quickTPlusOneNote, displayDecision.tPlusOneNote);
     if (els.leverageSelector) {
@@ -822,7 +828,7 @@ function renderOverview() {
     }
     text(els.executeHint, displayDecision.actionable
         ? `Leverage / Position Size (Mock): ${state.mockLeverage}x | SL / TP compressed by mock exposure | Net Edge ${displayDecision.netEdgeValue}`
-        : buildExecuteDisabledTooltip(phase, focusRow));
+        : `${buildExecuteDisabledTooltip(phase, focusRow)} Preview plan below is informational only.`);
 }
 
 function renderStartWindow() {
@@ -851,8 +857,12 @@ function renderMagnitude() {
     text(els.limitAdjustedNote, `Limit risk: ${capitalize(limitInfo.level)} | ${limitInfo.note}`);
     els.limitAdjustedBox.title = limitInfo.level === 'low' ? limitInfo.tooltip : limitInfo.note;
     els.limitAdjustedBox?.classList.toggle('high', limitInfo.level === 'high');
-    text(els.currentBiasText, quickDecision.actionable ? `Directional LONG bias into the next ${indexMeta.displayName} window.` : 'No directional edge yet; wait for cleaner domestic flow.');
-    text(els.currentLimitRiskText, `${capitalize(limitInfo.level)} | q90 ${formatSignedPercent(focusRow?.q90 || 0)} / q10 ${formatSignedPercent(focusRow?.q10 || 0)}`);
+    text(els.currentBiasText, quickDecision.actionable
+        ? `Policy Engine: LONG for the next ${indexMeta.displayName} window.`
+        : `Policy Engine: ${quickDecision.regime || 'WAIT'} regime, standing aside for now.`);
+    text(els.currentLimitRiskText, quickDecision.actionable
+        ? `${capitalize(limitInfo.level)} | q90 ${formatSignedPercent(focusRow?.q90 || 0)} / q10 ${formatSignedPercent(focusRow?.q10 || 0)}`
+        : `Blocked by ${quickDecision.blockingGates?.join(', ') || 'policy threshold'} | ${quickDecision.regime || capitalize(limitInfo.level)}`);
     els.currentLimitRiskText.title = limitInfo.level === 'low' ? limitInfo.tooltip : limitInfo.note;
     text(els.tPlusOneText, quickDecision.actionable ? 'T+1 applies. Any long initiated today can only exit on the next trading day.' : 'T+1 still applies once a long is opened. No shorting assumption for this page.');
     text(els.dataSourceText, viewModel.dataSourceText);
@@ -914,7 +924,7 @@ function renderHoveredSession(row) {
     if (!row) {
         text(els.hoveredSessionLabel, 'No session hovered yet.');
         text(els.hoveredExplanation, 'Move across the session table to inspect the rationale.');
-        text(els.hoveredSuggestedAction, 'LONG if P(UP) >= 55% after open | Confidence boost expected.');
+        text(els.hoveredSuggestedAction, 'Policy bias turns constructive only when the session packet clears its edge and confidence gates.');
         text(els.hoveredWindowBias, '--');
         text(els.hoveredLimitText, '--');
         text(els.hoveredExecutionState, 'Waiting for the current A-share window.');
@@ -1015,6 +1025,7 @@ function refreshPhaseDerivedState() {
         state.viewModel.direction,
         state.viewModel.magnitude,
         state.viewModel.tpSl || {},
+        state.viewModel.policyPacket || null,
         phase,
         state.viewModel.focusRow,
         state.viewModel.indexMeta
@@ -1038,11 +1049,12 @@ function materializeQuickDecision(decision, leverage) {
             badge: 'NO-GO',
             tone: 'flat',
             entryValue: formatIndexValue(decision.entryPrice),
-            stopValue: `P(UP) >= ${formatPercent(decision.longTriggerPUp)}`,
-            takeProfitValue: `Confidence >= ${formatPercent(decision.minConfidence)}`,
-            netEdgeValue: decision.waitForLabel || '--',
+            stopValue: formatSignedPercent(asNumber(decision.baseNetEdgePct, 0)),
+            takeProfitValue: formatDecisionQuality(decision),
+            netEdgeValue: decision.regime || decision.waitForLabel || '--',
             netEdgePct: asNumber(decision.baseNetEdgePct, 0),
-            tPlusOneNote: `Rule preview: ${decision.tPlusOneNote}`
+            tPlusOneNote: `Rule preview: ${decision.tPlusOneNote}`,
+            previewPlan: decision.previewPlan || null
         };
     }
 
@@ -1059,8 +1071,32 @@ function materializeQuickDecision(decision, leverage) {
         stopLossPct,
         takeProfitPct,
         netEdgePct,
-        tPlusOneNote: decision.tPlusOneNote
+        tPlusOneNote: decision.tPlusOneNote,
+        previewPlan: decision.previewPlan || null
     };
+}
+
+function renderPreviewPlan(previewPlan, visible) {
+    if (els.previewPlanSection) {
+        els.previewPlanSection.hidden = !(visible && previewPlan?.available);
+    }
+    if (!visible || !previewPlan?.available) {
+        text(els.previewEntry, '--');
+        text(els.previewStop, '--');
+        text(els.previewTakeProfit1, '--');
+        text(els.previewTakeProfit2, '--');
+        text(els.previewRr1, '--');
+        text(els.previewRr2, '--');
+        return;
+    }
+    text(els.previewEntryLabel, `Preview Entry (${previewPlan.direction || 'Plan'})`);
+    text(els.previewEntry, formatIndexValue(previewPlan.entryPrice));
+    text(els.previewStop, formatIndexValue(previewPlan.stopLoss));
+    text(els.previewTakeProfit1, formatIndexValue(previewPlan.takeProfit1));
+    text(els.previewTakeProfit2, formatIndexValue(previewPlan.takeProfit2));
+    text(els.previewRr1, formatRatioValue(previewPlan.rewardRisk1));
+    text(els.previewRr2, formatRatioValue(previewPlan.rewardRisk2));
+    text(els.previewPlanNote, 'Preview only. These levels come from the current packet and reference price, but they are not approved for execution yet.');
 }
 
 function buildExecuteDisabledTooltip(phase, focusRow) {
@@ -1074,12 +1110,13 @@ function buildExecuteDisabledTooltip(phase, focusRow) {
 
 function buildSuggestedAction(signal, sessionKey, confidence) {
     if (signal === 'LONG') {
-        return `LONG if P(UP) >= ${Math.round(LONG_TRIGGER * 100)}% after open | Confidence ${formatPercent(confidence)} already clears the gate`;
+        const sessionLabel = SESSION_ROWS.find((row) => row.key === sessionKey)?.label || 'next session';
+        return `Policy bias is constructive for ${sessionLabel} | Confidence ${formatPercent(confidence)} supports a long-side setup`;
     }
     if (sessionKey.startsWith('afternoon')) {
-        return 'Wait for cleaner afternoon domestic flow | Confidence gate not cleared';
+        return 'Policy Engine is standing aside for the afternoon window | Wait for cleaner net edge and domestic flow';
     }
-    return 'Wait for Afternoon Open | Confidence boost expected';
+    return 'Policy Engine is standing aside | Wait for a higher-quality A-share session packet';
 }
 
 function firstRenderableHoverRow() {
@@ -1160,17 +1197,23 @@ function closeModal() {
     els.executeModal.classList.remove('open');
     els.executeModal.setAttribute('aria-hidden', 'true');
 }
-function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, indexMeta) {
+function buildQuickDecision(price, direction, magnitude, tpSl, policyPacket, phase, focusRow, indexMeta) {
     const resolvedIndexMeta = indexMeta || currentIndexMeta();
-    const pUp = asNumber(direction.pUp, 0.5);
-    const confidence = asNumber(direction.confidence, 0.5);
-    const signal = resolveSignal(pUp, confidence);
-    const actionable = signal === 'LONG';
     const entryPrice = asNumber(price, tpSl.entryPrice);
-    const baseNetEdgePct = asNumber(focusRow?.q50, magnitude.q50 ?? 0) - ESTIMATED_FEE_PCT;
+    const packetAction = String(policyPacket?.action || '').toUpperCase();
+    const actionable = packetAction.includes('LONG');
+    const baseNetEdgePct = Number.isFinite(Number(policyPacket?.expectedNetEdgePct))
+        ? Number(policyPacket.expectedNetEdgePct) / 100
+        : asNumber(focusRow?.q50, magnitude.q50 ?? 0) - ESTIMATED_FEE_PCT;
     const baseStopLossPct = asNumber(tpSl.stopLossPct, focusRow?.q10 ?? -0.015);
     const baseTakeProfitPct = asNumber(tpSl.takeProfit2Pct, focusRow?.q90 ?? 0.02);
     const tPlusOneNote = 'LONG initiated today -> Exit only tomorrow or later';
+    const reason = buildPolicyReason(
+        policyPacket,
+        actionable
+            ? `Policy Engine approves LONG exposure for the ${resolvedIndexMeta.displayName} session packet.`
+            : `Policy Engine is standing aside for ${resolvedIndexMeta.displayName} until the packet clears its execution gates.`
+    );
 
     if (actionable) {
         return {
@@ -1185,13 +1228,20 @@ function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, 
             takeProfitLabel: 'Take Profit',
             netEdgeLabel: 'Net Edge',
             note: phase.tradable
-                ? `LONG setup for ${resolvedIndexMeta.displayName} ${focusRow?.label || 'the next session'} clears the policy gate. T+1 holding rule applies after entry.`
+                ? `${reason} T+1 holding rule applies after entry.`
                 : `Simulated only. Market reopens at ${formatTimeOnly(phase.nextOpenAt)} BJT.`,
             entryPrice,
             baseStopLossPct,
             baseTakeProfitPct,
             baseNetEdgePct,
             tPlusOneNote,
+            regime: policyPacket?.regime || '',
+            tradeQualityScore: policyPacket?.tradeQualityScore,
+            tradeQualityBand: policyPacket?.tradeQualityBand || '',
+            passedGates: Array.isArray(policyPacket?.gates) ? policyPacket.gates : [],
+            blockingGates: buildBlockingGates(policyPacket),
+            reason,
+            previewPlan: normalizePreviewPlan(policyPacket?.previewPlan),
             longTriggerPUp: LONG_TRIGGER,
             minConfidence: MIN_CONFIDENCE
         };
@@ -1205,15 +1255,22 @@ function buildQuickDecision(price, direction, magnitude, tpSl, phase, focusRow, 
         mode: phase.tradable ? 'Stand Aside' : 'Simulated Only',
         modeTone: phase.tradable ? 'warning' : 'info',
         entryLabel: 'Reference',
-        stopLabel: 'Long Trigger',
-        takeProfitLabel: 'Confidence Gate',
-        netEdgeLabel: 'Wait For',
+        stopLabel: 'Expected Net Edge',
+        takeProfitLabel: 'Trade Quality',
+        netEdgeLabel: 'Regime',
         note: phase.tradable
-            ? `No directional edge yet. Wait for the next higher-conviction ${resolvedIndexMeta.displayName} session before opening risk.`
+            ? reason
             : `Simulated only until ${formatTimeOnly(phase.nextOpenAt)} BJT.`,
         entryPrice,
         baseNetEdgePct,
         tPlusOneNote,
+        regime: policyPacket?.regime || '',
+        tradeQualityScore: policyPacket?.tradeQualityScore,
+        tradeQualityBand: policyPacket?.tradeQualityBand || '',
+        passedGates: Array.isArray(policyPacket?.gates) ? policyPacket.gates : [],
+        blockingGates: buildBlockingGates(policyPacket),
+        reason,
+        previewPlan: normalizePreviewPlan(policyPacket?.previewPlan),
         longTriggerPUp: LONG_TRIGGER,
         minConfidence: MIN_CONFIDENCE,
         waitForLabel: phase.tradable ? `${focusRow?.label || 'Next session'} bias` : `${formatTimeOnly(phase.nextOpenAt)} reopen`
@@ -1227,20 +1284,83 @@ function buildNoGoReason(decision, direction, magnitude, phase, limitInfo, index
     const width = Math.abs(asNumber(magnitude.q90, 0.015) - asNumber(magnitude.q10, -0.015));
 
     if (decision.liveEligible) {
-        return `GO for the active ${resolvedIndexMeta.displayName} window. Confidence ${Math.round(confidence * 100)}% clears the execution gate and T+1 applies after entry.`;
+        return `GO for the active ${resolvedIndexMeta.displayName} window. The live policy packet is actionable and T+1 applies after entry.`;
     }
 
     if (decision.actionable && !phase.tradable) {
         return `NO-GO for execution because the market is closed. The directional bias is still LONG, but this remains simulation-only until ${formatTimeOnly(phase.nextOpenAt)} BJT.`;
     }
 
+    if (decision?.reason) {
+        return decision.reason;
+    }
+
     const reasons = [];
-    if (pUp < LONG_TRIGGER) reasons.push(`directional edge is only ${Math.round(pUp * 100)}% P(UP)`);
-    if (confidence < MIN_CONFIDENCE) reasons.push(`confidence is too low (${Math.round(confidence * 100)}%)`);
+    if (pUp < LONG_TRIGGER) reasons.push(`directional edge is still weak (${Math.round(pUp * 100)}% P(UP))`);
+    if (confidence < MIN_CONFIDENCE) reasons.push(`confidence support is still light (${Math.round(confidence * 100)}%)`);
     if (width >= 0.05) reasons.push('volatility forecast is elevated');
     if (limitInfo.level === 'high') reasons.push(`the q-band is near the ${resolvedIndexMeta.policyLabel.toLowerCase()}`);
     const waitFor = recommendedWaitTarget(phase.key);
-    return `NO-GO due to ${reasons.join(' + ') || 'insufficient edge'}. Recommend wait for ${waitFor}.`;
+    return `NO-GO because the policy packet is not actionable yet: ${reasons.join(' + ') || 'insufficient net edge'}. Recommend wait for ${waitFor}.`;
+}
+
+function normalizePolicyPacket(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+        action: String(raw.action || 'FLAT').toUpperCase(),
+        expectedNetEdgePct: Number.isFinite(Number(raw.expectedNetEdgePct)) ? Number(raw.expectedNetEdgePct) : null,
+        tradeQualityScore: Number.isFinite(Number(raw.tradeQualityScore)) ? Number(raw.tradeQualityScore) : null,
+        tradeQualityBand: raw.tradeQualityBand ? String(raw.tradeQualityBand) : '',
+        regime: raw.regime ? String(raw.regime) : '',
+        previewPlan: normalizePreviewPlan(raw.previewPlan),
+        gates: Array.isArray(raw.gates) ? raw.gates.map((item) => String(item)) : [],
+        reasons: Array.isArray(raw.reasons) ? raw.reasons.map((item) => String(item)) : []
+    };
+}
+
+function normalizePreviewPlan(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return null;
+    return {
+        available: Boolean(raw.available),
+        status: String(raw.status || 'preview').toLowerCase(),
+        direction: String(raw.direction || '').toUpperCase(),
+        entryPrice: nullableNumber(raw.entryPrice, null),
+        stopLoss: nullableNumber(raw.stopLoss, null),
+        takeProfit1: nullableNumber(raw.takeProfit1, null),
+        takeProfit2: nullableNumber(raw.takeProfit2, null),
+        rewardRisk1: nullableNumber(raw.rewardRisk1, null),
+        rewardRisk2: nullableNumber(raw.rewardRisk2, null)
+    };
+}
+
+function buildBlockingGates(policyPacket) {
+    if (!policyPacket) return [];
+    const gates = Array.isArray(policyPacket.gates) ? policyPacket.gates : [];
+    const blocking = [];
+    if (!gates.includes('cost_ok') || Number(policyPacket.expectedNetEdgePct || 0) <= 0) blocking.push('net edge');
+    if (!gates.includes('confidence_ok')) blocking.push('confidence');
+    if (!gates.includes('regime_ok')) blocking.push('regime');
+    if (!gates.includes('liquidity_ok')) blocking.push('liquidity');
+    if ((policyPacket.action === 'WAIT' || policyPacket.action === 'FLAT') && Number(policyPacket.expectedNetEdgePct || 0) > 0 && blocking.length === 0) {
+        blocking.push('edge threshold');
+    }
+    return blocking;
+}
+
+function buildPolicyReason(policyPacket, fallback) {
+    const reasons = Array.isArray(policyPacket?.reasons) ? policyPacket.reasons.filter(Boolean) : [];
+    return reasons.length ? reasons.join(' ') : fallback;
+}
+
+function formatDecisionQuality(decision) {
+    if (!Number.isFinite(decision?.tradeQualityScore)) return '--';
+    const band = decision.tradeQualityBand ? ` (${decision.tradeQualityBand})` : '';
+    return `${decision.tradeQualityScore.toFixed(1)}${band}`;
+}
+
+function formatRatioValue(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)}x` : '--';
 }
 
 function resolveSignal(pUp, confidence) {
@@ -1446,6 +1566,11 @@ function formatPercent(value) {
 }
 
 function asNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function nullableNumber(value, fallback = null) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : fallback;
 }

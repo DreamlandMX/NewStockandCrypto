@@ -73,12 +73,29 @@ function mapPositionRow(row) {
         unrealized_pnl: unrealizedPnl,
         unrealized_pnl_pct: unrealizedPnlPct,
         notes: row.notes || '',
+        engine_version: row.engine_version || null,
+        entry_policy_packet_json: row.entry_policy_packet_json || null,
+        entry_policy_packet: row.entry_policy_packet_json ? safeJsonParse(row.entry_policy_packet_json) : null,
+        entry_expected_net_edge_pct: row.entry_expected_net_edge_pct === null || row.entry_expected_net_edge_pct === undefined ? null : Number(row.entry_expected_net_edge_pct),
+        entry_trade_quality_score: row.entry_trade_quality_score === null || row.entry_trade_quality_score === undefined ? null : Number(row.entry_trade_quality_score),
+        entry_trade_quality_band: row.entry_trade_quality_band || null,
+        entry_regime: row.entry_regime || null,
+        entry_cost_pct: row.entry_cost_pct === null || row.entry_cost_pct === undefined ? null : Number(row.entry_cost_pct),
         status: row.status || 'open',
         opened_at: row.opened_at,
         closed_at: row.closed_at,
         created_at: row.created_at,
         updated_at: row.updated_at
     };
+}
+
+function safeJsonParse(value) {
+    if (!value) return null;
+    try {
+        return JSON.parse(value);
+    } catch (_) {
+        return null;
+    }
 }
 
 function mapStopOrderRow(row) {
@@ -181,6 +198,26 @@ function createPositionsStore(options = {}) {
         CREATE INDEX IF NOT EXISTS idx_stop_orders_user_status ON stop_orders(user_id, status);
     `);
 
+    function ensureColumn(table, column, definition) {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+        if (columns.some((item) => item.name === column)) {
+            return;
+        }
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+
+    ensureColumn('positions', 'engine_version', 'TEXT');
+    ensureColumn('positions', 'entry_policy_packet_json', 'TEXT');
+    ensureColumn('positions', 'entry_expected_net_edge_pct', 'REAL');
+    ensureColumn('positions', 'entry_trade_quality_score', 'REAL');
+    ensureColumn('positions', 'entry_trade_quality_band', 'TEXT');
+    ensureColumn('positions', 'entry_regime', 'TEXT');
+    ensureColumn('positions', 'entry_cost_pct', 'REAL');
+    ensureColumn('position_history', 'policy_snapshot_json', 'TEXT');
+    ensureColumn('position_history', 'realized_slippage_pct', 'REAL');
+    ensureColumn('position_history', 'realized_vs_expected_edge_pct', 'REAL');
+    ensureColumn('position_history', 'exit_regime', 'TEXT');
+
     const getPositionStmt = db.prepare(`
         SELECT *
         FROM positions
@@ -212,6 +249,13 @@ function createPositionsStore(options = {}) {
             current_value,
             realized_pnl,
             notes,
+            engine_version,
+            entry_policy_packet_json,
+            entry_expected_net_edge_pct,
+            entry_trade_quality_score,
+            entry_trade_quality_band,
+            entry_regime,
+            entry_cost_pct,
             status,
             opened_at,
             closed_at,
@@ -230,6 +274,13 @@ function createPositionsStore(options = {}) {
             @current_value,
             @realized_pnl,
             @notes,
+            @engine_version,
+            @entry_policy_packet_json,
+            @entry_expected_net_edge_pct,
+            @entry_trade_quality_score,
+            @entry_trade_quality_band,
+            @entry_regime,
+            @entry_cost_pct,
             @status,
             @opened_at,
             @closed_at,
@@ -247,6 +298,10 @@ function createPositionsStore(options = {}) {
             price,
             quantity,
             realized_pnl,
+            policy_snapshot_json,
+            realized_slippage_pct,
+            realized_vs_expected_edge_pct,
+            exit_regime,
             reason,
             created_at
         ) VALUES (
@@ -257,6 +312,10 @@ function createPositionsStore(options = {}) {
             @price,
             @quantity,
             @realized_pnl,
+            @policy_snapshot_json,
+            @realized_slippage_pct,
+            @realized_vs_expected_edge_pct,
+            @exit_regime,
             @reason,
             @created_at
         )
@@ -352,6 +411,7 @@ function createPositionsStore(options = {}) {
         const entryPrice = Number(payload.entry_price);
         const quantity = Number(payload.quantity);
         const notes = String(payload.notes || '').trim();
+        const policyPacket = payload.policy_packet && typeof payload.policy_packet === 'object' ? payload.policy_packet : null;
 
         if (!symbol) {
             throw new Error('Symbol is required.');
@@ -363,7 +423,7 @@ function createPositionsStore(options = {}) {
             throw new Error('Quantity must be greater than zero.');
         }
 
-        return { symbol, market, side, entryPrice, quantity, notes };
+        return { symbol, market, side, entryPrice, quantity, notes, policyPacket };
     }
 
     function listPositions(userId, options = {}) {
@@ -395,6 +455,13 @@ function createPositionsStore(options = {}) {
             current_value: normalized.entryPrice * normalized.quantity,
             realized_pnl: 0,
             notes: normalized.notes,
+            engine_version: normalized.policyPacket?.engineVersion || null,
+            entry_policy_packet_json: normalized.policyPacket ? JSON.stringify(normalized.policyPacket) : null,
+            entry_expected_net_edge_pct: normalized.policyPacket?.expectedNetEdgePct ?? null,
+            entry_trade_quality_score: normalized.policyPacket?.tradeQualityScore ?? null,
+            entry_trade_quality_band: normalized.policyPacket?.tradeQualityBand ?? null,
+            entry_regime: normalized.policyPacket?.regime ?? null,
+            entry_cost_pct: normalized.policyPacket?.costPct ?? null,
             status: 'open',
             opened_at: timestamp,
             closed_at: null,
@@ -412,6 +479,10 @@ function createPositionsStore(options = {}) {
                 price: normalized.entryPrice,
                 quantity: normalized.quantity,
                 realized_pnl: 0,
+                policy_snapshot_json: normalized.policyPacket ? JSON.stringify(normalized.policyPacket) : null,
+                realized_slippage_pct: null,
+                realized_vs_expected_edge_pct: null,
+                exit_regime: null,
                 reason: 'manual',
                 created_at: timestamp
             });
@@ -450,6 +521,11 @@ function createPositionsStore(options = {}) {
         const nextClosedAt = isClosed ? timestamp : null;
         const currentValue = isClosed ? 0 : closePrice * remainingQty;
         const totalRealizedPnl = (Number(position.realized_pnl) || 0) + realizedPnl;
+        const entryPacket = position.entry_policy_packet || null;
+        const realizedPnlPct = position.entry_price > 0 ? (closePrice - position.entry_price) / position.entry_price * 100 * (position.side === 'short' ? -1 : 1) : null;
+        const realizedVsExpectedEdgePct = Number.isFinite(realizedPnlPct) && Number.isFinite(position.entry_expected_net_edge_pct)
+            ? realizedPnlPct - Number(position.entry_expected_net_edge_pct)
+            : null;
 
         const transaction = db.transaction(() => {
             updatePositionStmt.run({
@@ -472,6 +548,10 @@ function createPositionsStore(options = {}) {
                 price: closePrice,
                 quantity,
                 realized_pnl: realizedPnl,
+                policy_snapshot_json: entryPacket ? JSON.stringify(entryPacket) : null,
+                realized_slippage_pct: Number.isFinite(payload.realized_slippage_pct) ? Number(payload.realized_slippage_pct) : null,
+                realized_vs_expected_edge_pct: Number.isFinite(realizedVsExpectedEdgePct) ? realizedVsExpectedEdgePct : null,
+                exit_regime: payload.exit_regime ? String(payload.exit_regime) : null,
                 reason: String(payload.reason || 'manual'),
                 created_at: timestamp
             });
@@ -485,6 +565,7 @@ function createPositionsStore(options = {}) {
         return {
             position: getPosition(userId, positionId),
             realizedPnl,
+            realizedVsExpectedEdgePct,
             isClosed
         };
     }
@@ -503,6 +584,11 @@ function createPositionsStore(options = {}) {
             price: row.price,
             quantity: row.quantity,
             realized_pnl: row.realized_pnl,
+            policy_snapshot_json: row.policy_snapshot_json || null,
+            policy_snapshot: row.policy_snapshot_json ? safeJsonParse(row.policy_snapshot_json) : null,
+            realized_slippage_pct: row.realized_slippage_pct === null || row.realized_slippage_pct === undefined ? null : Number(row.realized_slippage_pct),
+            realized_vs_expected_edge_pct: row.realized_vs_expected_edge_pct === null || row.realized_vs_expected_edge_pct === undefined ? null : Number(row.realized_vs_expected_edge_pct),
+            exit_regime: row.exit_regime || null,
             reason: row.reason,
             created_at: row.created_at
         }));

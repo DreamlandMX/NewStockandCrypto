@@ -276,6 +276,7 @@
         : NaN
     };
 
+    const policyPacket = normalizePolicyPacket(payload?.policyPacket);
     const decisionRaw = payload?.decision;
     if (!decisionRaw) throw new Error('Session payload missing decision block.');
     const action = normAction(decisionRaw.action);
@@ -301,7 +302,14 @@
       rr1: nullableNum(decisionRaw.rr1, NaN),
       rr2: nullableNum(decisionRaw.rr2, NaN),
       reason: String(decisionRaw.reason || 'Generated from live model session engine.'),
-      leverage: 1
+      leverage: 1,
+      policyPacket,
+      passedGates: Array.isArray(decisionRaw.passedGates) ? decisionRaw.passedGates.map((item) => String(item)) : (policyPacket?.gates || []),
+      blockingGates: Array.isArray(decisionRaw.blockingGates) ? decisionRaw.blockingGates.map((item) => String(item)) : buildBlockingGates(policyPacket),
+      regime: String(decisionRaw.regime || policyPacket?.regime || ''),
+      tradeQualityScore: Number.isFinite(Number(decisionRaw.tradeQualityScore)) ? Number(decisionRaw.tradeQualityScore) : policyPacket?.tradeQualityScore,
+      tradeQualityBand: String(decisionRaw.tradeQualityBand || policyPacket?.tradeQualityBand || ''),
+      previewPlan: normalizePreviewPlan(decisionRaw.previewPlan || policyPacket?.previewPlan)
     };
 
     const decisionByLeverage = normalizeDecisionByLeverage(payload?.decisionByLeverage || {}, decision);
@@ -372,6 +380,7 @@
         refreshSec: Number.isFinite(Number(payload?.meta?.refreshSec)) ? Number(payload.meta.refreshSec) : 5
       },
       current,
+      policyPacket,
       sessions: withStatuses(sessions, current.sessionCode),
       decision,
       decisionByLeverage,
@@ -641,10 +650,11 @@
       setDecisionLevelTile('decisionTp2Tile', 'tp2', 'decisionTakeProfit2Label', 'Take Profit 2', 'decisionTakeProfit2', Number.isFinite(decision.takeProfit2) ? utils.formatCurrency(decision.takeProfit2) : '--');
     } else {
       setDecisionLevelTile('decisionEntryTile', 'reference', 'decisionEntryLabel', 'Reference Price', 'decisionEntry', Number.isFinite(currentPrice) ? utils.formatCurrency(currentPrice) : '--');
-      setDecisionLevelTile('decisionStopTile', 'trigger-long', 'decisionStopLossLabel', 'Long Trigger', 'decisionStopLoss', `P(UP) >= ${(decision.longTriggerPUp * 100).toFixed(0)}%`);
-      setDecisionLevelTile('decisionTp1Tile', 'trigger-short', 'decisionTakeProfitLabel', 'Short Trigger', 'decisionTakeProfit', `P(UP) <= ${(decision.shortTriggerPUp * 100).toFixed(0)}%`);
-      setDecisionLevelTile('decisionTp2Tile', 'edge', 'decisionTakeProfit2Label', 'Current Edge', 'decisionTakeProfit2', fmtPct(decision.netEdgePct));
+      setDecisionLevelTile('decisionStopTile', 'edge', 'decisionStopLossLabel', 'Expected Net Edge', 'decisionStopLoss', fmtPct(decision.netEdgePct));
+      setDecisionLevelTile('decisionTp1Tile', 'trigger-short', 'decisionTakeProfitLabel', 'Trade Quality', 'decisionTakeProfit', formatDecisionQuality(decision));
+      setDecisionLevelTile('decisionTp2Tile', 'reference', 'decisionTakeProfit2Label', 'Gate Status', 'decisionTakeProfit2', formatDecisionGateState(decision));
     }
+    renderDecisionPreview(decision.previewPlan, actionable);
 
     badge(document.getElementById('decisionStatusBadge'), actionable ? signalClass(action) : 'warning', actionable ? action : 'NO TRADE');
 
@@ -663,7 +673,7 @@
     const disclaimer = document.getElementById('executeDisclaimer');
     disclaimer.textContent = actionable
       ? 'Simulation only. Not investment advice. Execute action does not place real trades.'
-      : 'Neutral regime. No simulated order will be submitted until a directional edge appears.';
+      : 'Policy Engine is standing aside. The preview plan is informational only until net edge and execution gates improve.';
     disclaimer.className = 'warning-inline';
     disclaimer.style.color = 'var(--text-secondary)';
 
@@ -672,7 +682,7 @@
       hint.textContent = `Leverage ${decision.leverage}x | R:R(TP1/TP2): ${fmtRatio(decision.rr1)} / ${fmtRatio(decision.rr2)}`;
       hint.className = 'warning-inline';
     } else {
-      hint.textContent = `Wait for LONG at P(UP) >= ${(decision.longTriggerPUp * 100).toFixed(0)}% or SHORT at P(UP) <= ${(decision.shortTriggerPUp * 100).toFixed(0)}% | Refresh ${state.refreshSec}s`;
+      hint.textContent = `Policy Engine status: ${formatDecisionGateState(decision)} | Preview plan shown below | Refresh ${state.refreshSec}s`;
       hint.className = 'warning-inline text-neutral';
     }
 
@@ -732,8 +742,91 @@
   }
 
   function buildNeutralDecisionReason(decision) {
+    const reasons = Array.isArray(decision?.policyPacket?.reasons) ? decision.policyPacket.reasons.filter(Boolean) : [];
+    if (reasons.length) return reasons.join(' ');
     const edgeText = Number.isFinite(decision.netEdgePct) ? fmtPct(decision.netEdgePct) : '--';
-    return `No directional edge right now. Stay flat until model bias reaches LONG at ${(decision.longTriggerPUp * 100).toFixed(0)}% or SHORT at ${(decision.shortTriggerPUp * 100).toFixed(0)}% P(UP). Current edge: ${edgeText}.`;
+    return `Policy Engine is waiting. Expected net edge is ${edgeText}, so the trade stays flat until execution conditions improve.`;
+  }
+
+  function formatDecisionQuality(decision) {
+    if (!Number.isFinite(decision?.tradeQualityScore)) return '--';
+    const band = decision.tradeQualityBand ? ` (${decision.tradeQualityBand})` : '';
+    return `${decision.tradeQualityScore.toFixed(1)}${band}`;
+  }
+
+  function formatDecisionGateState(decision) {
+    const blocking = Array.isArray(decision?.blockingGates) ? decision.blockingGates.filter(Boolean) : [];
+    const passed = Array.isArray(decision?.passedGates) ? decision.passedGates.filter(Boolean) : [];
+    if (blocking.length) return `Blocked: ${blocking.join(', ')}`;
+    if (passed.length) return `Passed: ${passed.join(', ')}`;
+    return decision?.regime ? `Regime: ${decision.regime}` : 'Waiting';
+  }
+
+  function renderDecisionPreview(previewPlan, actionable) {
+    const section = document.getElementById('decisionPreviewSection');
+    if (section) {
+      section.hidden = actionable || !previewPlan?.available;
+    }
+    if (actionable || !previewPlan?.available) {
+      document.getElementById('decisionPreviewEntry').textContent = '--';
+      document.getElementById('decisionPreviewStop').textContent = '--';
+      document.getElementById('decisionPreviewTp1').textContent = '--';
+      document.getElementById('decisionPreviewTp2').textContent = '--';
+      document.getElementById('decisionPreviewRr1').textContent = '--';
+      document.getElementById('decisionPreviewRr2').textContent = '--';
+      return;
+    }
+    document.getElementById('decisionPreviewEntryLabel').textContent = `Preview Entry (${previewPlan.direction || 'Plan'})`;
+    document.getElementById('decisionPreviewEntry').textContent = Number.isFinite(previewPlan.entryPrice) ? utils.formatCurrency(previewPlan.entryPrice) : '--';
+    document.getElementById('decisionPreviewStop').textContent = Number.isFinite(previewPlan.stopLoss) ? utils.formatCurrency(previewPlan.stopLoss) : '--';
+    document.getElementById('decisionPreviewTp1').textContent = Number.isFinite(previewPlan.takeProfit1) ? utils.formatCurrency(previewPlan.takeProfit1) : '--';
+    document.getElementById('decisionPreviewTp2').textContent = Number.isFinite(previewPlan.takeProfit2) ? utils.formatCurrency(previewPlan.takeProfit2) : '--';
+    document.getElementById('decisionPreviewRr1').textContent = fmtRatio(previewPlan.rewardRisk1);
+    document.getElementById('decisionPreviewRr2').textContent = fmtRatio(previewPlan.rewardRisk2);
+    document.getElementById('decisionPreviewNote').textContent = 'Preview only. These levels are derived from the current reference price and do not authorize execution yet.';
+  }
+
+  function normalizePreviewPlan(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return null;
+    return {
+      available: Boolean(raw.available),
+      status: String(raw.status || 'preview').toLowerCase(),
+      direction: String(raw.direction || '').toUpperCase(),
+      entryPrice: nullableNum(raw.entryPrice, NaN),
+      stopLoss: nullableNum(raw.stopLoss, NaN),
+      takeProfit1: nullableNum(raw.takeProfit1, NaN),
+      takeProfit2: nullableNum(raw.takeProfit2, NaN),
+      rewardRisk1: nullableNum(raw.rewardRisk1, NaN),
+      rewardRisk2: nullableNum(raw.rewardRisk2, NaN)
+    };
+  }
+
+  function normalizePolicyPacket(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      action: String(raw.action || 'FLAT').toUpperCase(),
+      expectedNetEdgePct: Number.isFinite(Number(raw.expectedNetEdgePct)) ? Number(raw.expectedNetEdgePct) : null,
+      tradeQualityScore: Number.isFinite(Number(raw.tradeQualityScore)) ? Number(raw.tradeQualityScore) : null,
+      tradeQualityBand: raw.tradeQualityBand ? String(raw.tradeQualityBand) : '',
+      regime: raw.regime ? String(raw.regime) : '',
+      previewPlan: normalizePreviewPlan(raw.previewPlan),
+      gates: Array.isArray(raw.gates) ? raw.gates.map((item) => String(item)) : [],
+      reasons: Array.isArray(raw.reasons) ? raw.reasons.map((item) => String(item)) : []
+    };
+  }
+
+  function buildBlockingGates(policyPacket) {
+    if (!policyPacket) return [];
+    const gates = Array.isArray(policyPacket.gates) ? policyPacket.gates : [];
+    const blocking = [];
+    if (!gates.includes('cost_ok') || Number(policyPacket.expectedNetEdgePct || 0) <= 0) blocking.push('net edge');
+    if (!gates.includes('confidence_ok')) blocking.push('confidence');
+    if (!gates.includes('regime_ok')) blocking.push('regime');
+    if (!gates.includes('liquidity_ok')) blocking.push('liquidity');
+    if ((policyPacket.action === 'WAIT' || policyPacket.action === 'FLAT') && Number(policyPacket.expectedNetEdgePct || 0) > 0 && blocking.length === 0) {
+      blocking.push('edge threshold');
+    }
+    return blocking;
   }
 
   function setDecisionLevelTile(tileId, modeClass, labelId, label, valueId, value) {
@@ -985,9 +1078,10 @@
     decisionRing.style.background = 'conic-gradient(#64748b 0deg, #64748b 0deg, rgba(255,255,255,0.12) 0deg)';
     document.getElementById('decisionConfidenceText').textContent = '--';
     setDecisionLevelTile('decisionEntryTile', 'reference', 'decisionEntryLabel', 'Reference Price', 'decisionEntry', '--');
-    setDecisionLevelTile('decisionStopTile', 'trigger-long', 'decisionStopLossLabel', 'Long Trigger', 'decisionStopLoss', '--');
-    setDecisionLevelTile('decisionTp1Tile', 'trigger-short', 'decisionTakeProfitLabel', 'Short Trigger', 'decisionTakeProfit', '--');
-    setDecisionLevelTile('decisionTp2Tile', 'edge', 'decisionTakeProfit2Label', 'Current Edge', 'decisionTakeProfit2', '--');
+    setDecisionLevelTile('decisionStopTile', 'edge', 'decisionStopLossLabel', 'Expected Net Edge', 'decisionStopLoss', '--');
+    setDecisionLevelTile('decisionTp1Tile', 'trigger-short', 'decisionTakeProfitLabel', 'Trade Quality', 'decisionTakeProfit', '--');
+    setDecisionLevelTile('decisionTp2Tile', 'reference', 'decisionTakeProfit2Label', 'Gate Status', 'decisionTakeProfit2', '--');
+    renderDecisionPreview(null, false);
 
     const executeButton = document.getElementById('executeBtn');
     executeButton.disabled = true;

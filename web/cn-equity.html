@@ -357,12 +357,22 @@
                             </div>
                         </div>
                         <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Signal</span><span class="status-badge info" id="signalBadge">--</span></div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Action</span><strong id="actionValue">--</strong></div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Position Size</span><strong id="positionSizeValue">--</strong></div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Short Eligible</span><strong id="shortEligibleValue">No</strong></div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Margin Eligible</span><strong id="marginEligibleValue">--</strong></div>
-                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span>Short Policy</span><strong id="shortReasonValue">CN strict no-short mode</strong></div>
-                        <div style="display:flex; justify-content:space-between;"><span>T+1 Rule</span><strong id="tPlusOneValue">Applied</strong></div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span id="actionLabel">Action</span><strong id="actionValue">--</strong></div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span id="positionSizeLabel">Position Size</span><strong id="positionSizeValue">--</strong></div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span id="shortEligibleLabel">Expected Net Edge</span><strong id="shortEligibleValue">--</strong></div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span id="marginEligibleLabel">Trade Quality</span><strong id="marginEligibleValue">--</strong></div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.45rem;"><span id="shortReasonLabel">Regime</span><strong id="shortReasonValue">--</strong></div>
+                        <div style="display:flex; justify-content:space-between;"><span id="tPlusOneLabel">Gate Status</span><strong id="tPlusOneValue">--</strong></div>
+                        <div id="previewPlanSection" style="margin-top:0.95rem;" hidden>
+                            <div style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.55rem;">Preview Plan</div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.35rem;"><span id="previewEntryLabel">Preview Entry</span><strong id="previewEntryValue">--</strong></div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.35rem;"><span id="previewStopLabel">Preview Stop</span><strong id="previewStopValue">--</strong></div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.35rem;"><span id="previewTp1Label">Preview TP1</span><strong id="previewTp1Value">--</strong></div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.35rem;"><span id="previewTp2Label">Preview TP2</span><strong id="previewTp2Value">--</strong></div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:0.35rem;"><span id="previewRr1Label">Preview R:R (TP1)</span><strong id="previewRr1Value">--</strong></div>
+                            <div style="display:flex; justify-content:space-between;"><span id="previewRr2Label">Preview R:R (TP2)</span><strong id="previewRr2Value">--</strong></div>
+                            <div style="margin-top:0.5rem; color:var(--text-secondary); font-size:0.78rem;" id="previewPlanNote">Preview only. Entry and exits are not approved until the policy packet becomes actionable.</div>
+                        </div>
                     </div>
                 </section>
 

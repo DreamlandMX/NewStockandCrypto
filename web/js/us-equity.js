@@ -154,10 +154,32 @@ function cacheElements() {
         pDownValue: byId('pDownValue'),
         confidenceValue: byId('confidenceValue'),
         signalBadge: byId('signalBadge'),
+        actionLabel: byId('actionLabel'),
         actionValue: byId('actionValue'),
+        positionSizeLabel: byId('positionSizeLabel'),
         positionSizeValue: byId('positionSizeValue'),
+        shortAllowedLabel: byId('shortAllowedLabel'),
         shortAllowedValue: byId('shortAllowedValue'),
+        leverageLabel: byId('leverageLabel'),
         leverageValue: byId('leverageValue'),
+        regimeLabel: byId('regimeLabel'),
+        regimeValue: byId('regimeValue'),
+        gateStatusLabel: byId('gateStatusLabel'),
+        gateStatusValue: byId('gateStatusValue'),
+        previewPlanSection: byId('previewPlanSection'),
+        previewEntryLabel: byId('previewEntryLabel'),
+        previewEntryValue: byId('previewEntryValue'),
+        previewStopLabel: byId('previewStopLabel'),
+        previewStopValue: byId('previewStopValue'),
+        previewTp1Label: byId('previewTp1Label'),
+        previewTp1Value: byId('previewTp1Value'),
+        previewTp2Label: byId('previewTp2Label'),
+        previewTp2Value: byId('previewTp2Value'),
+        previewRr1Label: byId('previewRr1Label'),
+        previewRr1Value: byId('previewRr1Value'),
+        previewRr2Label: byId('previewRr2Label'),
+        previewRr2Value: byId('previewRr2Value'),
+        previewPlanNote: byId('previewPlanNote'),
         w0Bar: byId('w0Bar'),
         w1Bar: byId('w1Bar'),
         w2Bar: byId('w2Bar'),
@@ -738,6 +760,7 @@ function renderPrediction() {
         text(els.positionSizeValue, '--');
         text(els.shortAllowedValue, 'Yes');
         text(els.leverageValue, '2.00');
+        renderPreviewPlan(null, false);
         return;
     }
 
@@ -745,6 +768,7 @@ function renderPrediction() {
     const window = packet.prediction.window || {};
     const magnitude = packet.prediction.magnitude || {};
     const policy = packet.policy || {};
+    const policyPacket = packet.policyPacket || {};
 
     text(els.pUpValue, formatRate(direction.pUp));
     text(els.pDownValue, formatRate(direction.pDown));
@@ -757,10 +781,19 @@ function renderPrediction() {
         els.signalBadge.textContent = signal;
     }
 
-    text(els.actionValue, policy.action || '--');
-    text(els.positionSizeValue, Number.isFinite(policy.positionSize) ? `${policy.positionSize.toFixed(2)}x` : '--');
-    text(els.shortAllowedValue, policy.shortAllowed === false ? 'No' : 'Yes');
-    text(els.leverageValue, Number.isFinite(policy.leverage) ? policy.leverage.toFixed(2) : '2.00');
+    text(els.actionLabel, 'Action');
+    text(els.positionSizeLabel, 'Position Size');
+    text(els.shortAllowedLabel, 'Expected Net Edge');
+    text(els.leverageLabel, 'Trade Quality');
+    text(els.regimeLabel, 'Regime');
+    text(els.gateStatusLabel, 'Gate Status');
+    text(els.actionValue, formatPolicyAction(policyPacket, policy));
+    text(els.positionSizeValue, Number.isFinite(policyPacket.positionSize) ? `${policyPacket.positionSize.toFixed(2)}x` : '--');
+    text(els.shortAllowedValue, formatPolicyPercent(policyPacket.expectedNetEdgePct));
+    text(els.leverageValue, formatPolicyQuality(policyPacket));
+    text(els.regimeValue, policyPacket.regime || 'Unavailable');
+    text(els.gateStatusValue, formatPolicyGateStatus(policyPacket));
+    renderPreviewPlan(policyPacket.previewPlan, !isPolicyActionable(policyPacket.action));
 
     renderWindow('w0', window.W0);
     renderWindow('w1', window.W1);
@@ -774,6 +807,71 @@ function renderPrediction() {
     text(els.intervalWidthValue, formatSignedRatioAsPercent(width, false));
 
     updateMainChartOverlays(magnitude);
+}
+
+function renderPreviewPlan(previewPlan, visible) {
+    if (els.previewPlanSection) {
+        els.previewPlanSection.hidden = !(visible && previewPlan?.available);
+    }
+    if (!visible || !previewPlan?.available) {
+        text(els.previewEntryValue, '--');
+        text(els.previewStopValue, '--');
+        text(els.previewTp1Value, '--');
+        text(els.previewTp2Value, '--');
+        text(els.previewRr1Value, '--');
+        text(els.previewRr2Value, '--');
+        return;
+    }
+    text(els.previewEntryLabel, `Preview Entry (${previewPlan.direction || 'Plan'})`);
+    text(els.previewEntryValue, formatCurrency(previewPlan.entryPrice));
+    text(els.previewStopValue, formatCurrency(previewPlan.stopLoss));
+    text(els.previewTp1Value, formatCurrency(previewPlan.takeProfit1));
+    text(els.previewTp2Value, formatCurrency(previewPlan.takeProfit2));
+    text(els.previewRr1Value, formatRatio(previewPlan.rewardRisk1));
+    text(els.previewRr2Value, formatRatio(previewPlan.rewardRisk2));
+    text(els.previewPlanNote, 'Preview only. Execution stays blocked until the policy packet becomes actionable.');
+}
+
+function isPolicyActionable(action) {
+    const normalized = String(action || '').toUpperCase();
+    return normalized.includes('LONG') || normalized.includes('SHORT');
+}
+
+function formatPolicyAction(policyPacket, policy) {
+    const action = String(policyPacket?.action || '').toUpperCase();
+    if (!action) return policy?.action || '--';
+    if (action === 'WAIT') return 'Wait';
+    if (action === 'FLAT') return 'Hold';
+    return action.replace(/_/g, ' ');
+}
+
+function formatPolicyPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}%`;
+}
+
+function formatPolicyQuality(policyPacket) {
+    const score = Number(policyPacket?.tradeQualityScore);
+    if (!Number.isFinite(score)) return '--';
+    return `${score.toFixed(1)}${policyPacket?.tradeQualityBand ? ` (${policyPacket.tradeQualityBand})` : ''}`;
+}
+
+function formatPolicyGateStatus(policyPacket) {
+    const gates = Array.isArray(policyPacket?.gates) ? policyPacket.gates : [];
+    if (!gates.length) return '--';
+    return gates.map((gate) => gate.replace(/_ok$/i, '').replace(/_/g, ' ')).join(', ');
+}
+
+function formatCurrency(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return numeric.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatRatio(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)}x` : '--';
 }
 
 function renderWindow(prefix, value) {

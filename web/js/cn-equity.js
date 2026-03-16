@@ -163,12 +163,32 @@ function cacheElements() {
         pDownValue: byId('pDownValue'),
         confidenceValue: byId('confidenceValue'),
         signalBadge: byId('signalBadge'),
+        actionLabel: byId('actionLabel'),
         actionValue: byId('actionValue'),
+        positionSizeLabel: byId('positionSizeLabel'),
         positionSizeValue: byId('positionSizeValue'),
+        shortEligibleLabel: byId('shortEligibleLabel'),
         shortEligibleValue: byId('shortEligibleValue'),
+        marginEligibleLabel: byId('marginEligibleLabel'),
         marginEligibleValue: byId('marginEligibleValue'),
+        shortReasonLabel: byId('shortReasonLabel'),
         shortReasonValue: byId('shortReasonValue'),
+        tPlusOneLabel: byId('tPlusOneLabel'),
         tPlusOneValue: byId('tPlusOneValue'),
+        previewPlanSection: byId('previewPlanSection'),
+        previewEntryLabel: byId('previewEntryLabel'),
+        previewEntryValue: byId('previewEntryValue'),
+        previewStopLabel: byId('previewStopLabel'),
+        previewStopValue: byId('previewStopValue'),
+        previewTp1Label: byId('previewTp1Label'),
+        previewTp1Value: byId('previewTp1Value'),
+        previewTp2Label: byId('previewTp2Label'),
+        previewTp2Value: byId('previewTp2Value'),
+        previewRr1Label: byId('previewRr1Label'),
+        previewRr1Value: byId('previewRr1Value'),
+        previewRr2Label: byId('previewRr2Label'),
+        previewRr2Value: byId('previewRr2Value'),
+        previewPlanNote: byId('previewPlanNote'),
         w0Bar: byId('w0Bar'),
         w1Bar: byId('w1Bar'),
         w2Bar: byId('w2Bar'),
@@ -726,6 +746,7 @@ function renderPrediction() {
         text(els.marginEligibleValue, '--');
         text(els.shortReasonValue, 'CN strict no-short mode');
         text(els.tPlusOneValue, 'Applied');
+        renderPreviewPlan(null, false);
         return;
     }
 
@@ -733,6 +754,7 @@ function renderPrediction() {
     const window = packet.prediction.window || {};
     const magnitude = packet.prediction.magnitude || {};
     const policy = packet.policy || {};
+    const policyPacket = packet.policyPacket || {};
 
     text(els.pUpValue, formatRate(direction.pUp));
     text(els.pDownValue, formatRate(direction.pDown));
@@ -742,12 +764,19 @@ function renderPrediction() {
         els.signalBadge.className = `status-badge ${signal === 'LONG' ? 'success' : 'warning'}`;
         els.signalBadge.textContent = signal;
     }
-    text(els.actionValue, policy.action || '--');
-    text(els.positionSizeValue, policy.positionSize === undefined ? '--' : `${(policy.positionSize * 100).toFixed(1)}%`);
-    text(els.shortEligibleValue, policy.shortEligible ? 'Yes' : 'No');
-    text(els.marginEligibleValue, policy.marginEligible ? 'Yes' : 'No');
-    text(els.shortReasonValue, policy.shortReason || 'CN strict no-short mode');
-    text(els.tPlusOneValue, policy.tPlusOneApplied ? 'Applied' : 'N/A');
+    text(els.actionLabel, 'Action');
+    text(els.positionSizeLabel, 'Position Size');
+    text(els.shortEligibleLabel, 'Expected Net Edge');
+    text(els.marginEligibleLabel, 'Trade Quality');
+    text(els.shortReasonLabel, 'Regime');
+    text(els.tPlusOneLabel, 'Gate Status');
+    text(els.actionValue, formatPolicyAction(policyPacket, policy));
+    text(els.positionSizeValue, Number.isFinite(policyPacket.positionSize) ? `${(policyPacket.positionSize * 100).toFixed(1)}%` : '--');
+    text(els.shortEligibleValue, formatPolicyPercent(policyPacket.expectedNetEdgePct));
+    text(els.marginEligibleValue, formatPolicyQuality(policyPacket));
+    text(els.shortReasonValue, policyPacket.regime || 'Unavailable');
+    text(els.tPlusOneValue, formatPolicyGateStatus(policyPacket, 'CN no-short / T+1'));
+    renderPreviewPlan(policyPacket.previewPlan, !isPolicyActionable(policyPacket.action));
 
     renderWindow('w0', window.W0);
     renderWindow('w1', window.W1);
@@ -762,6 +791,71 @@ function renderPrediction() {
     text(els.intervalWidthValue, formatSignedPercentFromRatio(width, false));
 
     updateChartOverlays(magnitude);
+}
+
+function renderPreviewPlan(previewPlan, visible) {
+    if (els.previewPlanSection) {
+        els.previewPlanSection.hidden = !(visible && previewPlan?.available);
+    }
+    if (!visible || !previewPlan?.available) {
+        text(els.previewEntryValue, '--');
+        text(els.previewStopValue, '--');
+        text(els.previewTp1Value, '--');
+        text(els.previewTp2Value, '--');
+        text(els.previewRr1Value, '--');
+        text(els.previewRr2Value, '--');
+        return;
+    }
+    text(els.previewEntryLabel, `Preview Entry (${previewPlan.direction || 'Plan'})`);
+    text(els.previewStopValue, formatCurrency(previewPlan.stopLoss));
+    text(els.previewTp1Value, formatCurrency(previewPlan.takeProfit1));
+    text(els.previewTp2Value, formatCurrency(previewPlan.takeProfit2));
+    text(els.previewEntryValue, formatCurrency(previewPlan.entryPrice));
+    text(els.previewRr1Value, formatRatio(previewPlan.rewardRisk1));
+    text(els.previewRr2Value, formatRatio(previewPlan.rewardRisk2));
+    text(els.previewPlanNote, 'Preview only. CN execution still requires an actionable packet and respects no-short / T+1 rules.');
+}
+
+function isPolicyActionable(action) {
+    const normalized = String(action || '').toUpperCase();
+    return normalized.includes('LONG') || normalized.includes('SHORT');
+}
+
+function formatPolicyAction(policyPacket, policy) {
+    const action = String(policyPacket?.action || '').toUpperCase();
+    if (!action) return policy?.action || '--';
+    if (action === 'WAIT') return 'Wait';
+    if (action === 'FLAT') return 'Hold';
+    return action.replace(/_/g, ' ');
+}
+
+function formatPolicyPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}%`;
+}
+
+function formatPolicyQuality(policyPacket) {
+    const score = Number(policyPacket?.tradeQualityScore);
+    if (!Number.isFinite(score)) return '--';
+    return `${score.toFixed(1)}${policyPacket?.tradeQualityBand ? ` (${policyPacket.tradeQualityBand})` : ''}`;
+}
+
+function formatPolicyGateStatus(policyPacket, fallback = '--') {
+    const gates = Array.isArray(policyPacket?.gates) ? policyPacket.gates : [];
+    if (!gates.length) return fallback;
+    return gates.map((gate) => gate.replace(/_ok$/i, '').replace(/_/g, ' ')).join(', ');
+}
+
+function formatCurrency(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return numeric.toLocaleString('en-US', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatRatio(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)}x` : '--';
 }
 
 function renderWindow(prefix, value) {

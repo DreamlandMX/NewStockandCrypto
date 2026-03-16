@@ -790,8 +790,8 @@
                                     <div><span class="signal-pill long" id="signalPill">LONG</span></div>
                                     <div class="kv-key">Confidence</div>
                                     <div class="kv-value" id="directionConfidence">0.95</div>
-                                    <div class="kv-key">Threshold Rule</div>
-                                    <div class="kv-value">LONG &gt;= 0.55 / SHORT &lt;= 0.45; Conf &gt;= 0.45</div>
+                                    <div class="kv-key">Policy Lens</div>
+                                    <div class="kv-value">P(UP) is directional context; execution also requires positive net edge and policy gates.</div>
                                 </div>
                             </div>
                             <p class="data-note" id="predictionDataNote"></p>
@@ -866,13 +866,31 @@
                                 <div class="kv-key" id="rrRatio2Label">R:R (TP2)</div>
                                 <div class="kv-value" id="rrRatio2">0.00</div>
                             </div>
+                            <div id="previewPlanSection" style="margin-top: 0.95rem;" hidden>
+                                <h4 style="font-size: 0.86rem; color: var(--text-secondary); margin-bottom: 0.65rem;">Preview Plan</h4>
+                                <div class="kv-grid">
+                                    <div class="kv-key" id="previewEntryLabel">Preview Entry</div>
+                                    <div class="kv-value" id="previewEntryPrice">--</div>
+                                    <div class="kv-key" id="previewStopLabel">Preview Stop</div>
+                                    <div class="kv-value" id="previewStopLoss">--</div>
+                                    <div class="kv-key" id="previewTp1Label">Preview TP1</div>
+                                    <div class="kv-value" id="previewTakeProfit1">--</div>
+                                    <div class="kv-key" id="previewTp2Label">Preview TP2</div>
+                                    <div class="kv-value" id="previewTakeProfit2">--</div>
+                                    <div class="kv-key" id="previewRr1Label">Preview R:R (TP1)</div>
+                                    <div class="kv-value" id="previewRrRatio1">--</div>
+                                    <div class="kv-key" id="previewRr2Label">Preview R:R (TP2)</div>
+                                    <div class="kv-value" id="previewRrRatio2">--</div>
+                                </div>
+                                <p class="data-note" id="previewPlanNote">Preview only. Execution remains blocked until the policy packet becomes actionable.</p>
+                            </div>
                             <div class="regime-chip defensive" id="regimeChip" title="Negative Sharpe indicates low volatility regime, strategy in review.">Current Regime: Defensive</div>
                             <h4 style="font-size: 0.86rem; margin-top: 0.8rem; color: var(--text-secondary);">Execution Rules</h4>
                             <ul class="rules-list">
-                                <li>LONG if P(UP) >= 0.55 and Confidence >= 0.45</li>
-                                <li>SHORT if P(UP) <= 0.45 and Confidence >= 0.45</li>
-                                <li>NO TRADE otherwise</li>
-                                <li>Position capped by max leverage and risk gate</li>
+                                <li>Policy Engine decides execution from net edge, confidence, liquidity, and regime.</li>
+                                <li>P(UP) remains directional context, not the sole trade trigger.</li>
+                                <li>WAIT and FLAT are valid outcomes when edge is too thin after cost.</li>
+                                <li>Position size remains capped by leverage, stop distance, and risk gates.</li>
                             </ul>
                         </div>
                     </div>

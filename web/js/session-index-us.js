@@ -60,7 +60,10 @@ function cacheElements() {
         'quickGapRiskBadge', 'leverageSelector', 'quickExposureText', 'quickGapRiskNote', 'executeBtnWrap',
         'executeBtn', 'executeHint',
         'quickEntryLabel', 'quickStopLabel', 'quickTakeProfitLabel', 'quickNetEdgeLabel', 'quickEntry',
-        'quickStop', 'quickTakeProfit', 'quickNetEdge', 'quickDecisionNote', 'chartModeDirection',
+        'quickStop', 'quickTakeProfit', 'quickNetEdge', 'quickDecisionNote',
+        'previewPlanSection', 'previewEntryLabel', 'previewEntry', 'previewStopLabel', 'previewStop',
+        'previewTakeProfit1Label', 'previewTakeProfit1', 'previewTakeProfit2Label', 'previewTakeProfit2',
+        'previewRr1Label', 'previewRr1', 'previewRr2Label', 'previewRr2', 'previewPlanNote', 'chartModeDirection',
         'chartModeVolatility', 'sessionChart', 'sessionChartNote', 'windowBars', 'windowMostLikely',
         'windowConfidenceNote', 'magnitudeQ10', 'magnitudeQ50', 'magnitudeQ90', 'magnitudeWidth',
         'limitAdjustedBox', 'limitAdjustedText', 'limitAdjustedNote', 'magnitudeSparkChart',
@@ -328,7 +331,8 @@ function buildViewModel({ indexMeta, marketState, indicesPayload, historyPayload
         focusRow = resolveFocusRow(rows, marketState);
         accuracy = deriveUsAccuracy(direction, magnitude);
         riskInfo = buildUsRiskInfo(focusRow);
-        quickDecision = buildUsQuickDecision(quote.price, direction, predictionPayload.tpSl || {}, marketState, focusRow);
+        const policyPacket = normalizePolicyPacket(predictionPayload.policyPacket);
+        quickDecision = buildUsQuickDecision(quote.price, direction, predictionPayload.tpSl || {}, policyPacket, marketState, focusRow);
         noGoReason = buildUsNoGoReason(quickDecision, direction, riskInfo, marketState);
     }
 
@@ -340,6 +344,7 @@ function buildViewModel({ indexMeta, marketState, indicesPayload, historyPayload
         historyLabel: String(historyPayload?.selectedSession?.label || 'Last Regular Session'),
         historyPath,
         prediction: predictionPayload?.prediction || null,
+        policyPacket: normalizePolicyPacket(predictionPayload?.policyPacket),
         predictionAvailable,
         rows,
         focusRow,
@@ -540,10 +545,10 @@ function buildUsSessionRows({ direction, magnitude, windowForecast, marketState,
             suggestedAction: buildUsSuggestedAction(signal),
             gapMitigationHint: buildGapMitigationHint(gapRisk),
             executionState: signal === 'NO-TRADE'
-                ? `NO-TRADE | P(UP) ${formatPercent(pUp)} | Confidence ${formatPercent(confidence)}`
-                : `${signal} ready for regular-session execution | Confidence ${formatPercent(confidence)}`,
+                ? `NO-TRADE | Net edge still needs confirmation | Confidence ${formatPercent(confidence)}`
+                : `${signal} setup staged for regular-session execution | Confidence ${formatPercent(confidence)}`,
             executionHint: signal === 'NO-TRADE'
-                ? `No live trade packet until P(UP) >= ${formatThreshold(LONG_TRIGGER)} or <= ${formatThreshold(SHORT_TRIGGER)} with confidence >= ${formatThreshold(MIN_CONFIDENCE)}.`
+                ? 'No live trade packet yet. Wait for a regular-session policy packet with positive net edge and cleared execution gates.'
                 : `${signal} setup is valid for regular-session execution only.`,
             volatilityLabel: describeVolatility(spread),
             gapDistanceGuidePct: Number((GAP_GUIDE_LEVEL - Math.max(Math.abs(q10), Math.abs(q90))).toFixed(4))
@@ -669,6 +674,7 @@ function renderOverview() {
     text(els.quickTakeProfit, displayDecision.takeProfitValue);
     text(els.quickNetEdge, displayDecision.netEdgeValue);
     text(els.quickDecisionNote, displayDecision.note);
+    renderPreviewPlan(displayDecision.previewPlan, !displayDecision.actionable);
     text(els.quickExposureText, `Mock exposure: ${state.mockLeverage}x`);
     text(els.quickGapRiskNote, displayDecision.gapRiskNote);
     if (els.leverageSelector) els.leverageSelector.value = String(state.mockLeverage);
@@ -681,14 +687,18 @@ function renderOverview() {
         els.executeHint,
         displayDecision.actionable
             ? `Mock leverage ${state.mockLeverage}x | SL / TP compressed by exposure | Net Edge ${displayDecision.netEdgeValue}`
-            : buildExecuteDisabledTooltip(displayDecision)
+            : `${buildExecuteDisabledTooltip(displayDecision)} Preview plan below is informational only.`
     );
 
     text(els.dataDelayNote, viewModel.dataSourceText);
     text(els.mockDisclaimer, viewModel.disclaimer);
     text(els.dataSourceText, viewModel.dataSourceText);
-    text(els.currentBiasText, viewModel.predictionAvailable ? `${displayDecision.badge} bias for ${indexMeta.displayName} during regular hours.` : 'Last regular session snapshot only. No new forecast is shown while the market is closed.');
-    text(els.currentLimitRiskText, viewModel.predictionAvailable && viewModel.riskInfo ? `${capitalize(viewModel.riskInfo.level)} | ${viewModel.riskInfo.note}` : 'Gap risk resets at the next official open.');
+    text(els.currentBiasText, viewModel.predictionAvailable
+        ? `Policy Engine: ${displayDecision.badge} for ${indexMeta.displayName} during regular hours.`
+        : 'Last regular session snapshot only. No new forecast is shown while the market is closed.');
+    text(els.currentLimitRiskText, viewModel.predictionAvailable && viewModel.riskInfo
+        ? `${capitalize(viewModel.riskInfo.level)} | ${viewModel.riskInfo.note}`
+        : 'Gap risk resets at the next official open.');
     if (els.currentLimitRiskText) {
         els.currentLimitRiskText.title = viewModel.predictionAvailable && viewModel.riskInfo ? viewModel.riskInfo.tooltip : 'Gap risk resets at the next official open.';
     }
@@ -960,27 +970,35 @@ function buildClosedReason(marketState, hasSnapshot) {
         : 'Closed. No new decision packet is generated outside official regular hours.';
 }
 
-function buildUsQuickDecision(price, direction, tpSl, marketState, focusRow) {
-    const pUp = asNumber(direction.pUp, 0.5);
-    const confidence = asNumber(direction.confidence, 0.5);
-    const signal = resolveUsSignal(pUp, confidence);
+function buildUsQuickDecision(price, direction, tpSl, policyPacket, marketState, focusRow) {
+    const signal = String(policyPacket?.action || resolveUsSignal(asNumber(direction.pUp, 0.5), asNumber(direction.confidence, 0.5))).toUpperCase();
+    const isLong = signal.includes('LONG');
+    const isShort = signal.includes('SHORT');
     const entryPrice = asNumber(price, null);
-    const rawStopLossPct = Math.abs(asNumber(tpSl.stopLossPct, signal === 'LONG' ? Math.abs(focusRow?.q10) : Math.abs(focusRow?.q90)));
-    const rawTakeProfitPct = Math.abs(asNumber(tpSl.takeProfit2Pct, signal === 'LONG' ? Math.abs(focusRow?.q90) : Math.abs(focusRow?.q10)));
-    const stopLossPct = signal === 'LONG' ? -rawStopLossPct : rawStopLossPct;
-    const takeProfitPct = signal === 'LONG' ? rawTakeProfitPct : -rawTakeProfitPct;
-    const edge = Math.max(0, Math.abs(asNumber(focusRow?.q50, 0)) - 0.0025);
+    const rawStopLossPct = Math.abs(asNumber(tpSl.stopLossPct, isLong ? Math.abs(focusRow?.q10) : Math.abs(focusRow?.q90)));
+    const rawTakeProfitPct = Math.abs(asNumber(tpSl.takeProfit2Pct, isLong ? Math.abs(focusRow?.q90) : Math.abs(focusRow?.q10)));
+    const stopLossPct = isLong ? -rawStopLossPct : rawStopLossPct;
+    const takeProfitPct = isLong ? rawTakeProfitPct : -rawTakeProfitPct;
+    const edge = Number.isFinite(Number(policyPacket?.expectedNetEdgePct))
+        ? Number(policyPacket.expectedNetEdgePct) / 100
+        : Math.max(0, Math.abs(asNumber(focusRow?.q50, 0)) - 0.0025);
     const gapRisk = focusRow?.gapRisk || 'moderate';
     const gapRiskNote = gapRisk === 'high'
         ? 'HIGH GAP RISK - Wide opening possible'
         : gapRisk === 'moderate'
             ? 'MEDIUM GAP RISK - Watch early liquidity'
             : 'LOW GAP RISK - Normal opening range expected';
+    const reason = buildPolicyReason(
+        policyPacket,
+        isLong || isShort
+            ? `${signal.replace(/_/g, ' ')} setup is valid only during regular US cash hours.`
+            : 'Policy Engine is standing aside until the regular-session packet clears its edge and execution gates.'
+    );
 
-    if (signal === 'LONG' || signal === 'SHORT') {
+    if (isLong || isShort) {
         return {
             badge: signal,
-            tone: signal === 'LONG' ? 'long' : 'short',
+            tone: isLong ? 'long' : 'short',
             mode: marketState.isRegular ? 'Regular Session' : 'Closed',
             modeTone: marketState.isRegular ? 'success' : 'warning',
             liveEligible: marketState.isRegular,
@@ -999,7 +1017,13 @@ function buildUsQuickDecision(price, direction, tpSl, marketState, focusRow) {
             netEdgeValue: formatSignedPercent(edge),
             gapRisk,
             gapRiskNote,
-            note: `${signal} setup is valid only during regular US cash hours.`
+            regime: policyPacket?.regime || '',
+            tradeQualityScore: policyPacket?.tradeQualityScore,
+            tradeQualityBand: policyPacket?.tradeQualityBand || '',
+            passedGates: Array.isArray(policyPacket?.gates) ? policyPacket.gates : [],
+            blockingGates: buildBlockingGates(policyPacket),
+            previewPlan: normalizePreviewPlan(policyPacket?.previewPlan),
+            note: reason
         };
     }
 
@@ -1011,29 +1035,87 @@ function buildUsQuickDecision(price, direction, tpSl, marketState, focusRow) {
         liveEligible: false,
         actionable: false,
         entryLabel: 'Reference',
-        stopLabel: 'Long Trigger',
-        takeProfitLabel: 'Short Trigger',
-        netEdgeLabel: 'Wait For',
+        stopLabel: 'Expected Net Edge',
+        takeProfitLabel: 'Trade Quality',
+        netEdgeLabel: 'Regime',
         entryPrice,
         entryValue: formatIndexValue(entryPrice),
-        stopValue: `P(UP) >= ${formatThreshold(LONG_TRIGGER)}`,
-        takeProfitValue: `P(UP) <= ${formatThreshold(SHORT_TRIGGER)}`,
-        netEdgeValue: `Conf >= ${formatThreshold(MIN_CONFIDENCE)}`,
+        stopValue: formatSignedPercent(edge),
+        takeProfitValue: formatDecisionQuality(policyPacket),
+        netEdgeValue: policyPacket?.regime || 'Unavailable',
         gapRisk,
         gapRiskNote,
-        note: 'NO-TRADE until the real regular-session edge clears the LONG or SHORT gate.'
+        passedGates: Array.isArray(policyPacket?.gates) ? policyPacket.gates : [],
+        blockingGates: buildBlockingGates(policyPacket),
+        previewPlan: normalizePreviewPlan(policyPacket?.previewPlan),
+        note: reason
     };
 }
 
 function buildUsNoGoReason(quickDecision, direction, riskInfo, marketState) {
     if (quickDecision.actionable && marketState.isRegular) {
-        return `GO for the active regular session. Real confidence ${Math.round(asNumber(direction.confidence, 0.5) * 100)}% clears the execution gate.`;
+        return 'GO for the active regular session. The live policy packet is actionable.';
     }
+    if (quickDecision?.note) return quickDecision.note;
     const reasons = [];
     if (quickDecision.badge === 'NO-TRADE') reasons.push('the regular-session edge is not strong enough yet');
     if (riskInfo?.level === 'high') reasons.push('gap or liquidity risk is elevated');
     if (!marketState.isRegular) reasons.push('the market is closed');
     return `NO-TRADE because ${reasons.join(' + ') || 'the regular-session forecast is unavailable'}.`;
+}
+
+function normalizePolicyPacket(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+        action: String(raw.action || 'FLAT').toUpperCase(),
+        expectedNetEdgePct: Number.isFinite(Number(raw.expectedNetEdgePct)) ? Number(raw.expectedNetEdgePct) : null,
+        tradeQualityScore: Number.isFinite(Number(raw.tradeQualityScore)) ? Number(raw.tradeQualityScore) : null,
+        tradeQualityBand: raw.tradeQualityBand ? String(raw.tradeQualityBand) : '',
+        regime: raw.regime ? String(raw.regime) : '',
+        previewPlan: normalizePreviewPlan(raw.previewPlan),
+        gates: Array.isArray(raw.gates) ? raw.gates.map((item) => String(item)) : [],
+        reasons: Array.isArray(raw.reasons) ? raw.reasons.map((item) => String(item)) : []
+    };
+}
+
+function normalizePreviewPlan(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.available) return null;
+    return {
+        available: Boolean(raw.available),
+        status: String(raw.status || 'preview').toLowerCase(),
+        direction: String(raw.direction || '').toUpperCase(),
+        entryPrice: nullableNumber(raw.entryPrice, null),
+        stopLoss: nullableNumber(raw.stopLoss, null),
+        takeProfit1: nullableNumber(raw.takeProfit1, null),
+        takeProfit2: nullableNumber(raw.takeProfit2, null),
+        rewardRisk1: nullableNumber(raw.rewardRisk1, null),
+        rewardRisk2: nullableNumber(raw.rewardRisk2, null)
+    };
+}
+
+function buildBlockingGates(policyPacket) {
+    if (!policyPacket) return [];
+    const gates = Array.isArray(policyPacket.gates) ? policyPacket.gates : [];
+    const blocking = [];
+    if (!gates.includes('cost_ok') || Number(policyPacket.expectedNetEdgePct || 0) <= 0) blocking.push('net edge');
+    if (!gates.includes('confidence_ok')) blocking.push('confidence');
+    if (!gates.includes('regime_ok')) blocking.push('regime');
+    if (!gates.includes('liquidity_ok')) blocking.push('liquidity');
+    if ((policyPacket.action === 'WAIT' || policyPacket.action === 'FLAT') && Number(policyPacket.expectedNetEdgePct || 0) > 0 && blocking.length === 0) {
+        blocking.push('edge threshold');
+    }
+    return blocking;
+}
+
+function buildPolicyReason(policyPacket, fallback) {
+    const reasons = Array.isArray(policyPacket?.reasons) ? policyPacket.reasons.filter(Boolean) : [];
+    return reasons.length ? reasons.join(' ') : fallback;
+}
+
+function formatDecisionQuality(policyPacket) {
+    if (!Number.isFinite(policyPacket?.tradeQualityScore)) return '--';
+    const band = policyPacket.tradeQualityBand ? ` (${policyPacket.tradeQualityBand})` : '';
+    return `${policyPacket.tradeQualityScore.toFixed(1)}${band}`;
 }
 
 function deriveUsAccuracy(direction, magnitude) {
@@ -1076,7 +1158,7 @@ function resolveUsFocusKey(marketState) {
 }
 
 function buildUsSessionExplanation(segment, signal, confidence, gapRisk) {
-    const tone = signal === 'LONG' ? 'buy-side pressure' : signal === 'SHORT' ? 'sell-side pressure' : 'mixed flow';
+    const tone = signal.includes('LONG') ? 'buy-side pressure' : signal.includes('SHORT') ? 'sell-side pressure' : 'mixed flow';
     return `${segment.label}: ${tone} with ${formatPercent(confidence)} confidence. ${capitalize(gapRisk)} gap/liquidity risk for regular-session execution.`;
 }
 
@@ -1111,8 +1193,9 @@ function viewHasForecast() {
 }
 
 function signalTone(signal) {
-    if (signal === 'LONG') return 'long';
-    if (signal === 'SHORT') return 'short';
+    const normalized = String(signal || '').toUpperCase();
+    if (normalized.includes('LONG')) return 'long';
+    if (normalized.includes('SHORT')) return 'short';
     return 'flat';
 }
 
@@ -1165,6 +1248,7 @@ function materializeQuickDecision(baseDecision, leverage) {
     if (!baseDecision.actionable) {
         return {
             ...baseDecision,
+            previewPlan: baseDecision.previewPlan || null,
             gapRiskNote: baseDecision.gapRiskNote || 'Gap risk refreshes once a live regular-session packet returns.'
         };
     }
@@ -1181,13 +1265,37 @@ function materializeQuickDecision(baseDecision, leverage) {
         stopValue: formatSignedPercent(stopLossPct),
         takeProfitValue: formatSignedPercent(takeProfitPct),
         netEdgeValue: formatSignedPercent(netEdgePct),
+        previewPlan: baseDecision.previewPlan || null,
         note: `${baseDecision.badge} setup valid for regular hours. Mock ${safeLeverage}x compresses SL/TP distance and scales the projected net edge.`,
         gapRiskNote: baseDecision.gapRiskNote || 'Gap risk refreshes with the next live regular-session packet.'
     };
 }
 
+function renderPreviewPlan(previewPlan, visible) {
+    if (els.previewPlanSection) {
+        els.previewPlanSection.hidden = !(visible && previewPlan?.available);
+    }
+    if (!visible || !previewPlan?.available) {
+        text(els.previewEntry, '--');
+        text(els.previewStop, '--');
+        text(els.previewTakeProfit1, '--');
+        text(els.previewTakeProfit2, '--');
+        text(els.previewRr1, '--');
+        text(els.previewRr2, '--');
+        return;
+    }
+    text(els.previewEntryLabel, `Preview Entry (${previewPlan.direction || 'Plan'})`);
+    text(els.previewEntry, formatIndexValue(previewPlan.entryPrice));
+    text(els.previewStop, formatIndexValue(previewPlan.stopLoss));
+    text(els.previewTakeProfit1, formatIndexValue(previewPlan.takeProfit1));
+    text(els.previewTakeProfit2, formatIndexValue(previewPlan.takeProfit2));
+    text(els.previewRr1, formatRatioValue(previewPlan.rewardRisk1));
+    text(els.previewRr2, formatRatioValue(previewPlan.rewardRisk2));
+    text(els.previewPlanNote, 'Preview only. These levels are derived from the live packet and current reference price, but execution remains blocked.');
+}
+
 function buildExecuteDisabledTooltip(decision) {
-    return 'Regular Session Edge insufficient (P(UP)<0.55 or Conf<0.90) -> Await stronger confirmation post-open';
+    return decision?.note || 'Regular-session policy packet is not actionable yet. Await stronger net edge or cleaner gate alignment post-open.';
 }
 
 function createTradeLogEntry() {
@@ -1264,9 +1372,9 @@ function closeModal() {
 }
 
 function buildUsSuggestedAction(signal) {
-    if (signal === 'LONG') return 'LONG bias intact | Wait for stronger close confirmation if momentum fades';
-    if (signal === 'SHORT') return 'SHORT bias intact | Press only if regular-session weakness holds after the open';
-    return 'NO-TRADE until P(UP) >= 0.55 after open | Confidence boost expected';
+    if (String(signal || '').toUpperCase().includes('LONG')) return 'LONG bias intact | Use the live policy packet to manage entries through the cash session';
+    if (String(signal || '').toUpperCase().includes('SHORT')) return 'SHORT bias intact | Use the live policy packet to confirm weakness after the open';
+    return 'Policy Engine is standing aside | Wait for a cleaner regular-session packet';
 }
 
 function buildGapMitigationHint(gapRisk) {
@@ -1423,6 +1531,16 @@ function formatDurationDetailed(totalSeconds) {
 function asNumber(value, fallback = 0) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function nullableNumber(value, fallback = null) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function formatRatioValue(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)}x` : '--';
 }
 
 function clamp(value, min, max) {

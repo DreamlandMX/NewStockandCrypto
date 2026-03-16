@@ -703,6 +703,16 @@
                     <div class="level-item tp1" id="decisionTp1Tile"><div class="level-label" id="decisionTakeProfitLabel">Take Profit</div><div class="level-value" id="decisionTakeProfit">--</div></div>
                     <div class="level-item tp2" id="decisionTp2Tile"><div class="level-label" id="decisionTakeProfit2Label">Take Profit 2</div><div class="level-value" id="decisionTakeProfit2">--</div></div>
                 </div>
+                            <div id="decisionPreviewSection" style="display:grid; gap:0.45rem; margin-top:0.4rem;" hidden>
+                                <div style="font-size:0.82rem; color:var(--text-secondary);">Preview Plan</div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewEntryLabel">Preview Entry</span><strong id="decisionPreviewEntry">--</strong></div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewStopLabel">Preview Stop</span><strong id="decisionPreviewStop">--</strong></div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewTp1Label">Preview TP1</span><strong id="decisionPreviewTp1">--</strong></div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewTp2Label">Preview TP2</span><strong id="decisionPreviewTp2">--</strong></div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewRr1Label">Preview R:R (TP1)</span><strong id="decisionPreviewRr1">--</strong></div>
+                                <div class="risk-breakdown-row"><span id="decisionPreviewRr2Label">Preview R:R (TP2)</span><strong id="decisionPreviewRr2">--</strong></div>
+                                <div id="decisionPreviewNote" class="warning-inline" style="margin-top:0;">Preview only. Execution remains blocked until the packet is actionable.</div>
+                            </div>
                         </div>
                         <button class="btn btn-primary" id="executeBtn" style="width:100%; margin-top:1rem;" type="button">Execute (Mock)</button>
                         <div id="executeDisclaimer" class="warning-inline" style="color: var(--text-secondary);">
