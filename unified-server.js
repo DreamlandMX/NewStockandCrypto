@@ -5893,6 +5893,57 @@ function buildTrackingUsRow(row, stale = false, timestamp = new Date().toISOStri
     });
 }
 
+function buildTrackingCryptoBenchmarkRow(quote, stale = false, staleReason = null, timestamp = new Date().toISOString()) {
+    const symbol = normalizeCryptoSymbol(quote?.symbol);
+    if (!symbol || !Number.isFinite(quote?.price)) {
+        return null;
+    }
+    const baseSymbol = cryptoBaseSymbol(symbol);
+    const predictionPayload = buildCryptoPredictionPayload(symbol, quote, stale, staleReason);
+    const displayName = ({
+        BTC: 'Bitcoin',
+        ETH: 'Ethereum',
+        SOL: 'Solana'
+    })[baseSymbol] || baseSymbol;
+
+    return buildTrackingRow({
+        symbol,
+        name: displayName,
+        market: 'crypto',
+        marketLabel: 'Crypto',
+        price: quote.price,
+        changePct: Number.isFinite(quote.change) ? quote.change : 0,
+        pUp: predictionPayload.prediction.p_up,
+        confidence: predictionPayload.prediction.confidence,
+        q10: predictionPayload.prediction.magnitude.q10,
+        q50: predictionPayload.prediction.magnitude.q50,
+        q90: predictionPayload.prediction.magnitude.q90,
+        bandWidth: predictionPayload.prediction.magnitude.q90 - predictionPayload.prediction.magnitude.q10,
+        liquidityProxy: Number.isFinite(quote.volume) ? quote.volume : 0,
+        policyPacket: predictionPayload.policyPacket || null,
+        coverageInputs: [quote.price, quote.volume, quote.change, predictionPayload.prediction.p_up, predictionPayload.prediction.confidence],
+        signalSource: 'binance_us_benchmark',
+        stale,
+        staleReason,
+        timestamp,
+        status: stale ? 'STALE' : 'LIVE',
+        meta: {
+            marketCap: null,
+            totalVolume: roundTrackingNumber(Number.isFinite(quote.volume) ? quote.volume : 0, 2),
+            marketCapRank: ({
+                BTC: 1,
+                ETH: 2,
+                SOL: 7
+            })[baseSymbol] || null,
+            id: ({
+                BTC: 'bitcoin',
+                ETH: 'ethereum',
+                SOL: 'solana'
+            })[baseSymbol] || null
+        }
+    });
+}
+
 async function fetchTrackingCryptoUniverse() {
     const endpoint = buildCoinGeckoMarketsUrl(1, 120);
     const payload = await fetchJsonFromHttps(endpoint, 9000);
@@ -5964,6 +6015,29 @@ async function getTrackingCryptoUniverseWithCache() {
             trackingCryptoUniverseCache = stalePayload;
             trackingCryptoUniverseCacheAt = Date.now();
             return stalePayload;
+        }
+        try {
+            const benchmarkPayload = await getCryptoPricesWithCache();
+            const timestamp = new Date().toISOString();
+            const rows = listCryptoRows(benchmarkPayload)
+                .map((quote) => buildTrackingCryptoBenchmarkRow(quote, true, error.message, timestamp))
+                .filter((row) => row !== null);
+            if (rows.length) {
+                const stalePayload = {
+                    meta: {
+                        source: 'binance_us_benchmark',
+                        timestamp,
+                        stale: true,
+                        staleReason: error.message
+                    },
+                    rows
+                };
+                trackingCryptoUniverseCache = stalePayload;
+                trackingCryptoUniverseCacheAt = Date.now();
+                return deepCopy(stalePayload);
+            }
+        } catch (benchmarkError) {
+            console.warn(`crypto benchmark fallback failed: ${benchmarkError.message}`);
         }
         throw error;
     }
