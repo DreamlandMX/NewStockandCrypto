@@ -14,6 +14,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 9000);
 const API_HOST = process.env.API_HOST || '127.0.0.1';
 const API_PORT = Number(process.env.API_PORT || 5001);
+const MODEL_EXPLORER_SCHEME = String(process.env.MODEL_EXPLORER_SCHEME || 'http').trim().toLowerCase() === 'https' ? 'https' : 'http';
 const MODEL_EXPLORER_HOST = process.env.MODEL_EXPLORER_HOST || '127.0.0.1';
 const MODEL_EXPLORER_PORT = Number(process.env.MODEL_EXPLORER_PORT || 8000);
 const WEB_ROOT = path.join(__dirname, 'web');
@@ -7114,8 +7115,9 @@ function proxyModelExplorer(req, res, parsedUrl) {
 
     const rewrittenPathname = parsedUrl.pathname.replace(/^\/api\/model-explorer/, '') || '/';
     const upstreamPath = `${rewrittenPathname}${parsedUrl.search || ''}`;
+    const requestClient = MODEL_EXPLORER_SCHEME === 'https' ? https : http;
 
-    const proxyReq = http.request(
+    const proxyReq = requestClient.request(
         {
             hostname: MODEL_EXPLORER_HOST,
             port: MODEL_EXPLORER_PORT,
@@ -7438,7 +7440,7 @@ process.on('unhandledRejection', (reason) => {
 server.listen(PORT, HOST, () => {
     console.log(`Unified server listening at http://${HOST}:${PORT}`);
     console.log(`API proxy target: http://${API_HOST}:${API_PORT}`);
-    console.log(`Model explorer proxy target: http://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}`);
+    console.log(`Model explorer proxy target: ${MODEL_EXPLORER_SCHEME}://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}`);
     console.log(`Web root: ${WEB_ROOT}`);
     console.log(`Loaded CSI300 snapshot rows: ${csi300Snapshot.length}`);
     console.log(`Loaded S&P 500 snapshot rows: ${sp500Snapshot.length}`);
