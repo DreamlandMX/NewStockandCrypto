@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: npm install && npm rebuild better-sqlite3
     startCommand: npm start
-    healthCheckPath: /
+    healthCheckPath: /healthz
     disk:
       name: data
       mountPath: /opt/render/project/src/data

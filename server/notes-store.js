@@ -166,7 +166,7 @@ function mapIdeaRow(row, viewerUserId = null) {
 
 function createNotesStore(options = {}) {
     const baseDir = options.baseDir || process.cwd();
-    const dataDir = path.join(baseDir, 'data');
+    const dataDir = options.dataDir || process.env.APP_DATA_DIR || path.join(baseDir, 'data');
     const dbPath = path.join(dataDir, 'stockandcrypto.db');
     fs.mkdirSync(dataDir, { recursive: true });
 

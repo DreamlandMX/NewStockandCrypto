@@ -1,6 +1,7 @@
 // Unified server for StockandCrypto.
 // Exposes static frontend and API routes on the same port (default: 9000).
 
+const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -26,6 +27,10 @@ const MODEL_EXPLORER_PORT = Number(
     process.env.MODEL_EXPLORER_PORT || (IS_RENDER_RUNTIME ? 443 : 8000)
 );
 const WEB_ROOT = path.join(__dirname, 'web');
+const APP_DATA_DIR = process.env.APP_DATA_DIR || path.join(__dirname, 'data');
+const APP_VERSION = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || 'local';
+const SERVER_STARTED_AT = new Date();
+const REQUEST_LOGGING_ENABLED = String(process.env.REQUEST_LOGGING || 'true').toLowerCase() !== 'false';
 
 const CRYPTO_CACHE_TTL_MS = Number(process.env.CRYPTO_CACHE_TTL_MS || 9000);
 const CN_CACHE_TTL_MS = Number(process.env.CN_CACHE_TTL_MS || 9000);
@@ -190,10 +195,25 @@ let trackingActionLog = [];
 let trackingLatestActionAt = null;
 let trackingPreviousTrackedState = new Map();
 let trackingKnownUniverseSymbols = new Set();
-const authStore = createAuthStore({ baseDir: __dirname });
-const chatStore = createChatStore({ baseDir: __dirname });
-const notesStore = createNotesStore({ baseDir: __dirname });
-const positionsStore = createPositionsStore({ baseDir: __dirname });
+const authStore = createAuthStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
+const chatStore = createChatStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
+const notesStore = createNotesStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
+const positionsStore = createPositionsStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
+const REQUEST_METRICS = {
+    total: 0,
+    inFlight: 0,
+    byMethod: Object.create(null),
+    byStatusClass: {
+        '2xx': 0,
+        '3xx': 0,
+        '4xx': 0,
+        '5xx': 0,
+        other: 0
+    },
+    errors: 0,
+    lastRequestAt: null,
+    lastErrorAt: null
+};
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -220,6 +240,168 @@ function sendJson(res, statusCode, payload) {
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     });
     res.end(body);
+}
+
+function logEvent(level, event, details = {}) {
+    const entry = {
+        ts: new Date().toISOString(),
+        level,
+        event,
+        ...details
+    };
+    const serialized = JSON.stringify(entry);
+    if (level === 'error') {
+        console.error(serialized);
+        return;
+    }
+    console.log(serialized);
+}
+
+function getStatusClass(statusCode) {
+    if (statusCode >= 200 && statusCode < 300) return '2xx';
+    if (statusCode >= 300 && statusCode < 400) return '3xx';
+    if (statusCode >= 400 && statusCode < 500) return '4xx';
+    if (statusCode >= 500 && statusCode < 600) return '5xx';
+    return 'other';
+}
+
+function beginRequestTracking(req, res) {
+    const requestId = crypto.randomUUID();
+    const startedAt = process.hrtime.bigint();
+    REQUEST_METRICS.inFlight += 1;
+    REQUEST_METRICS.byMethod[req.method] = (REQUEST_METRICS.byMethod[req.method] || 0) + 1;
+    res.setHeader('X-Request-Id', requestId);
+
+    res.once('finish', () => {
+        const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+        const statusClass = getStatusClass(res.statusCode || 0);
+        REQUEST_METRICS.inFlight = Math.max(0, REQUEST_METRICS.inFlight - 1);
+        REQUEST_METRICS.total += 1;
+        REQUEST_METRICS.byStatusClass[statusClass] = (REQUEST_METRICS.byStatusClass[statusClass] || 0) + 1;
+        REQUEST_METRICS.lastRequestAt = new Date().toISOString();
+
+        if ((res.statusCode || 0) >= 500) {
+            REQUEST_METRICS.errors += 1;
+            REQUEST_METRICS.lastErrorAt = REQUEST_METRICS.lastRequestAt;
+        }
+
+        if (REQUEST_LOGGING_ENABLED) {
+            logEvent((res.statusCode || 0) >= 500 ? 'error' : 'info', 'http_request', {
+                requestId,
+                method: req.method,
+                path: req.url,
+                statusCode: res.statusCode,
+                durationMs: Number(elapsedMs.toFixed(2))
+            });
+        }
+    });
+
+    return requestId;
+}
+
+async function probeModelExplorerHealth() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    const target = `${MODEL_EXPLORER_SCHEME}://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}/health`;
+
+    try {
+        const response = await fetch(target, {
+            method: 'GET',
+            signal: controller.signal,
+            headers: { Accept: 'application/json' }
+        });
+        return {
+            ok: response.ok,
+            statusCode: response.status,
+            target
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            statusCode: null,
+            target,
+            error: error instanceof Error ? error.message : String(error)
+        };
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+function buildMetricsSnapshot() {
+    const memory = process.memoryUsage();
+    return {
+        ok: true,
+        service: 'newstockandcrypto',
+        version: APP_VERSION,
+        startedAt: SERVER_STARTED_AT.toISOString(),
+        uptimeSec: Math.round(process.uptime()),
+        requests: {
+            ...REQUEST_METRICS,
+            byMethod: { ...REQUEST_METRICS.byMethod },
+            byStatusClass: { ...REQUEST_METRICS.byStatusClass }
+        },
+        memory: {
+            rss: memory.rss,
+            heapTotal: memory.heapTotal,
+            heapUsed: memory.heapUsed,
+            external: memory.external
+        },
+        storage: {
+            appDataDir: APP_DATA_DIR,
+            authDbPath: authStore.dbPath,
+            chatDbPath: chatStore.dbPath,
+            notesDbPath: notesStore.dbPath,
+            positionsDbPath: positionsStore.dbPath
+        }
+    };
+}
+
+async function buildHealthSnapshot() {
+    const modelExplorer = await probeModelExplorerHealth();
+    const authDbExists = fs.existsSync(authStore.dbPath);
+    const chatDbExists = fs.existsSync(chatStore.dbPath);
+    const notesDbExists = fs.existsSync(notesStore.dbPath);
+    const positionsDbExists = fs.existsSync(positionsStore.dbPath);
+    const storageReady = authDbExists && chatDbExists && notesDbExists && positionsDbExists;
+    const degraded = !modelExplorer.ok;
+
+    return {
+        ok: storageReady,
+        status: storageReady ? (degraded ? 'degraded' : 'ok') : 'error',
+        service: 'newstockandcrypto',
+        version: APP_VERSION,
+        startedAt: SERVER_STARTED_AT.toISOString(),
+        uptimeSec: Math.round(process.uptime()),
+        dependencies: {
+            storage: {
+                appDataDir: APP_DATA_DIR,
+                authDbExists,
+                chatDbExists,
+                notesDbExists,
+                positionsDbExists
+            },
+            modelExplorer
+        }
+    };
+}
+
+async function handleSystemHealthRoute(req, res) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
+        return;
+    }
+
+    const payload = await buildHealthSnapshot();
+    sendJson(res, payload.ok ? 200 : 503, payload);
+}
+
+function handleSystemMetricsRoute(req, res) {
+    if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
+        return;
+    }
+
+    sendJson(res, 200, buildMetricsSnapshot());
 }
 
 function readJsonBody(req) {
@@ -7408,7 +7590,17 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    beginRequestTracking(req, res);
     const parsedUrl = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
+
+    if (parsedUrl.pathname === '/healthz' || parsedUrl.pathname === '/api/system/health') {
+        handleAsyncRoute(res, handleSystemHealthRoute(req, res), 'SYSTEM_HEALTH_FAILED');
+        return;
+    }
+    if (parsedUrl.pathname === '/api/system/metrics') {
+        handleSystemMetricsRoute(req, res);
+        return;
+    }
 
     if (parsedUrl.pathname === '/api/auth/register') {
         handleAsyncRoute(res, authStore.handleRegister(req, res, sendJson, readJsonBody), 'REGISTER_FAILED');
@@ -7673,6 +7865,8 @@ server.listen(PORT, HOST, () => {
     console.log(`API proxy target: http://${API_HOST}:${API_PORT}`);
     console.log(`Model explorer proxy target: ${MODEL_EXPLORER_SCHEME}://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}`);
     console.log(`Web root: ${WEB_ROOT}`);
+    console.log(`App data dir: ${APP_DATA_DIR}`);
+    console.log(`App version: ${APP_VERSION}`);
     console.log(`Loaded CSI300 snapshot rows: ${csi300Snapshot.length}`);
     console.log(`Loaded S&P 500 snapshot rows: ${sp500Snapshot.length}`);
 });
