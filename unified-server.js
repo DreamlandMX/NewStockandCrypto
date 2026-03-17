@@ -257,6 +257,18 @@ function logEvent(level, event, details = {}) {
     console.log(serialized);
 }
 
+function buildServiceBaseUrl(scheme, host, port) {
+    const normalizedScheme = String(scheme || 'http').toLowerCase() === 'https' ? 'https' : 'http';
+    const normalizedHost = String(host || '').trim();
+    const numericPort = Number(port);
+    const isDefaultPort = (normalizedScheme === 'https' && numericPort === 443)
+        || (normalizedScheme === 'http' && numericPort === 80);
+    const portSuffix = normalizedHost && Number.isFinite(numericPort) && !isDefaultPort
+        ? `:${numericPort}`
+        : '';
+    return `${normalizedScheme}://${normalizedHost}${portSuffix}`;
+}
+
 function getStatusClass(statusCode) {
     if (statusCode >= 200 && statusCode < 300) return '2xx';
     if (statusCode >= 300 && statusCode < 400) return '3xx';
@@ -302,7 +314,7 @@ function beginRequestTracking(req, res) {
 async function probeModelExplorerHealth() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2500);
-    const target = `${MODEL_EXPLORER_SCHEME}://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}/health`;
+    const target = `${buildServiceBaseUrl(MODEL_EXPLORER_SCHEME, MODEL_EXPLORER_HOST, MODEL_EXPLORER_PORT)}/health`;
 
     try {
         const response = await fetch(target, {
