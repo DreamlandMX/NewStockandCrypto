@@ -1,200 +1,100 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StockandCrypto - Live Quantitative Trading Platform</title>
-    <meta name="description" content="Live multi-market forecasting and tracking for crypto, CN A-shares, and US equities.">
+    <title>StockandCrypto - Cross-Market Signal Desk</title>
+    <meta name="description" content="Cross-market signal desk for crypto, CN A-shares, and US equities with live market snapshots, model conviction, and workflow-ready tools.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <style>
-        .home-hero-status {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
-        }
-        .home-hero-metrics {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 1.5rem;
-        }
-        .home-hero-metric {
-            padding: 1.25rem 0;
-        }
-        .home-hero-metric-value {
-            font-size: 3.2rem;
-            font-weight: 800;
-            font-family: var(--font-mono);
-            line-height: 1;
-            color: var(--text-primary);
-        }
-        .home-hero-metric-value.gradient {
-            background: var(--gradient-accent);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .home-hero-metric-label {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-top: 0.75rem;
-        }
-        .home-hero-metric-meta {
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            margin-top: 0.35rem;
-            font-family: var(--font-mono);
-        }
-        .home-overview-layout {
-            display: grid;
-            grid-template-columns: 1fr 400px;
-            gap: 2rem;
-        }
-        .home-overview-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 1rem;
-        }
-        .home-overview-card {
-            text-align: left;
-            cursor: pointer;
-            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-            min-height: 215px;
-            background: rgba(8, 12, 29, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        .home-overview-card:hover,
-        .home-overview-card.is-selected {
-            transform: translateY(-2px);
-            border-color: rgba(0, 229, 255, 0.45);
-            box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
-        }
-        .home-overview-card.is-selected {
-            background: linear-gradient(135deg, rgba(0, 229, 255, 0.16) 0%, rgba(16, 185, 129, 0.08) 100%);
-        }
-        .home-overview-card.is-stale {
-            border-color: rgba(255, 204, 0, 0.32);
-        }
-        .home-overview-card.is-unavailable {
-            opacity: 0.72;
-        }
-        .home-overview-card.is-loading {
-            opacity: 0.7;
-        }
-        .home-card-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            align-items: flex-start;
-            margin-bottom: 1.2rem;
-        }
-        .home-card-subcopy {
-            margin-top: 0.45rem;
-            color: var(--text-muted);
-            font-size: 0.72rem;
-            font-family: var(--font-mono);
-        }
-        .home-card-price {
-            min-height: 2.5rem;
-        }
-        .home-card-footer {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            align-items: flex-end;
-            margin-top: 1rem;
-        }
-        .home-card-signal {
-            text-align: right;
-        }
-        .home-card-pup {
-            font-size: 0.78rem;
-            color: var(--success);
-        }
-        .home-card-conf {
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            margin-top: 0.2rem;
-        }
-        .home-feature-panel .card-body {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        .home-feature-meta {
-            color: var(--text-muted);
-            font-size: 0.8rem;
-            font-family: var(--font-mono);
-        }
-        .home-factor-row {
-            margin-bottom: 1rem;
-        }
-        .home-factor-row:last-child {
-            margin-bottom: 0;
-        }
-        .home-factor-labels {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-bottom: 0.4rem;
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-        }
-        .home-factor-meta {
-            margin-top: 0.4rem;
-            font-size: 0.72rem;
-            color: var(--text-muted);
-        }
-        .home-factor-positive {
-            color: var(--success);
-            font-weight: 700;
-        }
-        .home-factor-neutral {
-            color: var(--primary-accent);
-            font-weight: 700;
-        }
-        .home-factor-negative {
-            color: var(--warning);
-            font-weight: 700;
-        }
-        .home-bar-momentum { background: var(--success); }
-        .home-bar-edge { background: var(--primary-accent); }
-        .home-bar-liquidity { background: var(--warning); }
-        .home-bar-volatility { background: var(--info); }
-        .home-bar-coverage { background: linear-gradient(90deg, rgba(0,229,255,0.95), rgba(16,185,129,0.95)); }
-        .home-explanation-box {
-            background: rgba(0, 229, 255, 0.05);
-            padding: 1rem;
-            border-radius: var(--radius-md);
-            border-left: 3px solid var(--primary-accent);
-        }
-        .home-explanation-box .label {
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            margin-bottom: 0.45rem;
-        }
-        .home-panel-empty {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            padding: 1rem 0;
-        }
-        @media (max-width: 1100px) {
-            .home-overview-layout {
-                grid-template-columns: 1fr;
-            }
-        }
-        @media (max-width: 900px) {
-            .home-hero-metrics,
-            .home-overview-grid {
-                grid-template-columns: 1fr;
-            }
-        }
+        :root { --home-display: var(--font-serif); --home-surface: rgba(24,29,38,.88); --home-border: rgba(214,205,188,.13); --home-glow: rgba(214,195,162,.12); --home-mint: #a4b7aa; --home-brass: #d6c3a2; }
+        .home-shell { position: relative; z-index: 1; overflow: clip; }
+        .home-shell::before, .home-shell::after { content: ''; position: absolute; border-radius: 999px; filter: blur(90px); pointer-events: none; opacity: .55; z-index: 0; }
+        .home-shell::before { width: 460px; height: 460px; top: 160px; right: -120px; background: rgba(214,195,162,.12); }
+        .home-shell::after { width: 320px; height: 320px; top: 540px; left: -80px; background: rgba(128,152,179,.12); }
+        .home-section { position: relative; z-index: 1; padding: 0 0 88px; }
+        .home-hero { padding: 146px 0 92px; }
+        .home-hero-grid, .home-overview-layout, .home-action-grid, .home-lanes, .home-workflow-grid { display: grid; gap: 1rem; }
+        .home-hero-grid { grid-template-columns: minmax(0,1.15fr) minmax(320px,.85fr); }
+        .home-overview-layout { grid-template-columns: minmax(0,1.1fr) minmax(320px,.9fr); }
+        .home-action-grid, .home-lanes { grid-template-columns: repeat(3, minmax(0,1fr)); }
+        .home-workflow-grid { grid-template-columns: repeat(4, minmax(0,1fr)); }
+        .home-panel, .home-feature-panel, .home-workflow { background: linear-gradient(180deg, rgba(255,255,255,.03), transparent 70%), var(--home-surface); border: 1px solid var(--home-border); border-radius: 28px; box-shadow: 0 24px 64px rgba(5,8,12,.28); backdrop-filter: blur(18px); }
+        .home-panel, .home-feature-panel, .home-workflow { padding: 1.5rem; }
+        .home-eyebrow, .home-kicker { display: inline-flex; align-items: center; gap: .5rem; font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+        .home-eyebrow { padding: .45rem .85rem; margin-bottom: 1.15rem; border: 1px solid rgba(214,195,162,.26); border-radius: 999px; background: rgba(214,195,162,.08); color: var(--home-brass); }
+        .home-eyebrow-dot { width: .55rem; height: .55rem; border-radius: 999px; background: var(--home-mint); box-shadow: none; }
+        .home-kicker { color: var(--home-brass); }
+        .home-hero-title, .home-section-title, .home-card-title { margin: 0; font-family: var(--home-display); letter-spacing: -.05em; background: none; -webkit-text-fill-color: initial; color: var(--text-primary); }
+        .home-hero-title { font-size: clamp(3rem,5.5vw,5.4rem); line-height: .95; }
+        .home-hero-title span { display: block; color: var(--home-brass); }
+        .home-section-title { font-size: clamp(1.9rem,3vw,2.7rem); }
+        .home-card-title { font-size: 1.35rem; }
+        .home-copy { color: #b9b3ab; }
+        .home-hero-copy > .home-copy { max-width: 720px; margin: 1.35rem 0 0; font-size: 1.12rem; line-height: 1.78; }
+        .home-actions { display: flex; flex-wrap: wrap; gap: .9rem; margin-top: 1.7rem; }
+        .home-actions .btn { min-width: 180px; justify-content: center; }
+        .home-inline-note, .home-feature-meta, .home-meta, .home-card-subcopy, .home-card-conf, .home-factor-meta, .home-footer-copy { font-family: var(--font-mono); }
+        .home-inline-note { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: 1.15rem; color: var(--text-muted); font-size: .76rem; }
+        .home-inline-note span, .home-brief-item, .home-lane-item, .home-workflow-step, .home-ops-item { padding: .2rem .5rem; border-radius: 999px; background: rgba(255,255,255,.04); }
+        .home-hero-status { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.8rem; }
+        .home-hero-metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1rem; margin-top: 1.65rem; }
+        .home-hero-metric { padding-top: 1rem; border-top: 1px solid rgba(255,255,255,.07); }
+        .home-hero-metric-value { font-size: clamp(2rem,3vw,3rem); font-weight: 800; font-family: var(--font-mono); line-height: 1; color: var(--text-primary); }
+        .home-hero-metric-value.gradient { background: linear-gradient(135deg, var(--home-brass) 0%, var(--home-mint) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .home-hero-metric-label { margin-top: .7rem; color: var(--text-primary); font-size: .86rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+        .home-hero-metric-meta { margin-top: .35rem; color: var(--text-muted); font-size: .76rem; font-family: var(--font-mono); }
+        .home-ops-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .75rem; margin-top: 1rem; }
+        .home-ops-item { border-radius: 18px; border: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.025); min-height: 152px; padding: 1rem; }
+        .home-ops-item .home-meta { color: var(--text-muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; }
+        .home-ops-item h3 { margin: .6rem 0 0; font-size: 1.05rem; }
+        .home-ops-item p { margin-top: .5rem; font-size: .88rem; line-height: 1.65; color: var(--text-secondary); }
+        .home-section-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-end; margin-bottom: 1.4rem; }
+        .home-action-card, .home-lane-card { padding: 1.4rem; border-radius: 24px; border: 1px solid var(--home-border); background: var(--home-surface); box-shadow: 0 22px 70px rgba(0,0,0,.28); transition: transform var(--transition-base), border-color var(--transition-base); }
+        .home-action-card:hover, .home-lane-card:hover { transform: translateY(-4px); border-color: rgba(214,195,162,.24); }
+        .home-action-top, .home-card-head, .home-card-footer { display: flex; justify-content: space-between; gap: .75rem; align-items: flex-start; }
+        .home-action-card p, .home-lane-card p, .home-workflow p { margin-top: .65rem; font-size: .92rem; line-height: 1.7; color: var(--text-secondary); }
+        .home-action-metric { margin-top: 1.2rem; font-family: var(--font-mono); font-size: 2.15rem; font-weight: 700; line-height: 1; }
+        .home-action-link { display: inline-flex; align-items: center; gap: .45rem; margin-top: 1rem; color: var(--primary-accent-alt); text-decoration: none; font-weight: 700; }
+        .home-overview-board { padding: 1.2rem; border-radius: 28px; border: 1px solid var(--home-border); background: rgba(20,24,32,.96); box-shadow: 0 22px 70px rgba(0,0,0,.3); }
+        .home-overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .9rem; }
+        .home-overview-card { min-height: 220px; padding: 1rem; border-radius: 22px; text-align: left; cursor: pointer; background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 65%), rgba(18,23,31,.9); border: 1px solid rgba(214,205,188,.09); transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast); }
+        .home-overview-card:hover, .home-overview-card.is-selected { transform: translateY(-3px); border-color: rgba(214,195,162,.35); box-shadow: 0 18px 36px rgba(0,0,0,.24); }
+        .home-overview-card.is-selected { background: linear-gradient(145deg, rgba(214,195,162,.12), rgba(128,152,179,.08)), rgba(18,23,31,.93); }
+        .home-overview-card.is-stale { border-color: rgba(209,174,121,.32); }
+        .home-overview-card.is-unavailable { opacity: .72; }
+        .home-overview-card.is-loading { opacity: .7; }
+        .home-card-subcopy { margin-top: .42rem; color: var(--text-muted); font-size: .72rem; }
+        .home-card-price { min-height: 2.5rem; font-size: 2rem; line-height: 1; }
+        .home-card-footer { align-items: flex-end; margin-top: 1.1rem; }
+        .home-card-signal { text-align: right; }
+        .home-card-pup { font-size: .78rem; color: var(--success); }
+        .home-feature-panel .card-header { margin-bottom: 1rem; }
+        .home-feature-panel .card-body { display: flex; flex-direction: column; gap: 1rem; }
+        .home-factor-row { margin-bottom: 1rem; }
+        .home-factor-row:last-child { margin-bottom: 0; }
+        .home-factor-labels { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .4rem; color: var(--text-secondary); font-size: .85rem; }
+        .home-factor-meta { margin-top: .4rem; font-size: .72rem; color: var(--text-muted); }
+        .home-factor-positive { color: var(--success); font-weight: 700; }
+        .home-factor-neutral { color: var(--primary-accent); font-weight: 700; }
+        .home-factor-negative { color: var(--warning); font-weight: 700; }
+        .home-bar-momentum { background: var(--success); } .home-bar-edge { background: var(--home-brass); } .home-bar-liquidity { background: var(--warning); } .home-bar-volatility { background: var(--info); } .home-bar-coverage { background: linear-gradient(90deg, rgba(214,195,162,.95), rgba(164,183,170,.95)); }
+        .home-explanation-box { padding: 1rem; border-radius: 18px; border: 1px solid rgba(214,195,162,.14); background: rgba(214,195,162,.05); }
+        .home-explanation-box .label { margin-bottom: .45rem; color: var(--text-muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+        .home-panel-empty { color: var(--text-muted); font-size: .9rem; padding: 1rem 0; }
+        .home-lane-item, .home-workflow-step { border-radius: 16px; border: 1px solid rgba(148,163,184,.12); background: rgba(255,255,255,.03); padding: .9rem .95rem; }
+        .home-lane-item .label, .home-workflow-step .label { color: var(--text-muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; }
+        .home-lane-item strong { display: block; margin-top: .35rem; color: var(--text-primary); font-size: .96rem; }
+        .home-workflow-step h3 { margin: .5rem 0 0; font-size: 1rem; }
+        .home-footer { padding: 0 0 2rem; }
+        .home-footer-card { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.35rem 1.5rem; border-radius: 24px; border: 1px solid var(--home-border); background: rgba(18,21,28,.72); }
+        @media (max-width: 1200px) { .home-hero-grid, .home-overview-layout, .home-action-grid, .home-lanes { grid-template-columns: 1fr; } .home-workflow-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+        @media (max-width: 900px) { .home-hero { padding-top: 128px; } .home-hero-metrics, .home-ops-grid, .home-overview-grid, .home-workflow-grid { grid-template-columns: 1fr; } .home-section-head, .home-footer-card { align-items: flex-start; flex-direction: column; } }
     </style>
+    <link rel="stylesheet" href="css/home.css">
 </head>
 <body>
     <header class="header">
@@ -211,228 +111,144 @@
                 </button>
                 <ul class="nav-menu" id="navMenu">
                     <li><a href="index.html" class="nav-link">Home</a></li>
-                    <li class="nav-dropdown">
-                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="marketsMenu">Markets</button>
-                        <ul class="nav-dropdown-menu" id="marketsMenu">
-                            <li><a href="crypto.html" class="nav-link">Crypto</a></li>
-                            <li><a href="cn-equity.html" class="nav-link">CN Equity</a></li>
-                            <li><a href="us-equity.html" class="nav-link">US Equity</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-dropdown">
-                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="analysisMenu">Analysis</button>
-                        <ul class="nav-dropdown-menu" id="analysisMenu">
-                            <li><a href="model-explorer.html" class="nav-link">AI Models</a></li>
-                            <li><a href="backtest-lab.html" class="nav-link">Backtest</a></li>
-                            <li><a href="risk-engine.html" class="nav-link">Risk</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-dropdown">
-                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button>
-                        <ul class="nav-dropdown-menu" id="sessionMenu">
-                            <li><a href="session-crypto.html" class="nav-link">Crypto Sessions</a></li>
-                            <li><a href="session-index.html" class="nav-link">A-Share Index Sessions</a></li>
-                            <li><a href="session-index-us.html" class="nav-link">US Index Sessions</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-dropdown">
-                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
-                        <ul class="nav-dropdown-menu" id="communityMenu">
-                            <li><a href="notes.html" class="nav-link">Notes</a></li>
-                            <li><a href="chat.html" class="nav-link">Chat</a></li>
-                        </ul>
-                    </li>
-                    <li class="nav-dropdown">
-                        <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="portfolioMenu">Portfolio</button>
-                        <ul class="nav-dropdown-menu" id="portfolioMenu">
-                            <li><a href="positions.html" class="nav-link">Positions</a></li>
-                            <li><a href="tracking.html" class="nav-link">Tracking</a></li>
-                        </ul>
-                    </li>
+                    <li class="nav-dropdown"><button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="marketsMenu">Markets</button><ul class="nav-dropdown-menu" id="marketsMenu"><li><a href="crypto.html" class="nav-link">Crypto</a></li><li><a href="cn-equity.html" class="nav-link">CN Equity</a></li><li><a href="us-equity.html" class="nav-link">US Equity</a></li></ul></li>
+                    <li class="nav-dropdown"><button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="analysisMenu">Analysis</button><ul class="nav-dropdown-menu" id="analysisMenu"><li><a href="model-explorer.html" class="nav-link">Models</a></li><li><a href="backtest-lab.html" class="nav-link">Backtest</a></li><li><a href="risk-engine.html" class="nav-link">Risk</a></li></ul></li>
+                    <li class="nav-dropdown"><button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="sessionMenu">Session Forecast</button><ul class="nav-dropdown-menu" id="sessionMenu"><li><a href="session-crypto.html" class="nav-link">Crypto Sessions</a></li><li><a href="session-index.html" class="nav-link">A-Share Index Sessions</a></li><li><a href="session-index-us.html" class="nav-link">US Index Sessions</a></li></ul></li>
+                    <li class="nav-dropdown"><button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button><ul class="nav-dropdown-menu" id="communityMenu"><li><a href="notes.html" class="nav-link">Notes</a></li><li><a href="chat.html" class="nav-link">Chat</a></li></ul></li>
+                    <li class="nav-dropdown"><button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="portfolioMenu">Portfolio</button><ul class="nav-dropdown-menu" id="portfolioMenu"><li><a href="positions.html" class="nav-link">Positions</a></li><li><a href="tracking.html" class="nav-link">Tracking</a></li></ul></li>
                 </ul>
                 <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
             </nav>
-            <div class="nav-actions">
-                <a href="login.html" class="btn btn-secondary btn-sm">Login</a>
-                <a href="register.html" class="btn btn-primary btn-sm">Sign Up</a>
-            </div>
+            <div class="nav-actions"><a href="login.html" class="btn btn-secondary btn-sm">Login</a><a href="register.html" class="btn btn-primary btn-sm">Sign Up</a></div>
         </div>
     </header>
-
-    <section style="padding: 160px 0 80px; position: relative; z-index: 1;">
-        <div class="container">
-            <div style="max-width: 880px;">
-                <div style="margin-bottom: 1rem;">
-                    <span class="status-badge model-tag">LIVE MULTI-MARKET FEED</span>
-                </div>
-                <h1 style="font-size: 4rem; margin-bottom: 1.5rem; line-height: 1.1;">
-                    AI-Powered<br>
-                    <span style="color: var(--primary-accent);">Quantitative Trading</span>
-                </h1>
-                <p style="font-size: 1.25rem; color: var(--text-secondary); margin-bottom: 2rem; max-width: 640px;">
-                    Live cross-market tracking with actionable signals, factor explanations, and real-time market snapshots for crypto, CN A-shares, and US equities.
-                </p>
-                <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-                    <a href="model-explorer.html" class="btn btn-primary btn-lg">Explore AI Models</a>
-                    <a href="backtest-lab.html" class="btn btn-secondary btn-lg">Backtest Lab</a>
-                </div>
-                <div class="home-hero-status">
-                    <span class="status-badge success" id="homeStatusBadge">LIVE</span>
-                    <span class="status-badge info" id="homeRefreshBadge">Refresh 10s</span>
-                    <span class="status-badge info" id="homeUpdatedBadge">Updated --</span>
-                    <span class="status-badge info" id="homeActionBadge">Latest Action --</span>
-                </div>
-                <div class="home-hero-metrics">
-                    <div class="home-hero-metric">
-                        <div class="home-hero-metric-value gradient" id="heroCoverageValue">--</div>
-                        <div class="home-hero-metric-label">Live Coverage</div>
-                        <div class="home-hero-metric-meta" id="heroCoverageMeta">Loading live coverage...</div>
-                    </div>
-                    <div class="home-hero-metric">
-                        <div class="home-hero-metric-value" id="heroAssetsValue">--</div>
-                        <div class="home-hero-metric-label">Assets Covered</div>
-                        <div class="home-hero-metric-meta" id="heroAssetsMeta">Loading asset counts...</div>
-                    </div>
-                    <div class="home-hero-metric">
-                        <div class="home-hero-metric-value" id="heroSignalsValue">--</div>
-                        <div class="home-hero-metric-label">Actionable Signals</div>
-                        <div class="home-hero-metric-meta" id="heroSignalsMeta">Loading live opportunity counts...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section style="padding: 80px 0; position: relative; z-index: 1;">
-        <div class="container">
-            <div style="margin-bottom: 3rem;">
-                <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Core Features</h2>
-                <p style="color: var(--text-muted);">Production-grade ML pipeline with real-time monitoring</p>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-                <div class="card">
-                    <div class="card-body">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-                            <h3 style="font-size: 1.25rem; font-weight: 700;">Multi-Task Forecasting</h3>
-                            <span class="status-badge model-tag">LSTM+Attention</span>
+    <main class="home-shell">
+        <section class="home-section home-hero">
+            <div class="container">
+                <div class="home-hero-grid">
+                    <div class="home-panel home-hero-copy">
+                        <div class="home-eyebrow"><span class="home-eyebrow-dot"></span><span>Live Multi-Market Desk</span></div>
+                        <h1 class="home-hero-title">Cross-market<span>signal desk</span></h1>
+                        <p class="home-copy">Track crypto, CN A-shares, and US equities from one operating view with ranked signals, model conviction, and fresh market context built for fast decision-making.</p>
+                        <div class="home-actions"><a href="model-explorer.html" class="btn btn-primary btn-lg">Inspect Models</a><a href="tracking.html" class="btn btn-secondary btn-lg">Open Tracking</a></div>
+                        <div class="home-inline-note"><span>Signal-first workflow</span><span>Live factor panel</span><span>Execution-oriented market view</span></div>
+                        <div class="home-hero-status"><span class="status-badge success" id="homeStatusBadge">LIVE</span><span class="status-badge info" id="homeRefreshBadge">Refresh 10s</span><span class="status-badge info" id="homeUpdatedBadge">Updated --</span><span class="status-badge info" id="homeActionBadge">Latest Action --</span></div>
+                        <div class="home-hero-metrics">
+                            <div class="home-hero-metric"><div class="home-hero-metric-value gradient" id="heroCoverageValue">--</div><div class="home-hero-metric-label">Live Coverage</div><div class="home-hero-metric-meta" id="heroCoverageMeta">Loading live coverage...</div></div>
+                            <div class="home-hero-metric"><div class="home-hero-metric-value" id="heroAssetsValue">--</div><div class="home-hero-metric-label">Assets Covered</div><div class="home-hero-metric-meta" id="heroAssetsMeta">Loading asset counts...</div></div>
+                            <div class="home-hero-metric"><div class="home-hero-metric-value" id="heroSignalsValue">--</div><div class="home-hero-metric-label">Actionable Signals</div><div class="home-hero-metric-meta" id="heroSignalsMeta">Loading live opportunity counts...</div></div>
                         </div>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Direction probability, start-window prediction, and magnitude intervals across multiple horizons.
-                        </p>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge info">Hourly</span>
-                            <span class="status-badge info">Daily</span>
-                            <span class="status-badge info">Walk-Forward</span>
+                    </div>
+                    <div class="home-panel home-stage-panel">
+                        <div class="home-stage-top">
+                            <div>
+                                <div class="home-kicker">Signal Theatre</div>
+                                <div class="home-stage-label">Live desk composition</div>
+                            </div>
+                            <div class="home-stage-chip">Conviction Engine</div>
+                        </div>
+                        <div class="home-stage-canvas">
+                            <div class="home-stage-gridline a"></div>
+                            <div class="home-stage-gridline b"></div>
+                            <div class="home-stage-gridline c"></div>
+                            <div class="home-stage-ring a"></div>
+                            <div class="home-stage-ring b"></div>
+                            <div class="home-stage-center">
+                                <div class="home-stage-heading">Desk Coverage</div>
+                                <div class="home-stage-value gradient" id="showcaseCoverageValue">--</div>
+                                <div class="home-stage-subtitle" id="showcaseUpdatedValue">Updated --</div>
+                                <div class="home-stage-divider"></div>
+                                <div class="home-stage-mini-grid">
+                                    <div class="home-stage-mini"><span>Signals</span><strong id="showcaseSignalsValue">--</strong></div>
+                                    <div class="home-stage-mini"><span>Assets</span><strong id="showcaseAssetsValue">--</strong></div>
+                                </div>
+                            </div>
+                            <div class="home-stage-orbit a"><div class="label">Crypto lane</div><strong>24/7 tape</strong><p>Momentum and session handoff bias.</p></div>
+                            <div class="home-stage-orbit b"><div class="label">CN lane</div><strong>Selective breadth</strong><p>Composite signal with policy-sensitive context.</p></div>
+                            <div class="home-stage-orbit c"><div class="label">US lane</div><strong>Follow-through</strong><p>Leadership clusters and composite trend.</p></div>
+                            <div class="home-stage-orbit d"><div class="label">Model lens</div><strong>Drivers on deck</strong><p>Conviction, disagreement, and explanation depth.</p></div>
+                        </div>
+                        <div class="home-stage-footer">
+                            <div class="home-stage-note">
+                                <div class="home-stage-label">Reading order</div>
+                                <p>Read the board first, inspect conviction second, and move into tracking only after the market context and drivers align.</p>
+                            </div>
+                            <div class="home-stage-stats">
+                                <div class="home-stage-label">Live refresh</div>
+                                <strong id="showcaseRefreshValue">10s</strong>
+                                <p>Rolling desk pulse with model-aware context.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="card">
-                    <div class="card-body">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-                            <h3 style="font-size: 1.25rem; font-weight: 700;">Drift Detection</h3>
-                            <span class="status-badge model-tag">PSI Monitor</span>
-                        </div>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Live model-health monitoring with stability checks, stale detection, and automatic retirement guards.
-                        </p>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge warning">Live Guards</span>
-                            <span class="status-badge success">Data Fresh</span>
-                            <span class="status-badge info">Auto Refresh</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-body">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-                            <h3 style="font-size: 1.25rem; font-weight: 700;">Explainable AI</h3>
-                            <span class="status-badge model-tag">Live Factors</span>
-                        </div>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Factor importance, action rationale, and confidence-driven explanations for every live card on the page.
-                        </p>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge info">Feature Panel</span>
-                            <span class="status-badge info">Reason Codes</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-body">
-                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-                            <h3 style="font-size: 1.25rem; font-weight: 700;">Policy Engine</h3>
-                            <span class="status-badge model-tag">Execution Lens</span>
-                        </div>
-                        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
-                            Live action ranking for strong buy, buy, hold, and reduce signals across crypto, CN, and US markets.
-                        </p>
-                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                            <span class="status-badge success">Dynamic Ranking</span>
-                            <span class="status-badge info">Live Signals</span>
-                        </div>
+                <div class="home-ribbon">
+                    <div class="home-ribbon-track" id="heroRibbonItems">
+                        <span><em>Desk feed</em> <strong>Loading</strong></span>
+                        <span><em>Coverage</em> <strong>Waiting</strong></span>
+                        <span><em>Signals</em> <strong>Waiting</strong></span>
+                        <span><em>Leaders</em> <strong>Waiting</strong></span>
+                        <span><em>Desk feed</em> <strong>Loading</strong></span>
+                        <span><em>Coverage</em> <strong>Waiting</strong></span>
+                        <span><em>Signals</em> <strong>Waiting</strong></span>
+                        <span><em>Leaders</em> <strong>Waiting</strong></span>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
-
-    <section style="padding: 80px 0; position: relative; z-index: 1;">
-        <div class="container">
-            <div style="margin-bottom: 3rem;">
-                <h2 style="font-size: 2.5rem; margin-bottom: 0.5rem;">Market Overview</h2>
-                <p style="color: var(--text-muted);">Live snapshots for fixed benchmark markets plus CN and US composite leaders.</p>
-            </div>
-            <div class="home-overview-layout">
-                <div class="home-overview-grid" id="marketOverviewGrid"></div>
-                <div class="card home-feature-panel">
-                    <div class="card-header">
+        </section>
+        <section class="home-section">
+            <div class="container">
+                <div class="home-section-head"><div><div class="home-kicker">Action Board</div><h2 class="home-section-title">Three ways to start the day</h2><p class="home-copy">Move from signal discovery to inspection and portfolio follow-through without bouncing between disconnected pages.</p></div></div>
+                <div class="home-action-grid">
+                    <article class="home-action-card is-featured">
                         <div>
-                            <h3 class="card-title" id="featurePanelTitle">Feature Importance</h3>
-                            <div class="home-feature-meta" id="featurePanelMeta">Waiting for live selection...</div>
+                            <div class="home-action-top"><span class="status-badge info">Opportunity Scan</span><span class="status-badge success">Live</span></div>
+                            <h3 class="home-card-title" style="margin-top:1rem;">Find where the tape is actually moving</h3>
+                            <p>Use the market matrix to isolate the strongest action across benchmark crypto, CN, and US leaders, then follow the driver panel before you commit attention.</p>
+                            <div class="home-action-metric display" id="actionBoardSignalsValue">--</div>
+                            <div class="home-meta" id="actionBoardSignalsMeta">Waiting for live opportunity counts...</div>
+                            <div class="home-action-highlight">
+                                <div class="tile"><span>Fastest move</span><strong id="actionBoardFastMove">--</strong></div>
+                                <div class="tile"><span>Desk bias</span><strong id="actionBoardDeskBias">Loading</strong></div>
+                            </div>
                         </div>
-                        <span class="status-badge model-tag" id="featurePanelBadge">Live Factors</span>
-                    </div>
-                    <div class="card-body">
-                        <div id="featurePanelList"></div>
-                        <div class="home-explanation-box">
-                            <div class="label">Model Explanation</div>
-                            <div style="font-size: 0.9rem; color: var(--text-primary); line-height: 1.6;" id="featurePanelExplanation">Waiting for live explanation...</div>
-                        </div>
+                        <a class="home-action-link" href="#market-overview">Open market matrix</a>
+                    </article>
+                    <div class="home-action-stack">
+                        <article class="home-action-card"><div class="home-action-top"><span class="status-badge model-tag">Model Lab</span><span class="status-badge info">Deep Dive</span></div><h3 class="home-card-title" style="margin-top:1rem;">Inspect model conviction</h3><p>Review horizon logic, factor weights, and explanation detail before turning a signal into a view.</p><div class="home-action-metric">4</div><div class="home-meta">LSTM, Transformer, LightGBM, TCN</div><a class="home-action-link" href="model-explorer.html">Open models</a></article>
+                        <article class="home-action-card"><div class="home-action-top"><span class="status-badge warning">Execution</span><span class="status-badge info">Portfolio</span></div><h3 class="home-card-title" style="margin-top:1rem;">Carry context into tracking</h3><p>Bring the same market read into ranking, journaling, and follow-up so the desk stays useful after the first decision.</p><div class="home-action-metric" id="actionBoardCoverageValue">--</div><div class="home-meta" id="actionBoardCoverageMeta">Loading live desk coverage...</div><a class="home-action-link" href="tracking.html">Open tracking</a></article>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
-
-    <div class="tech-stack-bar" style="position: relative; z-index: 1;">
-        <div class="container">
-            <div class="tech-stack-items">
-                <div class="tech-item">PyTorch</div>
-                <div class="tech-item">TensorFlow</div>
-                <div class="tech-item">LightGBM</div>
-                <div class="tech-item">Kafka</div>
-                <div class="tech-item">WebSocket</div>
-                <div class="tech-item">Redis</div>
-                <div class="tech-item">PostgreSQL</div>
-                <div class="tech-item">Docker</div>
-            </div>
-        </div>
-    </div>
-
-    <footer style="background: rgba(5, 10, 26, 0.5); border-top: 1px solid var(--border-default); padding: 2rem 0; position: relative; z-index: 1;">
-        <div class="container">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-                <div class="logo">
-                    <span class="logo-icon">&#9671;</span>
-                    <span class="logo-text">StockandCrypto</span>
+        </section>
+        <section class="home-section" id="market-overview">
+            <div class="container">
+                <div class="home-section-head"><div><div class="home-kicker">Market Matrix</div><h2 class="home-section-title">Live board with conviction on the side</h2><p class="home-copy">Select a market card to inspect the signal drivers, model explanation, and confidence context behind the move.</p></div></div>
+                <div class="home-overview-layout">
+                    <div class="home-overview-board"><div class="home-overview-grid" id="marketOverviewGrid"></div></div>
+                    <div class="card home-feature-panel">
+                        <div class="card-header"><div><h3 class="card-title" id="featurePanelTitle">Signal Drivers</h3><div class="home-feature-meta" id="featurePanelMeta">Choose a live card to inspect its conviction profile.</div></div><span class="status-badge model-tag" id="featurePanelBadge">Live Drivers</span></div>
+                        <div class="card-body"><div id="featurePanelList"></div><div class="home-explanation-box"><div class="label">Desk Interpretation</div><div style="font-size:.9rem;color:var(--text-primary);line-height:1.7;" id="featurePanelExplanation">Waiting for live interpretation...</div></div></div>
+                    </div>
                 </div>
-                <p style="color: var(--text-muted); font-size: 0.85rem;" class="mono" id="homeFooterCopy">
-                    LIVE SNAPSHOT | Auto-refresh 10s | Not Investment Advice
-                </p>
             </div>
-        </div>
-    </footer>
-
+        </section>
+        <section class="home-section">
+            <div class="container">
+                <div class="home-section-head"><div><div class="home-kicker">Coverage Lanes</div><h2 class="home-section-title">Three markets, one operating rhythm</h2><p class="home-copy">Each lane has its own structure, but the desk keeps the same signal language across all of them.</p></div></div>
+                <div class="home-lanes">
+                    <article class="home-lane-card"><span class="status-badge info">Crypto</span><h3 class="home-card-title" style="margin-top:.85rem;">24/7 benchmark tape</h3><p>Use BTC, ETH, and SOL as the primary strip, then move into session analysis when the tape starts rotating.</p><div class="home-lane-item"><div class="label">Best for</div><strong>Momentum shifts and session handoffs</strong></div><div class="home-lane-item" style="margin-top:.75rem;"><div class="label">Primary view</div><strong>Signal ranking + session forecast</strong></div><a href="crypto.html" class="btn btn-secondary" style="margin-top:1rem;">Open Crypto</a></article>
+                    <article class="home-lane-card"><span class="status-badge warning">CN Equity</span><h3 class="home-card-title" style="margin-top:.85rem;">Policy-sensitive breadth</h3><p>Focus on composite leadership, breadth concentration, and how selective the market is under current policy conditions.</p><div class="home-lane-item"><div class="label">Best for</div><strong>Index-led strength and stock selection</strong></div><div class="home-lane-item" style="margin-top:.75rem;"><div class="label">Primary view</div><strong>Composite signal + breadth read</strong></div><a href="cn-equity.html" class="btn btn-secondary" style="margin-top:1rem;">Open CN Equity</a></article>
+                    <article class="home-lane-card"><span class="status-badge success">US Equity</span><h3 class="home-card-title" style="margin-top:.85rem;">Growth, quality, and risk tone</h3><p>Watch composite leaders and broad risk tone, then move into tracking when names start clustering around the same direction.</p><div class="home-lane-item"><div class="label">Best for</div><strong>Composite trend + follow-through names</strong></div><div class="home-lane-item" style="margin-top:.75rem;"><div class="label">Primary view</div><strong>Market matrix + tracking list</strong></div><a href="us-equity.html" class="btn btn-secondary" style="margin-top:1rem;">Open US Equity</a></article>
+                </div>
+            </div>
+        </section>
+        <section class="home-section">
+            <div class="container">
+                <div class="home-workflow"><div class="home-kicker">Research To Execution</div><h2 class="home-section-title">One workflow from signal to follow-up</h2><p class="home-copy">The homepage is only the front edge. The rest of the product is arranged as a working chain instead of disconnected features.</p><div class="home-workflow-grid"><div class="home-workflow-step"><div class="label">01</div><h3>Scan</h3><p>Start on the live board and identify the strongest market signal or the most interesting mismatch.</p></div><div class="home-workflow-step"><div class="label">02</div><h3>Inspect</h3><p>Move into model detail, factor breakdown, and explanation depth before turning a signal into a view.</p></div><div class="home-workflow-step"><div class="label">03</div><h3>Validate</h3><p>Use backtest and risk pages to pressure-test the setup instead of acting off a single snapshot.</p></div><div class="home-workflow-step"><div class="label">04</div><h3>Track</h3><p>Carry the idea into positions, notes, and tracking so the desk remains useful after the initial decision.</p></div></div></div>
+            </div>
+        </section>
+        <footer class="home-footer"><div class="container"><div class="home-footer-card"><div class="logo"><span class="logo-icon">&#9671;</span><span class="logo-text">StockandCrypto</span></div><p class="home-footer-copy mono" id="homeFooterCopy">LIVE SNAPSHOT | Auto-refresh 10s | Not Investment Advice</p></div></div></footer>
+    </main>
     <script src="js/auth.js"></script>
     <script src="js/nav.js"></script>
     <script src="js/utils.js"></script>
@@ -440,8 +256,3 @@
     <script src="js/home.js"></script>
 </body>
 </html>
-
-
-
-
-

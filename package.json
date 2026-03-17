@@ -10,6 +10,10 @@
     "start": "node unified-server.js",
     "position-server": "node server/position-server.js",
     "start:all": "concurrently \"npm start\" \"npm run position-server\"",
+    "public:local": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Start-LocalPublicSite.ps1 -ModelMode live -DownloadCloudflared",
+    "public:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Stop-LocalPublicStack.ps1",
+    "public:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Get-LocalPublicStatus.ps1",
+    "cloudflared:get": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Get-Cloudflared.ps1 -DownloadIfMissing",
     "postinstall": "npm rebuild better-sqlite3 || true"
   },
   "dependencies": {

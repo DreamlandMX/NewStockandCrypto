@@ -3,6 +3,62 @@
 // ========================================
 (function initSiteNavigationModule() {
     const MOBILE_BREAKPOINT = 991;
+    const NAV_ITEMS = [
+        { type: 'link', href: 'index.html', label: 'Home' },
+        {
+            type: 'dropdown',
+            label: 'Markets',
+            items: [
+                { href: 'crypto.html', title: 'Crypto', description: '24/7 benchmark tape' },
+                { href: 'cn-equity.html', title: 'CN Equity', description: 'A-share breadth and leaders' },
+                { href: 'us-equity.html', title: 'US Equity', description: 'Composite trend and follow-through' }
+            ]
+        },
+        {
+            type: 'dropdown',
+            label: 'Research',
+            items: [
+                { href: 'model-explorer.html', title: 'Models', description: 'Conviction, horizons, and drivers' },
+                { href: 'backtest-lab.html', title: 'Backtest', description: 'Validate ideas across regimes' },
+                { href: 'risk-engine.html', title: 'Risk', description: 'Position sizing and guardrails' }
+            ]
+        },
+        {
+            type: 'dropdown',
+            label: 'Sessions',
+            items: [
+                { href: 'session-crypto.html', title: 'Crypto Sessions', description: 'Asia, Europe, and US handoffs' },
+                { href: 'session-index.html', title: 'A-Share Sessions', description: 'Session-based index framing' },
+                { href: 'session-index-us.html', title: 'US Sessions', description: 'Index rhythm through the US day' }
+            ]
+        },
+        {
+            type: 'dropdown',
+            label: 'Community',
+            items: [
+                { href: 'notes.html', title: 'Ideas Feed', description: 'Published trade ideas and notes' },
+                { href: 'chat.html', title: 'Market Lounges', description: 'Live discussion and desk chat' }
+            ]
+        },
+        {
+            type: 'dropdown',
+            label: 'Portfolio',
+            items: [
+                { href: 'tracking.html', title: 'Tracking', description: 'Selection, ranking, and monitoring' },
+                { href: 'positions.html', title: 'Positions', description: 'Journaled trades and exposure' },
+                { href: 'execution.html', title: 'Execution', description: 'Decision packets and paper flow' }
+            ]
+        }
+    ];
+
+    const PAGE_ALIASES = {
+        'login.html': 'index.html',
+        'register.html': 'index.html',
+        'note-detail.html': 'notes.html',
+        'note-view.html': 'notes.html',
+        'dm.html': 'chat.html',
+        'profile.html': 'positions.html'
+    };
 
     function isMobileViewport() {
         return window.innerWidth <= MOBILE_BREAKPOINT;
@@ -10,7 +66,80 @@
 
     function getCurrentPage() {
         const file = window.location.pathname.split('/').pop();
-        return file || 'index.html';
+        const currentPage = file || 'index.html';
+        return PAGE_ALIASES[currentPage] || currentPage;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function buildMenuMarkup() {
+        return NAV_ITEMS.map((item) => {
+            if (item.type === 'link') {
+                return `<li><a href="${item.href}" class="nav-link" data-nav-page="${item.href}">${item.label}</a></li>`;
+            }
+
+            const menuId = `${item.label.toLowerCase().replace(/\s+/g, '-')}-menu`;
+            const itemsMarkup = item.items.map((entry) => `
+                <li>
+                    <a href="${entry.href}" class="nav-link nav-submenu-link" data-nav-page="${entry.href}">
+                        <span class="nav-link-title">${escapeHtml(entry.title)}</span>
+                        <span class="nav-link-desc">${escapeHtml(entry.description)}</span>
+                    </a>
+                </li>
+            `).join('');
+
+            return `
+                <li class="nav-dropdown" data-nav-group="${item.label}">
+                    <button class="nav-link nav-dropdown-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${menuId}">
+                        ${escapeHtml(item.label)}
+                    </button>
+                    <ul class="nav-dropdown-menu" id="${menuId}">
+                        ${itemsMarkup}
+                    </ul>
+                </li>
+            `;
+        }).join('');
+    }
+
+    function ensureNavScaffold(nav) {
+        nav.innerHTML = '';
+
+        const navToggle = document.createElement('button');
+        navToggle.type = 'button';
+        navToggle.id = 'navToggle';
+        navToggle.className = 'nav-toggle';
+        navToggle.setAttribute('aria-label', 'Toggle navigation');
+        navToggle.setAttribute('aria-controls', 'navMenu');
+        navToggle.setAttribute('aria-expanded', 'false');
+        navToggle.innerHTML = '<span></span><span></span><span></span>';
+
+        const navMenu = document.createElement('ul');
+        navMenu.id = 'navMenu';
+        navMenu.classList.add('nav-menu');
+        navMenu.innerHTML = buildMenuMarkup();
+
+        const navBackdrop = document.createElement('button');
+        navBackdrop.type = 'button';
+        navBackdrop.className = 'nav-backdrop';
+        navBackdrop.setAttribute('aria-label', 'Close navigation');
+
+        nav.appendChild(navToggle);
+        nav.appendChild(navMenu);
+        nav.appendChild(navBackdrop);
+
+        const logoIcon = document.querySelector('.logo-icon');
+        if (logoIcon) {
+            logoIcon.textContent = '◇';
+        }
+
+        return { navMenu, navToggle, navBackdrop };
     }
 
     const SiteNav = {
@@ -26,20 +155,35 @@
                 return;
             }
 
-            const navMenu = nav.querySelector('#navMenu, .nav-menu');
-            const navToggle = nav.querySelector('#navToggle, .nav-toggle');
-            if (!navMenu || !navToggle) {
-                return;
-            }
-
-            const navBackdrop = nav.querySelector('.nav-backdrop');
+            const { navMenu, navToggle, navBackdrop } = ensureNavScaffold(nav);
             const dropdowns = Array.from(navMenu.querySelectorAll('.nav-dropdown'));
+            const closeTimers = new WeakMap();
+
+            const clearCloseTimer = (dropdown) => {
+                const timer = closeTimers.get(dropdown);
+                if (timer) {
+                    window.clearTimeout(timer);
+                    closeTimers.delete(dropdown);
+                }
+            };
+
+            const scheduleClose = (dropdown, toggle, delay = 180) => {
+                clearCloseTimer(dropdown);
+                const timer = window.setTimeout(() => {
+                    dropdown.classList.remove('open');
+                    toggle.setAttribute('aria-expanded', 'false');
+                    closeTimers.delete(dropdown);
+                }, delay);
+                closeTimers.set(dropdown, timer);
+            };
 
             const closeDropdowns = (keepOpen = null) => {
                 dropdowns.forEach((dropdown) => {
                     if (keepOpen && keepOpen === dropdown) {
+                        clearCloseTimer(dropdown);
                         return;
                     }
+                    clearCloseTimer(dropdown);
                     dropdown.classList.remove('open');
                     const toggle = dropdown.querySelector('.nav-dropdown-toggle');
                     if (toggle) {
@@ -73,9 +217,7 @@
                 closeDropdowns();
             });
 
-            if (navBackdrop) {
-                navBackdrop.addEventListener('click', closeMobileMenu);
-            }
+            navBackdrop.addEventListener('click', closeMobileMenu);
 
             dropdowns.forEach((dropdown) => {
                 const toggle = dropdown.querySelector('.nav-dropdown-toggle');
@@ -91,10 +233,31 @@
                     toggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
                 });
 
+                toggle.addEventListener('mouseenter', () => {
+                    if (isMobileViewport()) {
+                        return;
+                    }
+                    clearCloseTimer(dropdown);
+                    closeDropdowns(dropdown);
+                    dropdown.classList.add('open');
+                    toggle.setAttribute('aria-expanded', 'true');
+                });
+
                 toggle.addEventListener('focus', () => {
                     if (isMobileViewport()) {
                         return;
                     }
+                    clearCloseTimer(dropdown);
+                    closeDropdowns(dropdown);
+                    dropdown.classList.add('open');
+                    toggle.setAttribute('aria-expanded', 'true');
+                });
+
+                dropdown.addEventListener('mouseenter', () => {
+                    if (isMobileViewport()) {
+                        return;
+                    }
+                    clearCloseTimer(dropdown);
                     closeDropdowns(dropdown);
                     dropdown.classList.add('open');
                     toggle.setAttribute('aria-expanded', 'true');
@@ -113,6 +276,13 @@
                     }
                 });
 
+                dropdown.addEventListener('mouseleave', () => {
+                    if (isMobileViewport()) {
+                        return;
+                    }
+                    scheduleClose(dropdown, toggle);
+                });
+
                 dropdown.addEventListener('focusout', (event) => {
                     if (isMobileViewport()) {
                         return;
@@ -120,8 +290,7 @@
                     if (dropdown.contains(event.relatedTarget)) {
                         return;
                     }
-                    dropdown.classList.remove('open');
-                    toggle.setAttribute('aria-expanded', 'false');
+                    scheduleClose(dropdown, toggle, 120);
                 });
             });
 
@@ -164,7 +333,7 @@
                 toggle.classList.remove('active');
             });
 
-            const activeLink = navMenu.querySelector(`.nav-link[href="${currentPage}"]`);
+            const activeLink = navMenu.querySelector(`.nav-link[data-nav-page="${currentPage}"]`);
             if (activeLink) {
                 activeLink.classList.add('active');
                 const parentDropdown = activeLink.closest('.nav-dropdown');

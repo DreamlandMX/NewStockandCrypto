@@ -37,6 +37,7 @@ Desktop.ini
 dist/
 build/
 .cache/
+.local-tools/
 *.egg-info/
 .eggs/
 

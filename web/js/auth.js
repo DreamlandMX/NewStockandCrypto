@@ -57,6 +57,12 @@
             || 'User';
     }
 
+    function getCompactDisplayName(maxLength = 14) {
+        const displayName = getDisplayName();
+        if (!displayName) return 'User';
+        return displayName.length > maxLength ? `${displayName.slice(0, maxLength - 1)}...` : displayName;
+    }
+
     function notify(type, message) {
         if (window.showToast?.[type]) {
             window.showToast[type](message, 2800);
@@ -174,10 +180,11 @@
         if (!containers.length) return;
 
         const displayName = escapeHtml(getDisplayName());
+        const compactDisplayName = escapeHtml(getCompactDisplayName());
         containers.forEach((container) => {
             if (authState.user) {
                 container.innerHTML = `
-                    <a href="profile.html" class="btn btn-secondary btn-sm" id="profileBtn">Hi, ${displayName}</a>
+                    <a href="profile.html" class="btn btn-secondary btn-sm" id="profileBtn" title="${displayName}">Hi, ${compactDisplayName}</a>
                     <button type="button" class="btn btn-primary btn-sm" id="logoutBtn" data-auth-logout>Logout</button>
                 `;
                 return;
@@ -185,8 +192,8 @@
 
             if (authState.legacyMismatch) {
                 container.innerHTML = `
-                    <span class="btn btn-secondary btn-sm" style="pointer-events:none; opacity:0.95;" id="profileBtn">Hi, ${displayName} (Legacy)</span>
-                    <a href="login.html?reason=legacy-session" class="btn btn-secondary btn-sm" id="loginBtn">Upgrade Sign In</a>
+                    <span class="btn btn-secondary btn-sm" style="pointer-events:none; opacity:0.95;" id="profileBtn" title="${displayName} (Legacy)">Legacy: ${compactDisplayName}</span>
+                    <a href="login.html?reason=legacy-session" class="btn btn-secondary btn-sm" id="loginBtn">Upgrade</a>
                     <button type="button" class="btn btn-primary btn-sm" id="logoutBtn" data-auth-logout>Logout</button>
                 `;
                 return;

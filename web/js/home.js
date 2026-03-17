@@ -25,6 +25,11 @@ function cacheHomeDom() {
         'heroCoverageValue', 'heroCoverageMeta',
         'heroAssetsValue', 'heroAssetsMeta',
         'heroSignalsValue', 'heroSignalsMeta',
+        'showcaseCoverageValue', 'showcaseSignalsValue', 'showcaseAssetsValue', 'showcaseUpdatedValue', 'showcaseRefreshValue',
+        'actionBoardSignalsValue', 'actionBoardSignalsMeta',
+        'actionBoardCoverageValue', 'actionBoardCoverageMeta',
+        'actionBoardFastMove', 'actionBoardDeskBias',
+        'heroRibbonItems',
         'marketOverviewGrid',
         'featurePanelBadge', 'featurePanelTitle', 'featurePanelMeta', 'featurePanelList', 'featurePanelExplanation',
         'homeFooterCopy'
@@ -102,6 +107,7 @@ function syncSelectedCard() {
 function renderHome() {
     renderHeroStatus();
     renderHeroMetrics();
+    renderHeroRibbon();
     renderOverviewCards();
     renderFeaturePanel();
     renderFooter();
@@ -125,6 +131,14 @@ function renderHomeLoading() {
     }
     if (homeDom.featurePanelList) {
         homeDom.featurePanelList.innerHTML = '<div class="home-panel-empty">Waiting for live factor payload...</div>';
+    }
+    if (homeDom.heroRibbonItems) {
+        homeDom.heroRibbonItems.innerHTML = Array.from({ length: 2 }).map(() => `
+            <span><em>Desk feed</em> <strong>Loading</strong></span>
+            <span><em>Coverage</em> <strong>Waiting</strong></span>
+            <span><em>Signals</em> <strong>Waiting</strong></span>
+            <span><em>Leaders</em> <strong>Waiting</strong></span>
+        `).join('');
     }
 }
 
@@ -150,6 +164,55 @@ function renderHeroMetrics() {
 
     homeDom.heroSignalsValue.textContent = utils.formatNumber(hero.actionableSignals || 0, 0);
     homeDom.heroSignalsMeta.textContent = `${utils.formatNumber(hero.strongBuyCount || 0, 0)} strong buy | ${utils.formatNumber(hero.buyCount || 0, 0)} buy`;
+
+    if (homeDom.showcaseCoverageValue) {
+        homeDom.showcaseCoverageValue.textContent = `${Number(hero.liveCoveragePct || 0).toFixed(1)}%`;
+    }
+    if (homeDom.showcaseSignalsValue) {
+        homeDom.showcaseSignalsValue.textContent = utils.formatNumber(hero.actionableSignals || 0, 0);
+    }
+    if (homeDom.showcaseAssetsValue) {
+        homeDom.showcaseAssetsValue.textContent = utils.formatNumber(hero.assetsCovered || 0, 0);
+    }
+    if (homeDom.showcaseUpdatedValue) {
+        homeDom.showcaseUpdatedValue.textContent = `Updated ${formatUtc(homeState.payload?.meta?.lastUpdatedAt)}`;
+    }
+    if (homeDom.showcaseRefreshValue) {
+        homeDom.showcaseRefreshValue.textContent = `${homeState.payload?.meta?.refreshIntervalSec || 10}s`;
+    }
+
+    if (homeDom.actionBoardSignalsValue) {
+        homeDom.actionBoardSignalsValue.textContent = utils.formatNumber(hero.actionableSignals || 0, 0);
+    }
+    if (homeDom.actionBoardSignalsMeta) {
+        homeDom.actionBoardSignalsMeta.textContent = `${utils.formatNumber(hero.strongBuyCount || 0, 0)} strong buy | ${utils.formatNumber(hero.buyCount || 0, 0)} buy`;
+    }
+    if (homeDom.actionBoardCoverageValue) {
+        homeDom.actionBoardCoverageValue.textContent = `${Number(hero.liveCoveragePct || 0).toFixed(1)}%`;
+    }
+    if (homeDom.actionBoardCoverageMeta) {
+        homeDom.actionBoardCoverageMeta.textContent = `${utils.formatNumber(hero.assetsCovered || 0, 0)} assets tracked across three market lanes`;
+    }
+    if (homeDom.actionBoardFastMove) {
+        homeDom.actionBoardFastMove.textContent = hero.strongBuyCount ? `${utils.formatNumber(hero.strongBuyCount, 0)} strong buy` : 'Scanning';
+    }
+    if (homeDom.actionBoardDeskBias) {
+        homeDom.actionBoardDeskBias.textContent = hero.buyCount ? `${utils.formatNumber(hero.buyCount, 0)} buy` : 'Balanced';
+    }
+}
+
+function renderHeroRibbon() {
+    if (!homeDom.heroRibbonItems) return;
+    const hero = homeState.payload?.hero || {};
+    const cards = (homeState.payload?.overview?.cards || []).filter((card) => !card.unavailable).slice(0, 3);
+    const stale = homeState.payload?.meta?.stale ? 'Stale snapshot' : 'Live desk';
+    const items = [
+        `<span><em>${stale}</em> <strong>${Number(hero.liveCoveragePct || 0).toFixed(1)}% coverage</strong></span>`,
+        `<span><em>Signals</em> <strong>${utils.formatNumber(hero.actionableSignals || 0, 0)} actionable</strong></span>`,
+        `<span><em>Assets</em> <strong>${utils.formatNumber(hero.assetsCovered || 0, 0)} tracked</strong></span>`,
+        ...cards.map((card) => `<span><em>${escapeHtml(card.label || 'Market')}</em> <strong>${escapeHtml(card.action || 'Live')} ${formatCardChange(card.changePct)}</strong></span>`)
+    ];
+    homeDom.heroRibbonItems.innerHTML = [...items, ...items].join('');
 }
 
 function renderOverviewCards() {
@@ -192,16 +255,16 @@ function renderFeaturePanel() {
     if (!details) {
         homeDom.featurePanelBadge.textContent = 'Unavailable';
         homeDom.featurePanelBadge.className = 'status-badge danger';
-        homeDom.featurePanelTitle.textContent = 'Feature Importance';
-        homeDom.featurePanelMeta.textContent = 'Choose an available card to inspect live factors.';
+        homeDom.featurePanelTitle.textContent = 'Signal Drivers';
+        homeDom.featurePanelMeta.textContent = 'Choose an available card to inspect conviction and context.';
         homeDom.featurePanelList.innerHTML = '<div class="home-panel-empty">Factor payload unavailable.</div>';
-        homeDom.featurePanelExplanation.textContent = 'No live explanation available.';
+        homeDom.featurePanelExplanation.textContent = 'No live interpretation available.';
         return;
     }
 
     homeDom.featurePanelBadge.textContent = details.badge || 'Live Factors';
     homeDom.featurePanelBadge.className = `status-badge ${details.stale ? 'warning' : badgeTone(details.actionTone)}`;
-    homeDom.featurePanelTitle.textContent = details.title || 'Feature Importance';
+    homeDom.featurePanelTitle.textContent = details.title || 'Signal Drivers';
     homeDom.featurePanelMeta.textContent = details.subtitle || `${details.marketLabel || '--'} | ${details.symbol || '--'}`;
 
     const factors = Array.isArray(details.factors) ? details.factors : [];
@@ -218,7 +281,7 @@ function renderFeaturePanel() {
         </div>
     `).join('') : '<div class="home-panel-empty">No factor details available.</div>';
 
-    homeDom.featurePanelExplanation.textContent = details.explanation || details.actionTooltip || 'Live explanation unavailable.';
+    homeDom.featurePanelExplanation.textContent = details.explanation || details.actionTooltip || 'Live interpretation unavailable.';
 }
 
 function renderFooter() {
@@ -231,10 +294,48 @@ function renderHardError(error) {
     homeDom.homeStatusBadge.textContent = 'UNAVAILABLE';
     homeDom.homeStatusBadge.className = 'status-badge danger';
     homeDom.homeUpdatedBadge.textContent = 'Updated --';
-    homeDom.homeActionBadge.textContent = `Home feed unavailable`;
+    homeDom.homeActionBadge.textContent = 'Desk feed unavailable';
     homeDom.marketOverviewGrid.innerHTML = `<div class="home-panel-empty">Home landing unavailable: ${escapeHtml(error.message)}</div>`;
     homeDom.featurePanelList.innerHTML = '<div class="home-panel-empty">Live factor payload unavailable.</div>';
-    homeDom.featurePanelExplanation.textContent = 'Home landing feed is currently unavailable.';
+    homeDom.featurePanelExplanation.textContent = 'The live desk feed is currently unavailable.';
+    if (homeDom.heroRibbonItems) {
+        homeDom.heroRibbonItems.innerHTML = `
+            <span><em>Desk feed</em> <strong>Unavailable</strong></span>
+            <span><em>Status</em> <strong>${escapeHtml(error.message)}</strong></span>
+            <span><em>Desk feed</em> <strong>Unavailable</strong></span>
+            <span><em>Status</em> <strong>${escapeHtml(error.message)}</strong></span>
+        `;
+    }
+    if (homeDom.actionBoardSignalsValue) {
+        homeDom.actionBoardSignalsValue.textContent = '--';
+    }
+    if (homeDom.actionBoardSignalsMeta) {
+        homeDom.actionBoardSignalsMeta.textContent = 'Opportunity counts unavailable.';
+    }
+    if (homeDom.actionBoardCoverageValue) {
+        homeDom.actionBoardCoverageValue.textContent = '--';
+    }
+    if (homeDom.actionBoardFastMove) {
+        homeDom.actionBoardFastMove.textContent = '--';
+    }
+    if (homeDom.actionBoardDeskBias) {
+        homeDom.actionBoardDeskBias.textContent = 'Unavailable';
+    }
+    if (homeDom.showcaseCoverageValue) {
+        homeDom.showcaseCoverageValue.textContent = '--';
+    }
+    if (homeDom.showcaseSignalsValue) {
+        homeDom.showcaseSignalsValue.textContent = '--';
+    }
+    if (homeDom.showcaseAssetsValue) {
+        homeDom.showcaseAssetsValue.textContent = '--';
+    }
+    if (homeDom.showcaseUpdatedValue) {
+        homeDom.showcaseUpdatedValue.textContent = 'Updated --';
+    }
+    if (homeDom.actionBoardCoverageMeta) {
+        homeDom.actionBoardCoverageMeta.textContent = 'Coverage status unavailable.';
+    }
     homeDom.homeFooterCopy.textContent = 'LIVE SNAPSHOT UNAVAILABLE | Not Investment Advice';
 }
 

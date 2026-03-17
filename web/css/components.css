@@ -1,27 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
 /* ========================================
-   StockandCrypto - Final Professional Styles
-   Bloomberg-grade Quantitative Finance UI
+   StockandCrypto - Editorial Research Components
+   Boutique research terminal direction
    ======================================== */
 
 /* CSS Variables */
 :root {
-    --bg-primary: #050A1A;
-    --bg-secondary: #0A0F1C;
-    --text-primary: #F8FAFC;
-    --text-secondary: #94A3B8;
-    --text-muted: #64748B;
-    --accent-primary: #00E5FF;
-    --accent-secondary: #00FFAA;
-    --up-color: #00FFAA;
-    --down-color: #FF4D4F;
-    --warning-color: #F59E0B;
-    --purple: #8B5CF6;
-    --font-display: 'Inter', sans-serif;
+    --bg-primary: #111318;
+    --bg-secondary: #181c24;
+    --text-primary: #f4ede2;
+    --text-secondary: #b2b8c4;
+    --text-muted: #7f8797;
+    --accent-primary: #d6c3a2;
+    --accent-secondary: #a4b7aa;
+    --up-color: #8faf97;
+    --down-color: #b97b73;
+    --warning-color: #d1ae79;
+    --purple: #8f8aa0;
+    --font-display: 'Manrope', sans-serif;
+    --font-serif: 'Instrument Serif', serif;
     --font-mono: 'JetBrains Mono', monospace;
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --shadow-glow: 0 0 20px rgba(0, 229, 255, 0.3);
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 22px;
+    --shadow-glow: 0 18px 38px rgba(6, 9, 15, 0.28);
 }
 
 /* Base Styles */
@@ -33,10 +36,12 @@
 
 body {
     font-family: var(--font-display);
-    background: var(--bg-primary);
+    background: linear-gradient(180deg, #171a22 0%, #111318 24%, #101218 100%);
     color: var(--text-primary);
     line-height: 1.6;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 body::before {
@@ -46,23 +51,22 @@ body::before {
     left: 0;
     width: 100%;
     height: 100%;
-    background: 
-        linear-gradient(90deg, rgba(0, 229, 255, 0.02) 1px, transparent 1px),
-        linear-gradient(rgba(0, 229, 255, 0.02) 1px, transparent 1px);
-    background-size: 50px 50px;
+    background:
+        radial-gradient(circle at 15% 18%, rgba(214, 195, 162, 0.12) 0%, transparent 24%),
+        radial-gradient(circle at 84% 14%, rgba(128, 152, 179, 0.12) 0%, transparent 22%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, transparent 18%);
     pointer-events: none;
     z-index: 0;
 }
 
 /* Typography */
 h1, h2, h3, h4, h5, h6 {
-    font-weight: 700;
     letter-spacing: -0.02em;
 }
 
-h1 { font-size: 3.5rem; font-weight: 800; }
-h2 { font-size: 2.5rem; }
-h3 { font-size: 1.75rem; }
+h1 { font-size: 3.5rem; font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.045em; }
+h2 { font-size: 2.5rem; font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.04em; }
+h3 { font-size: 1.75rem; font-weight: 700; }
 h4 { font-size: 1.25rem; }
 
 p { color: var(--text-secondary); }
@@ -75,7 +79,7 @@ p { color: var(--text-secondary); }
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 1.5rem;
-    border-radius: var(--radius-md);
+    border-radius: 999px;
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
@@ -85,25 +89,25 @@ p { color: var(--text-secondary); }
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #00E5FF 0%, #00FFAA 100%);
-    color: #050A1A;
+    background: linear-gradient(135deg, #d6c3a2 0%, #a4b7aa 100%);
+    color: #15181f;
     box-shadow: var(--shadow-glow);
 }
 
 .btn-primary:hover {
-    box-shadow: 0 0 30px rgba(0, 229, 255, 0.5);
-    transform: translateY(-2px);
+    box-shadow: 0 24px 54px rgba(6, 9, 15, 0.34);
+    transform: translateY(-1px);
 }
 
 .btn-secondary {
-    background: transparent;
+    background: rgba(255, 250, 241, 0.02);
     color: var(--text-primary);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(214, 205, 188, 0.12);
 }
 
 .btn-secondary:hover {
     border-color: var(--accent-primary);
-    background: rgba(0, 229, 255, 0.1);
+    background: rgba(214, 195, 162, 0.08);
 }
 
 .btn-sm { padding: 0.25rem 1rem; font-size: 0.8rem; }
@@ -111,23 +115,23 @@ p { color: var(--text-secondary); }
 
 /* Cards */
 .card {
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 22%), rgba(27, 31, 40, 0.82);
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(214, 205, 188, 0.12);
     border-radius: var(--radius-lg);
     padding: 2rem;
     transition: all 0.3s ease;
 }
 
 .card:hover {
-    border-color: rgba(0, 229, 255, 0.3);
+    border-color: rgba(214, 195, 162, 0.22);
     box-shadow: var(--shadow-glow);
 }
 
 .card-header {
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(214, 205, 188, 0.12);
 }
 
 .card-title {
@@ -153,33 +157,33 @@ p { color: var(--text-secondary); }
 }
 
 .status-badge.success {
-    background: rgba(0, 255, 170, 0.1);
-    color: #00FFAA;
-    border: 1px solid rgba(0, 255, 170, 0.3);
+    background: rgba(143, 175, 151, 0.12);
+    color: #8faf97;
+    border: 1px solid rgba(143, 175, 151, 0.28);
 }
 
 .status-badge.danger {
-    background: rgba(255, 77, 79, 0.1);
-    color: #FF4D4F;
-    border: 1px solid rgba(255, 77, 79, 0.3);
+    background: rgba(185, 123, 115, 0.12);
+    color: #b97b73;
+    border: 1px solid rgba(185, 123, 115, 0.28);
 }
 
 .status-badge.warning {
-    background: rgba(245, 158, 11, 0.1);
-    color: #F59E0B;
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(209, 174, 121, 0.12);
+    color: #d1ae79;
+    border: 1px solid rgba(209, 174, 121, 0.28);
 }
 
 .status-badge.info {
-    background: rgba(0, 229, 255, 0.1);
-    color: #00E5FF;
-    border: 1px solid rgba(0, 229, 255, 0.3);
+    background: rgba(128, 152, 179, 0.12);
+    color: #8098b3;
+    border: 1px solid rgba(128, 152, 179, 0.28);
 }
 
 .status-badge.model-tag {
-    background: rgba(139, 92, 246, 0.1);
-    color: #8B5CF6;
-    border: 1px solid rgba(139, 92, 246, 0.3);
+    background: rgba(143, 138, 160, 0.12);
+    color: #8f8aa0;
+    border: 1px solid rgba(143, 138, 160, 0.28);
 }
 
 /* Tables */
@@ -189,7 +193,7 @@ p { color: var(--text-secondary); }
 }
 
 .data-table thead {
-    background: rgba(0, 229, 255, 0.05);
+    background: rgba(214, 195, 162, 0.05);
 }
 
 .data-table th {
@@ -200,24 +204,24 @@ p { color: var(--text-secondary); }
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(214, 205, 188, 0.12);
 }
 
 .data-table td {
     padding: 1rem 1.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(214, 205, 188, 0.12);
     font-family: var(--font-mono);
 }
 
 .data-table tbody tr:hover {
-    background: rgba(0, 229, 255, 0.05);
+    background: rgba(214, 195, 162, 0.06);
 }
 
 /* Progress Bars */
 .progress-bar {
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 250, 241, 0.08);
     border-radius: 3px;
     overflow: hidden;
 }
@@ -226,7 +230,7 @@ p { color: var(--text-secondary); }
     height: 100%;
     border-radius: 3px;
     transition: width 0.6s ease;
-    box-shadow: 0 0 10px currentColor;
+    box-shadow: none;
 }
 
 /* Forms */
