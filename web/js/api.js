@@ -41,7 +41,12 @@ const api = {
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                const error = new Error(data.error || `HTTP error! status: ${response.status}`);
+                error.status = response.status;
+                error.payload = data;
+                error.detail = data?.detail || '';
+                error.url = url;
+                throw error;
             }
 
             return data;

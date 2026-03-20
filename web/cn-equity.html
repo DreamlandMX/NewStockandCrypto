@@ -285,6 +285,13 @@
                     <div class="cn-open-close-note cn-mono" id="sseOpenClose">Open: -- | Close: --</div>
                     <div class="cn-sparkline-wrap"><canvas id="sseMiniTrend"></canvas></div>
                     <div class="cn-mini-caption cn-mono" id="sseMiniLabel">Regular Session (09:30-15:00 CST)</div>
+                    <div style="margin-top:0.7rem; padding:0.65rem 0.75rem; border:1px solid rgba(148,163,184,0.18); border-radius:12px; background:rgba(15,23,42,0.45);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                            <span class="status-badge info" id="ssePredictionSignal">Prediction --</span>
+                            <span class="cn-mono" style="font-size:0.78rem; color:var(--text-secondary);" id="ssePredictionMeta">P(UP) -- | q50 --</span>
+                        </div>
+                        <div class="cn-mini-caption" id="ssePredictionMove">Movement unavailable.</div>
+                    </div>
                     <div style="margin-top:0.7rem;">
                         <span class="status-badge info" id="sseIndexStatus">WAITING</span>
                     </div>
@@ -300,6 +307,13 @@
                     <div class="cn-open-close-note cn-mono" id="csiOpenClose">Open: -- | Close: --</div>
                     <div class="cn-sparkline-wrap"><canvas id="csiMiniTrend"></canvas></div>
                     <div class="cn-mini-caption cn-mono" id="csiMiniLabel">Regular Session (09:30-15:00 CST)</div>
+                    <div style="margin-top:0.7rem; padding:0.65rem 0.75rem; border:1px solid rgba(148,163,184,0.18); border-radius:12px; background:rgba(15,23,42,0.45);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                            <span class="status-badge info" id="csiPredictionSignal">Prediction --</span>
+                            <span class="cn-mono" style="font-size:0.78rem; color:var(--text-secondary);" id="csiPredictionMeta">P(UP) -- | q50 --</span>
+                        </div>
+                        <div class="cn-mini-caption" id="csiPredictionMove">Movement unavailable.</div>
+                    </div>
                     <div style="margin-top:0.7rem;">
                         <span class="status-badge info" id="csi300IndexStatus">WAITING</span>
                     </div>
@@ -324,12 +338,21 @@
 
             <section class="cn-chart-panel">
                 <div class="cn-chart-head">
-                    <h3 class="chart-title">SSE Composite Price Movement</h3>
+                    <div>
+                        <h3 class="chart-title" id="indexChartTitle">SSE Composite Price Movement</h3>
+                        <div class="cn-mini-caption cn-mono" id="mainChartRangeLabel">Range: Current regular session (09:30-15:00 CST)</div>
+                    </div>
                     <button class="btn btn-secondary btn-sm" id="refreshNowBtn">Refresh Now</button>
                 </div>
                 <div style="height:260px;">
                     <canvas id="indexChart"></canvas>
                 </div>
+                <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.85rem; color:var(--text-secondary); font-size:0.82rem;">
+                    <span><span style="display:inline-block; width:10px; height:10px; border-radius:999px; background:#00E5FF; margin-right:0.35rem;"></span>Actual</span>
+                    <span><span style="display:inline-block; width:10px; height:10px; border-radius:999px; background:#8B5CF6; margin-right:0.35rem;"></span>Predicted (q50)</span>
+                    <span><span style="display:inline-block; width:10px; height:10px; border-radius:999px; background:rgba(148,163,184,0.7); margin-right:0.35rem;"></span>Confidence Band (q10-q90)</span>
+                </div>
+                <p class="cn-mini-caption" id="chartSourceNote" style="margin-top:0.65rem;">Actual history and prediction band will appear here after the selected index loads.</p>
             </section>
 
             <div class="cn-layout-two">

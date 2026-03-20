@@ -5,11 +5,17 @@
 const CN_POLL_INTERVAL_MS = 10000;
 const MAX_CHART_POINTS = 48;
 const CN_HISTORY_RESEED_COOLDOWN_MS = 60000;
+const CN_PROJECTION_STEPS = 8;
 const CHART_PHASE_MARKERS = [
     { label: 'Open', ratio: 0.15 },
     { label: 'Lunch', ratio: 0.56 },
     { label: 'Close Auction', ratio: 0.9 }
 ];
+const CN_INDEX_META = {
+    '000001.SH': { code: '000001.SH', seriesKey: 'sse', cardPrefix: 'sse', label: 'SSE Composite' },
+    '000300.SH': { code: '000300.SH', seriesKey: 'csi300', cardPrefix: 'csi', label: 'CSI 300' }
+};
+const CN_INDEX_CODES = Object.keys(CN_INDEX_META);
 
 const state = {
     page: 1,
@@ -25,6 +31,8 @@ const state = {
     loading: false,
     indices: null,
     prediction: null,
+    predictionByCode: {},
+    predictionErrorByCode: {},
     marketSession: null,
     universe: {
         total: 0,
@@ -34,13 +42,14 @@ const state = {
         rows: []
     },
     chart: null,
-    chartLabels: [],
+    chartTimestamps: [],
     chartSeries: {
         actual: [],
         upperLimit: [],
         lowerLimit: [],
-        predictedOpen: [],
-        predictedClose: []
+        predictionUpper: [],
+        predictionLower: [],
+        predictionMedian: []
     },
     indexSeries: {
         sse: [],
@@ -156,9 +165,18 @@ function cacheElements() {
         csiOpenClose: byId('csiOpenClose'),
         csiMiniTrend: byId('csiMiniTrend'),
         csiMiniLabel: byId('csiMiniLabel'),
+        ssePredictionSignal: byId('ssePredictionSignal'),
+        ssePredictionMeta: byId('ssePredictionMeta'),
+        ssePredictionMove: byId('ssePredictionMove'),
+        csiPredictionSignal: byId('csiPredictionSignal'),
+        csiPredictionMeta: byId('csiPredictionMeta'),
+        csiPredictionMove: byId('csiPredictionMove'),
         indexChart: byId('indexChart'),
         refreshNowBtn: byId('refreshNowBtn'),
         indexSelector: byId('indexSelector'),
+        indexChartTitle: byId('indexChartTitle'),
+        mainChartRangeLabel: byId('mainChartRangeLabel'),
+        chartSourceNote: byId('chartSourceNote'),
         pUpValue: byId('pUpValue'),
         pDownValue: byId('pDownValue'),
         confidenceValue: byId('confidenceValue'),
@@ -212,6 +230,14 @@ function cacheElements() {
     });
 }
 
+function getCNIndexMeta(code = state.predictionIndexCode) {
+    return CN_INDEX_META[code] || CN_INDEX_META['000001.SH'];
+}
+
+function getPredictionForCode(code = state.predictionIndexCode) {
+    return state.predictionByCode[code] || null;
+}
+
 function bindEvents() {
     const debouncedSearch = utils.debounce(() => {
         state.page = 1;
@@ -250,7 +276,12 @@ function bindEvents() {
     if (els.indexSelector) {
         els.indexSelector.addEventListener('change', async () => {
             state.predictionIndexCode = els.indexSelector.value;
-            await loadPrediction();
+            syncSelectedPrediction();
+            if (!state.prediction) {
+                await loadPredictionForCode(state.predictionIndexCode);
+                syncSelectedPrediction();
+            }
+            syncSelectedChartFromHistory();
             renderPrediction();
         });
     }
@@ -322,21 +353,31 @@ function initializeChart() {
                     fill: false
                 },
                 {
-                    label: 'Predicted Open',
+                    label: 'Confidence High',
                     data: [],
-                    borderColor: 'rgba(245,158,11,0.85)',
-                    borderDash: [3, 5],
-                    pointRadius: 2,
-                    pointHoverRadius: 3,
+                    borderColor: 'rgba(148,163,184,0.72)',
+                    borderDash: [5, 5],
+                    borderWidth: 1.2,
+                    pointRadius: 0,
                     fill: false
                 },
                 {
-                    label: 'Predicted Close',
+                    label: 'Confidence Low',
                     data: [],
-                    borderColor: 'rgba(139,92,246,0.85)',
-                    borderDash: [3, 5],
-                    pointRadius: 2,
-                    pointHoverRadius: 3,
+                    borderColor: 'rgba(148,163,184,0.72)',
+                    borderDash: [5, 5],
+                    borderWidth: 1.2,
+                    pointRadius: 0,
+                    backgroundColor: 'rgba(148,163,184,0.14)',
+                    fill: '-1'
+                },
+                {
+                    label: 'Predicted (q50)',
+                    data: [],
+                    borderColor: 'rgba(139,92,246,0.9)',
+                    borderDash: [4, 5],
+                    borderWidth: 2,
+                    pointRadius: 0,
                     fill: false
                 }
             ]
@@ -355,7 +396,7 @@ function initializeChart() {
                 }
             },
             plugins: {
-                legend: { labels: { color: '#F8FAFC' } }
+                legend: { display: false }
             }
         }
     });
@@ -445,12 +486,14 @@ async function refreshAll(manual = false) {
             }
         }
 
-        if (state.indices?.sse?.price !== null && state.indices?.sse?.price !== undefined) {
-            pushChartPoint(state.indices.sse.price, state.lastUpdated);
+        const selectedMeta = getCNIndexMeta();
+        const selectedQuote = state.indices?.[selectedMeta.seriesKey];
+        if (selectedQuote?.price !== null && selectedQuote?.price !== undefined) {
+            pushChartPoint(selectedQuote.price, state.lastUpdated, selectedQuote?.prevClose);
         }
         appendMiniSeriesPoints(state.indices, state.lastUpdated);
 
-        await loadPrediction();
+        await loadAllPredictions();
         renderAll();
     } catch (error) {
         state.mode = 'error';
@@ -464,12 +507,31 @@ async function refreshAll(manual = false) {
     }
 }
 
-async function loadPrediction() {
+async function loadPredictionForCode(code) {
     try {
-        state.prediction = await api.getCNEquityIndexPrediction(state.predictionIndexCode);
+        const payload = await api.getCNEquityIndexPrediction(code);
+        state.predictionByCode[code] = payload;
+        delete state.predictionErrorByCode[code];
+        return payload;
     } catch (error) {
-        state.prediction = null;
+        delete state.predictionByCode[code];
+        state.predictionErrorByCode[code] = error?.message || 'Prediction unavailable';
+        return null;
     }
+}
+
+async function loadAllPredictions() {
+    const results = await Promise.allSettled(CN_INDEX_CODES.map((code) => loadPredictionForCode(code)));
+    results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+            state.predictionErrorByCode[CN_INDEX_CODES[index]] = result.reason?.message || 'Prediction unavailable';
+        }
+    });
+    syncSelectedPrediction();
+}
+
+function syncSelectedPrediction() {
+    state.prediction = getPredictionForCode(state.predictionIndexCode);
 }
 
 async function seedIndexHistory(silent = false) {
@@ -482,6 +544,7 @@ async function seedIndexHistory(silent = false) {
         applyHistorySessionMetadata(payload?.selectedSession);
         hydrateIndexSeries(payload?.series || {});
         applyOpenCloseFromPayload(payload?.openClose || {});
+        syncSelectedChartFromHistory();
         updateAllMiniCharts();
         renderMiniTrendLabels();
         return true;
@@ -500,6 +563,7 @@ function applyHistorySessionMetadata(selectedSession) {
     state.historySessionEndMs = Number.isFinite(endMs) ? endMs : null;
     state.historySessionType = String(selectedSession?.type || 'TODAY_REGULAR');
     state.historySessionLabel = String(selectedSession?.label || 'Regular Session (09:30-15:00 CST)');
+    text(els.mainChartRangeLabel, `Range: ${state.historySessionLabel}`);
 }
 
 function hydrateIndexSeries(series) {
@@ -544,6 +608,59 @@ function deriveOpenCloseFromSeries(key) {
         close: Number(points[points.length - 1].price.toFixed(2)),
         isFinalClose
     };
+}
+
+function syncSelectedChartFromHistory() {
+    const meta = getCNIndexMeta();
+    const points = state.indexSeries[meta.seriesKey] || [];
+    replaceSelectedChartSeries(points, state.indices?.[meta.seriesKey]?.prevClose);
+    updateChartTitle();
+    renderChartSourceNote();
+}
+
+function replaceSelectedChartSeries(points, prevCloseOverride = null) {
+    const safePoints = Array.isArray(points) ? points : [];
+    const prevClose = Number.isFinite(Number(prevCloseOverride))
+        ? Number(prevCloseOverride)
+        : Number(state.indices?.[getCNIndexMeta().seriesKey]?.prevClose);
+    state.chartTimestamps = safePoints.map((point) => point.ts);
+    state.chartSeries.actual = safePoints.map((point) => Number(point.price.toFixed(2)));
+    state.chartSeries.upperLimit = safePoints.map(() => Number.isFinite(prevClose) ? Number((prevClose * 1.1).toFixed(2)) : null);
+    state.chartSeries.lowerLimit = safePoints.map(() => Number.isFinite(prevClose) ? Number((prevClose * 0.9).toFixed(2)) : null);
+    state.chartSeries.predictionUpper = safePoints.map(() => null);
+    state.chartSeries.predictionLower = safePoints.map(() => null);
+    state.chartSeries.predictionMedian = safePoints.map(() => null);
+    syncChartDatasets();
+}
+
+function updateChartTitle() {
+    const meta = getCNIndexMeta();
+    text(els.indexChartTitle, `${meta.label} Price Movement`);
+}
+
+function renderChartSourceNote() {
+    if (!els.chartSourceNote) return;
+    const meta = getCNIndexMeta();
+    const hasHistory = state.chartSeries.actual.length > 0;
+    const packet = getPredictionForCode(meta.code);
+    const predictionFailed = Boolean(state.predictionErrorByCode[meta.code]);
+
+    if (!hasHistory && predictionFailed) {
+        els.chartSourceNote.textContent = `${meta.label} history and prediction are currently unavailable.`;
+        return;
+    }
+    if (!hasHistory) {
+        els.chartSourceNote.textContent = `Waiting for ${meta.label} history to load.`;
+        return;
+    }
+    if (!packet?.prediction?.magnitude) {
+        els.chartSourceNote.textContent = predictionFailed
+            ? `Actual: ${meta.label} session history | Projection unavailable while the prediction service is offline.`
+            : `Actual: ${meta.label} session history | Projection pending live q10/q50/q90 prediction.`;
+        return;
+    }
+
+    els.chartSourceNote.textContent = `Actual: ${meta.label} session history | Projection: live q10/q50/q90 movement anchored to the latest quote.`;
 }
 
 function appendMiniSeriesPoints(indices, timestampIso) {
@@ -709,6 +826,7 @@ function renderIndices() {
     if (!state.openClose.csi300) state.openClose.csi300 = deriveOpenCloseFromSeries('csi300');
     renderIndexCard('sse', state.indices?.sse, els.sseIndexValue, els.sseIndexChange, els.sseIndexStatus, els.sseOpenClose);
     renderIndexCard('csi300', state.indices?.csi300, els.csi300IndexValue, els.csi300IndexChange, els.csi300IndexStatus, els.csiOpenClose);
+    renderPredictionSummaryCards();
 }
 
 function renderIndexCard(seriesKey, data, valueEl, changeEl, statusEl, openCloseEl) {
@@ -733,6 +851,45 @@ function renderIndexCard(seriesKey, data, valueEl, changeEl, statusEl, openClose
     text(openCloseEl, formatOpenCloseLine(openClose));
 }
 
+function renderPredictionSummaryCards() {
+    renderPredictionSummaryCard(CN_INDEX_META['000001.SH']);
+    renderPredictionSummaryCard(CN_INDEX_META['000300.SH']);
+}
+
+function renderPredictionSummaryCard(meta) {
+    const packet = getPredictionForCode(meta.code);
+    const signalEl = els[`${meta.cardPrefix}PredictionSignal`];
+    const metaEl = els[`${meta.cardPrefix}PredictionMeta`];
+    const moveEl = els[`${meta.cardPrefix}PredictionMove`];
+    const loadError = state.predictionErrorByCode[meta.code];
+
+    if (!packet?.prediction) {
+        if (signalEl) {
+            signalEl.className = `status-badge ${loadError ? 'warning' : 'info'}`;
+            signalEl.textContent = loadError ? 'Prediction unavailable' : 'Prediction --';
+        }
+        text(metaEl, 'P(UP) -- | q50 --');
+        text(moveEl, loadError ? 'Prediction service unavailable for this index.' : 'Movement unavailable.');
+        return;
+    }
+
+    const direction = packet.prediction.direction || {};
+    const magnitude = packet.prediction.magnitude || {};
+    if (signalEl) {
+        const normalized = String(direction.signal || 'FLAT').toUpperCase();
+        const badge = normalized.includes('LONG') ? 'success' : normalized.includes('SHORT') ? 'danger' : 'info';
+        signalEl.className = `status-badge ${badge}`;
+        signalEl.textContent = normalized || 'FLAT';
+    }
+    text(metaEl, `P(UP) ${formatRate(direction.pUp)} | q50 ${formatSignedPercentFromRatio(magnitude.q50)}`);
+    text(moveEl, buildMovementSummary(magnitude));
+}
+
+function buildMovementSummary(magnitude) {
+    if (!magnitude) return 'Movement unavailable.';
+    return `Median ${formatSignedPercentFromRatio(magnitude.q50)} with band ${formatSignedPercentFromRatio(magnitude.q10)} to ${formatSignedPercentFromRatio(magnitude.q90)}.`;
+}
+
 function renderPrediction() {
     const packet = state.prediction;
     if (!packet?.prediction) {
@@ -747,6 +904,9 @@ function renderPrediction() {
         text(els.shortReasonValue, 'CN strict no-short mode');
         text(els.tPlusOneValue, 'Applied');
         renderPreviewPlan(null, false);
+        updateChartTitle();
+        updateChartOverlays(null);
+        renderChartSourceNote();
         return;
     }
 
@@ -790,7 +950,9 @@ function renderPrediction() {
     const width = (magnitude.q90 ?? 0) - (magnitude.q10 ?? 0);
     text(els.intervalWidthValue, formatSignedPercentFromRatio(width, false));
 
+    updateChartTitle();
     updateChartOverlays(magnitude);
+    renderChartSourceNote();
 }
 
 function renderPreviewPlan(previewPlan, visible) {
@@ -919,49 +1081,114 @@ function renderSortIndicators() {
     });
 }
 
-function pushChartPoint(price, timestamp) {
+function pushChartPoint(price, timestamp, prevCloseOverride = null) {
     if (!state.chart || !Number.isFinite(price)) return;
-    state.chartLabels.push(utils.formatTimestamp(timestamp, 'time'));
+    const timestampMs = Date.parse(timestamp) || Date.now();
+    state.chartTimestamps.push(timestampMs);
     state.chartSeries.actual.push(Number(price.toFixed(2)));
 
-    const prevClose = state.indices?.sse?.prevClose;
+    const prevClose = Number.isFinite(Number(prevCloseOverride))
+        ? Number(prevCloseOverride)
+        : Number(state.indices?.[getCNIndexMeta().seriesKey]?.prevClose);
     const upperLimit = Number.isFinite(prevClose) ? Number((prevClose * 1.1).toFixed(2)) : null;
     const lowerLimit = Number.isFinite(prevClose) ? Number((prevClose * 0.9).toFixed(2)) : null;
     state.chartSeries.upperLimit.push(upperLimit);
     state.chartSeries.lowerLimit.push(lowerLimit);
+    state.chartSeries.predictionUpper.push(null);
+    state.chartSeries.predictionLower.push(null);
+    state.chartSeries.predictionMedian.push(null);
 
-    if (state.chartLabels.length > MAX_CHART_POINTS) {
-        state.chartLabels.shift();
+    if (state.chartTimestamps.length > MAX_CHART_POINTS) {
+        state.chartTimestamps.shift();
         Object.keys(state.chartSeries).forEach((key) => state.chartSeries[key].shift());
     }
-    syncChartDatasets();
+    updateChartOverlays(state.prediction?.prediction?.magnitude || null);
 }
 
 function updateChartOverlays(magnitude) {
-    if (!state.chart || !state.chartSeries.actual.length) return;
+    if (!state.chart || !state.chartSeries.actual.length) {
+        syncChartDatasets();
+        return;
+    }
+    state.chartSeries.predictionUpper = state.chartSeries.actual.map(() => null);
+    state.chartSeries.predictionLower = state.chartSeries.actual.map(() => null);
+    state.chartSeries.predictionMedian = state.chartSeries.actual.map(() => null);
+    if (!magnitude) {
+        syncChartDatasets();
+        return;
+    }
     const latestPrice = state.chartSeries.actual[state.chartSeries.actual.length - 1];
-    const q10 = Number(magnitude?.q10 || 0);
-    const q50 = Number(magnitude?.q50 || 0);
-    const predictedOpen = Number((latestPrice * (1 + q10 * 0.35)).toFixed(2));
-    const predictedClose = Number((latestPrice * (1 + q50)).toFixed(2));
-
-    state.chartSeries.predictedOpen = state.chartSeries.actual.map(() => null);
-    state.chartSeries.predictedClose = state.chartSeries.actual.map(() => null);
-    state.chartSeries.predictedOpen[state.chartSeries.predictedOpen.length - 1] = predictedOpen;
-    state.chartSeries.predictedClose[state.chartSeries.predictedClose.length - 1] = predictedClose;
-
+    const lastIndex = state.chartSeries.actual.length - 1;
+    state.chartSeries.predictionUpper[lastIndex] = latestPrice;
+    state.chartSeries.predictionLower[lastIndex] = latestPrice;
+    state.chartSeries.predictionMedian[lastIndex] = latestPrice;
     syncChartDatasets();
 }
 
 function syncChartDatasets() {
     if (!state.chart) return;
-    state.chart.data.labels = state.chartLabels;
-    state.chart.data.datasets[0].data = state.chartSeries.actual;
-    state.chart.data.datasets[1].data = state.chartSeries.upperLimit;
-    state.chart.data.datasets[2].data = state.chartSeries.lowerLimit;
-    state.chart.data.datasets[3].data = state.chartSeries.predictedOpen;
-    state.chart.data.datasets[4].data = state.chartSeries.predictedClose;
+    const labels = state.chartTimestamps.map((timestampMs) => utils.formatTimestamp(new Date(timestampMs).toISOString(), 'time'));
+    const projection = state.chartSeries.actual.length && state.prediction?.prediction?.magnitude
+        ? buildChartProjection(
+            state.prediction.prediction.magnitude,
+            state.chartSeries.actual[state.chartSeries.actual.length - 1],
+            state.chartTimestamps[state.chartTimestamps.length - 1]
+        )
+        : { labels: [], predicted: [], high: [], low: [] };
+    const trailingNulls = Array(projection.labels.length).fill(null);
+    const anchorSeries = Array(Math.max(state.chartSeries.actual.length - 1, 0)).fill(null)
+        .concat(state.chartSeries.actual.length ? [state.chartSeries.actual[state.chartSeries.actual.length - 1]] : []);
+
+    state.chart.data.labels = labels.concat(projection.labels);
+    state.chart.data.datasets[0].data = state.chartSeries.actual.concat(trailingNulls);
+    state.chart.data.datasets[1].data = state.chartSeries.upperLimit.concat(trailingNulls);
+    state.chart.data.datasets[2].data = state.chartSeries.lowerLimit.concat(trailingNulls);
+    state.chart.data.datasets[3].data = anchorSeries.concat(projection.high);
+    state.chart.data.datasets[4].data = anchorSeries.concat(projection.low);
+    state.chart.data.datasets[5].data = anchorSeries.concat(projection.predicted);
     state.chart.update('none');
+}
+
+function buildChartProjection(magnitude, anchorPrice, anchorTimestampMs) {
+    if (!magnitude || !Number.isFinite(anchorPrice) || !Number.isFinite(anchorTimestampMs)) {
+        return { labels: [], predicted: [], high: [], low: [] };
+    }
+
+    const q10 = Number(magnitude.q10);
+    const q50 = Number(magnitude.q50);
+    const q90 = Number(magnitude.q90);
+    if (![q10, q50, q90].every(Number.isFinite)) {
+        return { labels: [], predicted: [], high: [], low: [] };
+    }
+
+    const stepMs = resolveChartStepMs();
+    const labels = [];
+    const predicted = [];
+    const high = [];
+    const low = [];
+    for (let step = 1; step <= CN_PROJECTION_STEPS; step += 1) {
+        const ratio = step / CN_PROJECTION_STEPS;
+        labels.push(utils.formatTimestamp(new Date(anchorTimestampMs + (stepMs * step)).toISOString(), 'time'));
+        predicted.push(Number((anchorPrice * (1 + q50 * ratio)).toFixed(2)));
+        high.push(Number((anchorPrice * (1 + q90 * ratio)).toFixed(2)));
+        low.push(Number((anchorPrice * (1 + q10 * ratio)).toFixed(2)));
+    }
+    return { labels, predicted, high, low };
+}
+
+function resolveChartStepMs() {
+    if (state.chartTimestamps.length >= 2) {
+        const deltas = [];
+        for (let index = 1; index < state.chartTimestamps.length; index += 1) {
+            const delta = state.chartTimestamps[index] - state.chartTimestamps[index - 1];
+            if (delta > 0) deltas.push(delta);
+        }
+        if (deltas.length) {
+            const sorted = deltas.slice().sort((a, b) => a - b);
+            return sorted[Math.floor(sorted.length / 2)];
+        }
+    }
+    return 60 * 1000;
 }
 
 function formatOpenCloseLine(packet) {

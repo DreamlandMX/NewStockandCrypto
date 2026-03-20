@@ -1057,6 +1057,7 @@ function toShanghaiNow(now = new Date()) {
         minute: '2-digit',
         second: '2-digit',
         weekday: 'short',
+        hourCycle: 'h23',
         hour12: false
     });
     const parts = Object.fromEntries(formatter.formatToParts(now).map((part) => [part.type, part.value]));
@@ -1068,15 +1069,26 @@ function toShanghaiNow(now = new Date()) {
     const second = Number(parts.second);
     const weekday = parts.weekday;
     const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
-    const date = new Date(`${dateKey}T${parts.hour}:${parts.minute}:${parts.second}+08:00`);
+    const normalizedHour = hour === 24 ? 0 : hour;
+    const date = new Date(Date.UTC(year, month - 1, day, normalizedHour - 8, minute, second));
     return { year, month, day, hour, minute, second, weekday, dateKey, date };
 }
 
 function makeShanghaiDate(dateKey, hour, minute, second = 0) {
-    const hh = String(hour).padStart(2, '0');
-    const mm = String(minute).padStart(2, '0');
-    const ss = String(second).padStart(2, '0');
-    return new Date(`${dateKey}T${hh}:${mm}:${ss}+08:00`);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || '').trim());
+    if (!match) {
+        return new Date(Number.NaN);
+    }
+    const [, yearRaw, monthRaw, dayRaw] = match;
+    const normalizedHour = Number(hour) === 24 ? 0 : Number(hour);
+    return new Date(Date.UTC(
+        Number(yearRaw),
+        Number(monthRaw) - 1,
+        Number(dayRaw),
+        normalizedHour - 8,
+        Number(minute),
+        Number(second)
+    ));
 }
 
 function nextTradingDateKey(currentDate) {
@@ -3947,6 +3959,96 @@ async function fetchCnIndicesHistoryPayload(query, preResolved = null) {
     };
 }
 
+function buildSyntheticCnSeriesFromIndex(indexData, window, interval) {
+    const open = parseNumber(indexData?.open);
+    const price = parseNumber(indexData?.price);
+    const prevClose = parseNumber(indexData?.prevClose);
+    const high = parseNumber(indexData?.high);
+    const low = parseNumber(indexData?.low);
+    const startValue = Number.isFinite(open) ? open : (Number.isFinite(prevClose) ? prevClose : price);
+    const endValue = Number.isFinite(price) ? price : (Number.isFinite(open) ? open : prevClose);
+    if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+        return [];
+    }
+
+    const stepsPerLeg = interval === '5m' ? 10 : 16;
+    const anchors = [
+        { ts: window.amStart.getTime(), price: startValue },
+        { ts: window.amEnd.getTime(), price: Number.isFinite(low) ? low : ((startValue + endValue) / 2) },
+        { ts: window.pmStart.getTime(), price: Number.isFinite(high) ? high : ((startValue + endValue) / 2) },
+        { ts: window.pmEnd.getTime(), price: endValue }
+    ];
+
+    const points = [];
+    for (let segmentIndex = 0; segmentIndex < anchors.length - 1; segmentIndex += 1) {
+        const current = anchors[segmentIndex];
+        const next = anchors[segmentIndex + 1];
+        for (let step = 0; step < stepsPerLeg; step += 1) {
+            if (segmentIndex > 0 && step === 0) continue;
+            const ratio = step / stepsPerLeg;
+            const ts = current.ts + ((next.ts - current.ts) * ratio);
+            const pricePoint = current.price + ((next.price - current.price) * ratio);
+            points.push({
+                ts: new Date(Math.round(ts)).toISOString(),
+                price: Number(pricePoint.toFixed(3))
+            });
+        }
+    }
+    points.push({
+        ts: new Date(window.pmEnd.getTime()).toISOString(),
+        price: Number(endValue.toFixed(3))
+    });
+    return points;
+}
+
+function buildCnIndicesHistoryFallbackPayload(query, reason, livePayload = null) {
+    const resolved = resolveCnHistoryTarget(query.session, new Date());
+    const selectedType = resolved.selectedType;
+    const selectedWindow = resolved.window;
+    const sourcePayload = livePayload || cnCache || readCnLiveSnapshot();
+    if (!sourcePayload?.indices) {
+        return null;
+    }
+
+    const symbols = Array.isArray(query.symbols) && query.symbols.length ? query.symbols : ['sse', 'csi300'];
+    const series = {};
+    const openClose = {};
+    symbols.forEach((symbolKey) => {
+        const symbolMeta = CN_INDEX_HISTORY_SYMBOLS[symbolKey];
+        if (!symbolMeta) return;
+        const indexData = sourcePayload.indices[symbolKey];
+        series[symbolKey] = buildSyntheticCnSeriesFromIndex(indexData, selectedWindow, query.interval);
+        openClose[symbolKey] = buildCnOpenClose(series[symbolKey], true);
+    });
+
+    const hasSeries = symbols.some((symbolKey) => Array.isArray(series[symbolKey]) && series[symbolKey].length > 0);
+    if (!hasSeries) {
+        return null;
+    }
+
+    return {
+        meta: {
+            source: 'cn_live_snapshot_synthetic_history',
+            timestamp: new Date().toISOString(),
+            stale: true,
+            staleReason: reason,
+            synthesized: true
+        },
+        marketSession: {
+            phaseCode: sourcePayload.marketSession?.phaseCode || resolved.marketSession.phaseCode,
+            timezoneLabel: sourcePayload.marketSession?.timezoneLabel || resolved.marketSession.timezoneLabel
+        },
+        selectedSession: {
+            type: selectedType,
+            label: buildCnSessionLabel(selectedType),
+            startCst: selectedWindow.startIso,
+            endCst: selectedWindow.endIso
+        },
+        series,
+        openClose
+    };
+}
+
 function buildCnIndicesHistoryCacheKey(query) {
     const resolved = resolveCnHistoryTarget(query.session, new Date());
     const symbolsKey = (query.symbols || ['sse', 'csi300']).join(',');
@@ -3977,6 +4079,13 @@ async function getCnIndicesHistoryWithCache(query) {
             stalePayload.meta.staleReason = error.message;
             stalePayload.meta.timestamp = new Date().toISOString();
             return stalePayload;
+        }
+        const fallbackPayload = buildCnIndicesHistoryFallbackPayload(query, error.message);
+        if (fallbackPayload) {
+            cnIndicesHistoryCache = fallbackPayload;
+            cnIndicesHistoryCacheAt = Date.now();
+            cnIndicesHistoryCacheKey = cacheKey;
+            return deepCopy(fallbackPayload);
         }
         throw error;
     }

@@ -17,6 +17,13 @@
         tcn: 'TCN',
     };
 
+    const BACKEND_OFFLINE_COPY = 'Model Explorer backend is offline. Start the ML service on port 8000 with "npm run start:stack", then refresh.';
+    const DEFAULT_HEATMAP_INSIGHTS = {
+        positive: 'If Momentum (20d) is bright green, the model reads a bullish push.',
+        negative: 'If Volume Ratio is red, the model reads bearish pressure.',
+        neutral: 'Yellow cells mean neutral impact and lower directional influence.',
+    };
+
     const HEALTH_CLASS_MAP = {
         HEALTHY: 'healthy',
         DRIFT_DETECTED: 'drift',
@@ -72,6 +79,8 @@
         lastInsights: null,
         autoRefreshHandle: null,
         baselineSnapshot: null,
+        backendStatus: 'unknown',
+        backendMessage: BACKEND_OFFLINE_COPY,
         whatIf: {
             volatilityDelta: 0,
         },
@@ -175,6 +184,41 @@
 
     function runtimeBadgeClass(status) {
         return RUNTIME_CLASS_MAP[String(status || '').toUpperCase()] || 'info';
+    }
+
+    function getErrorStatus(error) {
+        const direct = toNumber(error?.status, NaN);
+        if (Number.isFinite(direct)) return direct;
+        const payloadStatus = toNumber(error?.payload?.status, NaN);
+        return Number.isFinite(payloadStatus) ? payloadStatus : NaN;
+    }
+
+    function getErrorMessage(error) {
+        const primary = safeText(error?.message, '');
+        const detail = safeText(error?.detail || error?.payload?.detail, '');
+        return `${primary} ${detail}`.trim();
+    }
+
+    function isBackendOfflineError(error) {
+        const status = getErrorStatus(error);
+        if (status === 502) return true;
+
+        const text = getErrorMessage(error).toLowerCase();
+        return text.includes('model explorer proxy failed')
+            || text.includes('failed to fetch')
+            || text.includes('econnrefused')
+            || text.includes('socket hang up');
+    }
+
+    function getBackendOfflineMessage(error) {
+        const detail = safeText(error?.detail || error?.payload?.detail, '').trim();
+        if (!detail) return BACKEND_OFFLINE_COPY;
+
+        if (/econnrefused|failed to fetch|socket hang up|unable to connect/i.test(detail)) {
+            return BACKEND_OFFLINE_COPY;
+        }
+
+        return `${BACKEND_OFFLINE_COPY} Details: ${detail}`;
     }
 
     function effectiveHorizon() {
@@ -535,28 +579,47 @@
         Array.from(document.querySelectorAll('[data-health-for]')).forEach((node) => {
             const modelId = node.getAttribute('data-health-for');
             const payload = state.healthByModel?.[modelId] || null;
+
+            if (state.backendStatus === 'offline') {
+                node.className = 'model-health-badge offline';
+                node.textContent = 'Service Offline';
+                node.title = state.backendMessage;
+                return;
+            }
+
             const status = payload ? safeText(payload?.status, 'IN_REVIEW').toUpperCase() : 'UNAVAILABLE';
             const cssClass = HEALTH_CLASS_MAP[status] || 'review';
             node.className = `model-health-badge ${cssClass}`;
-            node.textContent = payload ? (HEALTH_LABEL_MAP[status] || 'In Review') : 'Quality N/A';
+            node.textContent = payload ? (HEALTH_LABEL_MAP[status] || 'In Review') : 'Waiting';
             const psi = toNumber(payload?.psi);
             const drop = toNumber(payload?.coverageDropPct);
             const reason = safeText(payload?.reason, 'Quality status unavailable.');
             node.title = payload
                 ? `Status: ${HEALTH_LABEL_MAP[status] || status} | PSI: ${Number.isFinite(psi) ? psi.toFixed(3) : '--'} | Coverage Drop: ${Number.isFinite(drop) ? drop.toFixed(2) : '--'}% | ${reason}`
-                : 'Quality status unavailable.';
+                : 'Quality status is pending.';
         });
     }
 
     function renderPredictionUnavailable(message) {
-        if (els.pUpValue) els.pUpValue.textContent = '--';
-        if (els.q50Value) els.q50Value.textContent = '--';
-        if (els.intervalWidthValue) els.intervalWidthValue.textContent = '--';
+        if (els.pUpValue) {
+            els.pUpValue.className = 'prediction-value neutral';
+            els.pUpValue.textContent = '--';
+        }
+        if (els.q50Value) {
+            els.q50Value.className = 'prediction-value neutral';
+            els.q50Value.textContent = '--';
+        }
+        if (els.intervalWidthValue) {
+            els.intervalWidthValue.className = 'prediction-value neutral';
+            els.intervalWidthValue.textContent = '--';
+        }
         if (els.explanationSummary) els.explanationSummary.textContent = message || 'Runtime unavailable.';
         if (els.predictionConfidenceTag) {
             els.predictionConfidenceTag.textContent = 'Runtime unavailable';
             els.predictionConfidenceTag.className = 'status-badge info';
         }
+        state.baselineSnapshot = null;
+        renderWhatIfPreview();
     }
 
     function renderRuntimeStatus() {
@@ -590,6 +653,22 @@
         }
     }
 
+    function renderRuntimeOffline(message) {
+        if (els.runtimeStatusBadge) {
+            els.runtimeStatusBadge.className = 'status-badge info';
+            els.runtimeStatusBadge.textContent = 'OFFLINE';
+        }
+
+        if (els.runtimeStatusText) {
+            els.runtimeStatusText.textContent = `${effectiveHorizon()} | ML service unavailable`;
+        }
+
+        if (els.runtimeNoticeBanner) {
+            els.runtimeNoticeBanner.style.display = 'block';
+            els.runtimeNoticeBanner.textContent = message || BACKEND_OFFLINE_COPY;
+        }
+    }
+
     function applyInsightsSelection(selection, triggerSource) {
         state.selection = selection || {};
         const resolvedHorizon = safeText(selection?.resolvedHorizon, '');
@@ -616,25 +695,52 @@
         });
     }
 
+    function resetHeatmapInsights() {
+        if (els.insightPositive) els.insightPositive.textContent = DEFAULT_HEATMAP_INSIGHTS.positive;
+        if (els.insightNegative) els.insightNegative.textContent = DEFAULT_HEATMAP_INSIGHTS.negative;
+        if (els.insightNeutral) els.insightNeutral.textContent = DEFAULT_HEATMAP_INSIGHTS.neutral;
+    }
+
     function renderHeatmapInsights() {
         if (!els.insightPositive || !els.insightNegative || !els.insightNeutral) {
             return;
         }
 
         const features = Array.isArray(state.lastTopFeatures) ? state.lastTopFeatures : [];
+        if (!features.length) {
+            resetHeatmapInsights();
+            return;
+        }
+
         const positive = features.find((feature) => toNumber(feature.value, 0) > 0.01);
         const negative = features.find((feature) => toNumber(feature.value, 0) < -0.01);
         const neutral = features.find((feature) => Math.abs(toNumber(feature.value, 0)) <= 0.01) || features[features.length - 1];
 
-        if (positive) {
-            els.insightPositive.textContent = `If ${formatFeatureName(positive.name)} is bright green, the model reads a bullish push and increases LONG confidence.`;
-        }
-        if (negative) {
-            els.insightNegative.textContent = `If ${formatFeatureName(negative.name)} is red, the model reads bearish pressure and may reduce LONG confidence.`;
-        }
-        if (neutral) {
-            els.insightNeutral.textContent = `If ${formatFeatureName(neutral.name)} stays yellow, the signal is neutral and has limited directional influence.`;
-        }
+        els.insightPositive.textContent = positive
+            ? `If ${formatFeatureName(positive.name)} is bright green, the model reads a bullish push and increases LONG confidence.`
+            : DEFAULT_HEATMAP_INSIGHTS.positive;
+        els.insightNegative.textContent = negative
+            ? `If ${formatFeatureName(negative.name)} is red, the model reads bearish pressure and may reduce LONG confidence.`
+            : DEFAULT_HEATMAP_INSIGHTS.negative;
+        els.insightNeutral.textContent = neutral
+            ? `If ${formatFeatureName(neutral.name)} stays yellow, the signal is neutral and has limited directional influence.`
+            : DEFAULT_HEATMAP_INSIGHTS.neutral;
+    }
+
+    function renderHeatmapInsightsUnavailable() {
+        if (els.insightPositive) els.insightPositive.textContent = 'Positive drivers will appear here after the ML service comes online.';
+        if (els.insightNegative) els.insightNegative.textContent = 'Negative drivers will appear here after the ML service comes online.';
+        if (els.insightNeutral) els.insightNeutral.textContent = 'Neutral drivers and fallback explanations are unavailable while the backend is offline.';
+    }
+
+    function renderTopFeaturesUnavailable(message) {
+        if (!els.featuresList) return;
+        state.lastTopFeatures = [];
+        els.featuresList.innerHTML = [
+            '<div class="feature-list-note">Feature explanations depend on the Model Explorer backend.</div>',
+            `<div style="color: var(--text-muted);">${safeText(message, BACKEND_OFFLINE_COPY)}</div>`,
+        ].join('');
+        renderHeatmapInsightsUnavailable();
     }
 
     function renderTopFeatures(features) {
@@ -696,6 +802,13 @@
         if (els.metricBrier) els.metricBrier.textContent = formatRatio(perf.brierScore, 3);
         if (els.metricEce) els.metricEce.textContent = formatRatio(perf.ece, 3);
         if (els.metricCoverage) els.metricCoverage.textContent = formatPercentNoSign(perf.intervalCoverage, 1);
+    }
+
+    function renderPerformanceUnavailable() {
+        if (els.metricAccuracy) els.metricAccuracy.textContent = '--';
+        if (els.metricBrier) els.metricBrier.textContent = '--';
+        if (els.metricEce) els.metricEce.textContent = '--';
+        if (els.metricCoverage) els.metricCoverage.textContent = '--';
     }
 
     function toggleHeatmapEmpty(show, message) {
@@ -770,6 +883,26 @@
         }
 
         return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.9)`;
+    }
+
+    function clearHeatmapVisuals() {
+        if (state.heatmapChart) {
+            state.heatmapChart.destroy();
+            state.heatmapChart = null;
+        }
+        if (state.waterfallChart) {
+            state.waterfallChart.destroy();
+            state.waterfallChart = null;
+        }
+        if (els.heatmapCanvas) {
+            els.heatmapCanvas.style.cursor = 'default';
+        }
+    }
+
+    function renderHeatmapUnavailable(message) {
+        state.lastHeatmap = null;
+        clearHeatmapVisuals();
+        toggleHeatmapEmpty(true, message || BACKEND_OFFLINE_COPY);
     }
 
     function renderHeatmap(payload) {
@@ -1068,6 +1201,62 @@
         clearComparisonRadar();
     }
 
+    function setBackendOnline() {
+        state.backendStatus = 'online';
+        state.backendMessage = '';
+    }
+
+    function renderBackendOfflineState(error, triggerSource = 'auto') {
+        const message = getBackendOfflineMessage(error);
+        const changed = state.backendStatus !== 'offline' || state.backendMessage !== message;
+
+        state.backendStatus = 'offline';
+        state.backendMessage = message;
+        state.lastPrediction = null;
+        state.lastPerformance = null;
+        state.lastHeatmap = null;
+        state.lastInsights = null;
+        state.healthByModel = {};
+        state.runtimeByModel = {};
+        state.selection = {};
+        state.baselineSnapshot = null;
+
+        if (els.modeBadge) {
+            els.modeBadge.className = 'status-badge info';
+            els.modeBadge.textContent = 'BACKEND OFFLINE';
+        }
+        if (els.loadedModelBadge) {
+            els.loadedModelBadge.className = 'status-badge warning';
+            els.loadedModelBadge.textContent = 'Start npm run start:stack';
+        }
+        if (els.predictionContext) {
+            els.predictionContext.textContent = `${state.asset} | ${state.horizon} Horizon | ${state.model.toUpperCase()} | Service Offline`;
+        }
+        if (els.disclaimer) {
+            els.disclaimer.textContent = 'Model Explorer backend offline | Not for Trading';
+        }
+
+        updateHealthBadges();
+        renderPredictionUnavailable(message);
+        if (els.predictionConfidenceTag) {
+            els.predictionConfidenceTag.textContent = 'Backend offline';
+            els.predictionConfidenceTag.className = 'status-badge info';
+        }
+        renderRuntimeOffline(message);
+        renderHeatmapUnavailable(message);
+        renderTopFeaturesUnavailable('The ML service is offline, so feature contribution data is unavailable.');
+        renderPerformanceUnavailable();
+        renderComparisonUnavailable('Model comparison is unavailable while the Model Explorer backend is offline.');
+        renderEnsembleCard();
+        state.xaiChartMode = 'heatmap';
+        setXaiChartMode('heatmap');
+        renderWhatIfPreview();
+
+        if (triggerSource === 'manual' || changed) {
+            notify('Model Explorer backend is offline. Run "npm run start:stack" and refresh.', 'warning', 4200);
+        }
+    }
+
     function renderWhatIfPreview() {
         const baseline = state.baselineSnapshot;
         if (!baseline) {
@@ -1199,6 +1388,7 @@
 
     function renderInsightsPayload(insights, triggerSource = 'silent') {
         if (!insights) return;
+        setBackendOnline();
         renderMeta(insights.meta);
         state.compatibilityByModel = insights.compatibility || { ...DEFAULT_COMPATIBILITY };
         state.healthByModel = insights.qualityHealth || insights.health || {};
@@ -1246,6 +1436,18 @@
             ]);
 
             if (cycleId !== state.cycleId) return;
+
+            const offlineError = [predictionRes, heatmapRes, performanceRes, insightsRes]
+                .filter((result) => result.status === 'rejected')
+                .map((result) => result.reason)
+                .find((error) => isBackendOfflineError(error));
+
+            if (offlineError) {
+                renderBackendOfflineState(offlineError, triggerSource);
+                return;
+            }
+
+            setBackendOnline();
 
             if (predictionRes.status === 'fulfilled') {
                 state.lastPrediction = predictionRes.value;
@@ -1316,24 +1518,38 @@
         if (!window.api) return;
 
         try {
-            const [modelsRes, assetsRes, healthRes] = await Promise.all([
+            const [modelsRes, assetsRes, healthRes] = await Promise.allSettled([
                 api.getModelExplorerModels(),
                 api.getModelExplorerAssets(),
                 api.getModelExplorerHealth(),
             ]);
 
-            renderMeta({
-                mode: healthRes.mode,
-                modelVersion: healthRes.modelVersion,
-                timestamp: healthRes.loadedAt,
-            });
+            const offlineError = [modelsRes, assetsRes, healthRes]
+                .filter((result) => result.status === 'rejected')
+                .map((result) => result.reason)
+                .find((error) => isBackendOfflineError(error));
 
-            const models = Array.isArray(modelsRes.models) ? modelsRes.models : [];
+            if (offlineError) {
+                renderBackendOfflineState(offlineError, 'silent');
+                return;
+            }
+
+            setBackendOnline();
+
+            if (healthRes.status === 'fulfilled') {
+                renderMeta({
+                    mode: healthRes.value.mode,
+                    modelVersion: healthRes.value.modelVersion,
+                    timestamp: healthRes.value.loadedAt,
+                });
+            }
+
+            const models = modelsRes.status === 'fulfilled' && Array.isArray(modelsRes.value.models) ? modelsRes.value.models : [];
             if (!models.some((model) => model.id === state.model) && models.length > 0) {
                 state.model = models[0].id;
             }
 
-            const assets = Array.isArray(assetsRes.assets) ? assetsRes.assets : [];
+            const assets = assetsRes.status === 'fulfilled' && Array.isArray(assetsRes.value.assets) ? assetsRes.value.assets : [];
             state.assetHorizonMap = {};
             assets.forEach((asset) => {
                 const available = Array.isArray(asset.availableHorizons) ? asset.availableHorizons : [];
@@ -1350,6 +1566,16 @@
 
             syncHorizonAvailability();
             syncModelCompatibility();
+
+            if (modelsRes.status === 'rejected') {
+                notify(`Model catalog load failed: ${modelsRes.reason?.message || modelsRes.reason}`, 'warning', 3200);
+            }
+            if (assetsRes.status === 'rejected') {
+                notify(`Asset catalog load failed: ${assetsRes.reason?.message || assetsRes.reason}`, 'warning', 3200);
+            }
+            if (healthRes.status === 'rejected') {
+                notify(`Model health load failed: ${healthRes.reason?.message || healthRes.reason}`, 'warning', 3200);
+            }
         } catch (error) {
             notify(`Catalog load failed: ${error.message || error}`, 'error', 3600);
         }

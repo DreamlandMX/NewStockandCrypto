@@ -107,7 +107,20 @@ git clone https://github.com/yourusername/stockandcrypto.git
 cd stockandcrypto
 ```
 
-### 2. Start Unified Server
+### 2. Start Local Stack
+
+For the full dashboard, including Model Explorer, start both the unified server and ML service together:
+
+```bash
+npm run start:stack
+```
+
+This starts:
+
+- the unified server on `127.0.0.1:9000`
+- the Model Explorer service on `127.0.0.1:8000`
+
+If you only need the web shell without Model Explorer, you can still start just the unified server:
 
 ```bash
 # Install dependencies (if package.json exists)
@@ -120,7 +133,7 @@ node unified-server.js
 PORT=8080 HOST=0.0.0.0 node unified-server.js
 ```
 
-### 3. Start ML Service (Optional)
+### 3. Start ML Service Manually (Optional)
 
 ```bash
 cd ml-service

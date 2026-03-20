@@ -119,6 +119,14 @@ test('health and metrics endpoints expose runtime state', async () => {
     assert.equal(metricsResult.payload.storage.appDataDir, APP_DATA_DIR);
 });
 
+test('model explorer proxy returns structured 502 json when upstream is unavailable', async () => {
+    const { response, payload } = await requestJson('/api/model-explorer/health');
+    assert.equal(response.status, 502);
+    assert.equal(payload.error, 'Model explorer proxy failed');
+    assert.equal(typeof payload.detail, 'string');
+    assert.ok(payload.detail.length > 0);
+});
+
 test('local auth, notes, and chat work end-to-end against a temp data dir', async () => {
     const email = `qa.smoke.${Date.now()}@example.com`;
     const password = 'Password123!';

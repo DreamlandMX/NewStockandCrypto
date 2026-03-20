@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node unified-server.js",
+    "start:stack": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Start-LocalStack.ps1 -ModelMode live",
     "position-server": "node server/position-server.js",
     "start:all": "concurrently \"npm start\" \"npm run position-server\"",
     "test": "npm run test:node",
