@@ -7313,10 +7313,31 @@ async function buildHomeLandingPayload() {
     const featuredCard = cards
         .filter((card) => Number.isFinite(card.totalScore))
         .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))[0] || cards[0];
+    const cryptoCards = cards.filter((card) => card.market === 'crypto');
+    const cryptoCardsBackfilledLive = cryptoCards.length > 0
+        && cryptoCards.every((card) => !card.unavailable && !card.stale && card.signalSource === 'binance_us_benchmark');
+    const aggregateStaleReasons = Array.isArray(aggregate.meta?.staleReasons) ? aggregate.meta.staleReasons : [];
+    const suppressedStaleReasons = cryptoCardsBackfilledLive
+        ? aggregateStaleReasons.filter((reason) => /^crypto:/i.test(String(reason || '').trim()))
+        : [];
+    const visibleStaleReasons = cryptoCardsBackfilledLive
+        ? aggregateStaleReasons.filter((reason) => !/^crypto:/i.test(String(reason || '').trim()))
+        : aggregateStaleReasons;
+    const visibleCardsAreLive = cards.every((card) => !card.unavailable && !card.stale);
 
     return {
         meta: {
             ...aggregate.meta,
+            stale: visibleStaleReasons.length > 0 || !visibleCardsAreLive,
+            staleReasons: visibleStaleReasons,
+            degradedSources: suppressedStaleReasons.length
+                ? suppressedStaleReasons.map((reason) => ({
+                    market: 'crypto',
+                    status: 'backfilled-live',
+                    message: reason,
+                    note: 'Homepage crypto cards are being served from live Binance benchmark data.'
+                }))
+                : [],
             lastUpdatedAt: aggregate.meta?.lastUpdatedAt || aggregate.summary?.lastUpdatedAt || new Date().toISOString(),
             refreshIntervalSec: aggregate.meta?.refreshIntervalSec || aggregate.summary?.refreshIntervalSec || TRACKING_REFRESH_INTERVAL_SEC
         },
