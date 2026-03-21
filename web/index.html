@@ -41,6 +41,8 @@
         .home-inline-note { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: 1.15rem; color: var(--text-muted); font-size: .76rem; }
         .home-inline-note span, .home-brief-item, .home-lane-item, .home-workflow-step, .home-ops-item { padding: .2rem .5rem; border-radius: 999px; background: rgba(255,255,255,.04); }
         .home-hero-status { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.8rem; }
+        .home-degraded-note { margin-top: .95rem; color: var(--text-muted); font-size: .83rem; line-height: 1.65; max-width: 720px; }
+        .home-degraded-note strong { color: var(--home-brass); }
         .home-hero-metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1rem; margin-top: 1.65rem; }
         .home-hero-metric { padding-top: 1rem; border-top: 1px solid rgba(255,255,255,.07); }
         .home-hero-metric-value { font-size: clamp(2rem,3vw,3rem); font-weight: 800; font-family: var(--font-mono); line-height: 1; color: var(--text-primary); }
@@ -133,6 +135,7 @@
                         <div class="home-actions"><a href="model-explorer.html" class="btn btn-primary btn-lg">Inspect Models</a><a href="tracking.html" class="btn btn-secondary btn-lg">Open Tracking</a></div>
                         <div class="home-inline-note"><span>Signal-first workflow</span><span>Live factor panel</span><span>Execution-oriented market view</span></div>
                         <div class="home-hero-status"><span class="status-badge success" id="homeStatusBadge">LIVE</span><span class="status-badge info" id="homeRefreshBadge">Refresh 10s</span><span class="status-badge info" id="homeUpdatedBadge">Updated --</span><span class="status-badge info" id="homeActionBadge">Latest Action --</span></div>
+                        <div class="home-degraded-note" id="homeDegradedNote" hidden></div>
                         <div class="home-hero-metrics">
                             <div class="home-hero-metric"><div class="home-hero-metric-value gradient" id="heroCoverageValue">--</div><div class="home-hero-metric-label">Live Coverage</div><div class="home-hero-metric-meta" id="heroCoverageMeta">Loading live coverage...</div></div>
                             <div class="home-hero-metric"><div class="home-hero-metric-value" id="heroAssetsValue">--</div><div class="home-hero-metric-label">Assets Covered</div><div class="home-hero-metric-meta" id="heroAssetsMeta">Loading asset counts...</div></div>

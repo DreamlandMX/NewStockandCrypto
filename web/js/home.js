@@ -30,6 +30,7 @@ function cacheHomeDom() {
         'actionBoardCoverageValue', 'actionBoardCoverageMeta',
         'actionBoardFastMove', 'actionBoardDeskBias',
         'heroRibbonItems',
+        'homeDegradedNote',
         'marketOverviewGrid',
         'featurePanelBadge', 'featurePanelTitle', 'featurePanelMeta', 'featurePanelList', 'featurePanelExplanation',
         'homeFooterCopy'
@@ -106,6 +107,7 @@ function syncSelectedCard() {
 
 function renderHome() {
     renderHeroStatus();
+    renderDegradedNote();
     renderHeroMetrics();
     renderHeroRibbon();
     renderOverviewCards();
@@ -152,6 +154,25 @@ function renderHeroStatus() {
     homeDom.homeUpdatedBadge.textContent = `Updated ${formatUtc(meta.lastUpdatedAt)}`;
     homeDom.homeActionBadge.textContent = `Latest Action ${latestActionAt ? formatUtc(latestActionAt) : 'Waiting'}`;
     homeDom.homeActionBadge.className = `status-badge ${stale ? 'warning' : 'info'}`;
+}
+
+function renderDegradedNote() {
+    const note = homeDom.homeDegradedNote;
+    if (!note) return;
+
+    const degradedSources = Array.isArray(homeState.payload?.meta?.degradedSources)
+        ? homeState.payload.meta.degradedSources
+        : [];
+    const cryptoFallbackActive = degradedSources.some((item) => item?.market === 'crypto' && item?.status === 'backfilled-live');
+
+    if (cryptoFallbackActive) {
+        note.hidden = false;
+        note.innerHTML = '<strong>Crypto backup live feed active.</strong> Homepage crypto cards are being served from a realtime Binance benchmark while the broader upstream crypto market source is temporarily rate-limited.';
+        return;
+    }
+
+    note.hidden = true;
+    note.textContent = '';
 }
 
 function renderHeroMetrics() {
@@ -295,6 +316,10 @@ function renderHardError(error) {
     homeDom.homeStatusBadge.className = 'status-badge danger';
     homeDom.homeUpdatedBadge.textContent = 'Updated --';
     homeDom.homeActionBadge.textContent = 'Desk feed unavailable';
+    if (homeDom.homeDegradedNote) {
+        homeDom.homeDegradedNote.hidden = true;
+        homeDom.homeDegradedNote.textContent = '';
+    }
     homeDom.marketOverviewGrid.innerHTML = `<div class="home-panel-empty">Home landing unavailable: ${escapeHtml(error.message)}</div>`;
     homeDom.featurePanelList.innerHTML = '<div class="home-panel-empty">Live factor payload unavailable.</div>';
     homeDom.featurePanelExplanation.textContent = 'The live desk feed is currently unavailable.';
