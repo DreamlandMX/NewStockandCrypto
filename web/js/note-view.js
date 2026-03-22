@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await waitForSupabaseClient();
         await initializeSharedView();
     } catch (error) {
-        console.error('Shared idea page failed:', error);
+        console.error('Shared note page failed:', error);
         showError();
     }
 });
@@ -57,7 +57,7 @@ async function initializeSharedView() {
 }
 
 async function renderSharedNote(note, relatedIdeas) {
-    document.getElementById('noteTitle').textContent = note.title || 'Untitled Idea';
+    document.getElementById('noteTitle').textContent = note.title || 'Untitled Note';
     document.getElementById('noteMarket').textContent = note.market || 'General';
     document.getElementById('noteMarket').className = `status-badge ${getMarketClass(note.market)}`;
     document.getElementById('noteAuthor').textContent = `By ${note.author?.display_name || 'Community Member'}`;
@@ -79,11 +79,11 @@ async function renderSharedNote(note, relatedIdeas) {
             .map((idea) => `
                 <a class="related-card" href="note-view.html?share=${idea.share_id}">
                     <span class="status-badge ${getMarketClass(idea.market)}">${escapeHtml(idea.market || 'General')}</span>
-                    <h4>${escapeHtml(idea.title || 'Untitled Idea')}</h4>
+                    <h4>${escapeHtml(idea.title || 'Untitled Note')}</h4>
                     <p style="margin:0; color: var(--text-secondary); font-size: 0.86rem; line-height: 1.55;">${escapeHtml(idea.excerpt || '')}</p>
                 </a>
             `).join('')
-        : '<span style="color: var(--text-secondary);">No related public ideas yet.</span>';
+        : '<span style="color: var(--text-secondary);">No related shared notes yet.</span>';
 }
 
 function showError() {

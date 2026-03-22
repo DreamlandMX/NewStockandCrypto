@@ -57,7 +57,7 @@ async function loadFeaturedIdeas() {
         return;
     }
 
-    container.innerHTML = '<div class="muted-copy">Loading community ideas...</div>';
+    container.innerHTML = '<div class="muted-copy">Loading shared notes...</div>';
 
     try {
         const payload = await window.SupabaseClient.communityNotes.listIdeas({
@@ -68,20 +68,20 @@ async function loadFeaturedIdeas() {
         });
         const ideas = Array.isArray(payload?.ideas) ? payload.ideas : [];
         if (!ideas.length) {
-            container.innerHTML = '<div class="muted-copy">No public ideas have been published yet.</div>';
+            container.innerHTML = '<div class="muted-copy">No shared notes have been published yet.</div>';
             return;
         }
 
         container.innerHTML = ideas.map((idea) => `
             <a class="idea-rail-item" href="${idea.share_id ? `note-view.html?share=${idea.share_id}` : `note-detail.html?id=${idea.id}`}">
                 <span class="status-badge ${getMarketBadgeTone(idea.market)}">${escapeHtml(idea.market || 'General')}</span>
-                <h4>${escapeHtml(idea.title || 'Untitled idea')}</h4>
-                <p>${escapeHtml(idea.excerpt || 'Open the article to read the full market thesis.')}</p>
+                <h4>${escapeHtml(idea.title || 'Untitled note')}</h4>
+                <p>${escapeHtml(idea.excerpt || 'Open the note to read the full entry.')}</p>
             </a>
         `).join('');
     } catch (error) {
         console.error('Load featured ideas error:', error);
-        container.innerHTML = '<div class="muted-copy">Featured ideas unavailable right now.</div>';
+        container.innerHTML = '<div class="muted-copy">Featured notes unavailable right now.</div>';
     }
 }
 

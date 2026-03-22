@@ -32,11 +32,11 @@
                 { href: 'session-index-us.html', title: 'US Sessions', description: 'Index rhythm through the US day' }
             ]
         },
+        { type: 'link', href: 'notes.html', label: 'Notes' },
         {
             type: 'dropdown',
             label: 'Community',
             items: [
-                { href: 'notes.html', title: 'Ideas Feed', description: 'Published trade ideas and notes' },
                 { href: 'chat.html', title: 'Market Lounges', description: 'Live discussion and desk chat' }
             ]
         },

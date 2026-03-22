@@ -153,12 +153,33 @@ test('local auth, notes, and chat work end-to-end against a temp data dir', asyn
     assert.equal(meResult.response.status, 200);
     assert.equal(meResult.payload.user.email, email);
 
+    const notebooksResult = await requestJson('/api/notebooks', {
+        headers: { Cookie: cookie }
+    });
+    assert.equal(notebooksResult.response.status, 200);
+    assert.equal(notebooksResult.payload.notebooks.length, 1);
+    assert.equal(notebooksResult.payload.notebooks[0].name, 'My Notes');
+
+    const customNotebookResult = await requestJson('/api/notebooks', {
+        method: 'POST',
+        headers: { Cookie: cookie },
+        body: JSON.stringify({
+            name: 'Research Lab',
+            color: 'green',
+            icon: 'folder'
+        })
+    });
+    assert.equal(customNotebookResult.response.status, 201);
+    assert.equal(customNotebookResult.payload.notebook.name, 'Research Lab');
+    const customNotebookId = customNotebookResult.payload.notebook.id;
+
     const noteResult = await requestJson('/api/notes', {
         method: 'POST',
         headers: { Cookie: cookie },
         body: JSON.stringify({
             title: 'Smoke note',
             content: '## Setup\n\n- Entry\n- Risk\n\n> Watchlist',
+            notebook_id: customNotebookId,
             market: 'Crypto',
             tags: ['smoke', 'test'],
             is_public: true
@@ -166,6 +187,21 @@ test('local auth, notes, and chat work end-to-end against a temp data dir', asyn
     });
     assert.equal(noteResult.response.status, 201);
     assert.equal(noteResult.payload.note.title, 'Smoke note');
+    assert.equal(noteResult.payload.note.notebook_id, customNotebookId);
+    assert.equal(noteResult.payload.note.notebook.name, 'Research Lab');
+
+    const filteredNotesResult = await requestJson(`/api/notes?notebook_id=${customNotebookId}`, {
+        headers: { Cookie: cookie }
+    });
+    assert.equal(filteredNotesResult.response.status, 200);
+    assert.equal(filteredNotesResult.payload.notes.length, 1);
+
+    const noteId = noteResult.payload.note.id;
+    const noteDetailResult = await requestJson(`/api/notes/${noteId}`, {
+        headers: { Cookie: cookie }
+    });
+    assert.equal(noteDetailResult.response.status, 200);
+    assert.ok(noteDetailResult.payload.note.last_opened_at);
 
     const notesResult = await requestJson('/api/notes', {
         headers: { Cookie: cookie }
@@ -200,4 +236,10 @@ test('local auth, notes, and chat work end-to-end against a temp data dir', asyn
     });
     assert.equal(messagesResult.response.status, 200);
     assert.ok(messagesResult.payload.messages.some((message) => message.content === 'Smoke test message'));
+
+    const discoverResult = await requestJson('/api/community/ideas?visibility=public', {
+        headers: { Cookie: cookie }
+    });
+    assert.equal(discoverResult.response.status, 200);
+    assert.ok(discoverResult.payload.ideas.some((note) => note.title === 'Smoke note'));
 });

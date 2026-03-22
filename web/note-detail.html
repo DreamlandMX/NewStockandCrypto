@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Idea Article - StockandCrypto</title>
+    <title>Note Detail - StockandCrypto</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <style>
@@ -179,15 +179,16 @@
                     <li class="nav-dropdown">
                         <button class="nav-link nav-dropdown-toggle active" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
                         <ul class="nav-dropdown-menu" id="communityMenu">
-                            <li><a href="notes.html" class="nav-link active">Ideas Feed</a></li>
+                            <li><a href="notes.html?view=my" class="nav-link active">Notes</a></li>
                             <li><a href="chat.html" class="nav-link">Market Lounges</a></li>
                         </ul>
                     </li>
                 </ul>
                 <button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
             </nav>
-            <div class="nav-actions">
-                <a href="notes.html" class="btn btn-secondary btn-sm">Back to Feed</a>
+            <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                <a href="notes.html?view=my" class="btn btn-secondary btn-sm" id="backToNotesBtn">Back to Notes</a>
+                <div class="nav-actions"></div>
             </div>
         </div>
     </header>
@@ -196,13 +197,13 @@
         <div class="container">
             <div id="loadingState" class="loading-wrap">
                 <div class="spinner"></div>
-                <p style="margin-top: 1rem;">Loading idea article...</p>
+                <p style="margin-top: 1rem;">Loading note...</p>
             </div>
 
             <div id="errorState" class="error-wrap" style="display:none;">
-                <h2>Idea Not Found</h2>
-                <p style="color: var(--text-secondary);">The article you are looking for does not exist or is not available to this account.</p>
-                <a href="notes.html" class="btn btn-primary" style="margin-top: 1rem;">Back to Ideas Feed</a>
+                <h2>Note Not Found</h2>
+                <p style="color: var(--text-secondary);">The note you are looking for does not exist or is not available to this account.</p>
+                <a href="notes.html?view=my" class="btn btn-primary" style="margin-top: 1rem;" id="errorBackBtn">Back to Notes</a>
             </div>
 
             <div id="articleState" style="display:none;">
@@ -222,7 +223,7 @@
                             <div class="article-hero-bottom">
                                 <div>
                                     <span class="section-tag" id="articleVisibility">Private Draft</span>
-                                    <h1 class="article-title" id="noteTitle">Idea title</h1>
+                                    <h1 class="article-title" id="noteTitle">Note title</h1>
                                     <div class="article-submeta">
                                         <span id="noteAuthor">By Community Member</span>
                                         <span id="noteDate">Published --</span>
@@ -241,9 +242,9 @@
 
                     <aside>
                         <section class="article-side article-section">
-                            <h3>Article Controls</h3>
+                            <h3>Note Controls</h3>
                             <div class="share-box" id="shareBox" style="margin-bottom: 1rem;">
-                                <input type="text" class="form-input" id="shareLink" readonly placeholder="Publish the idea to generate a share link">
+                                <input type="text" class="form-input" id="shareLink" readonly placeholder="Publish the note to generate a share link">
                                 <button type="button" class="btn btn-primary btn-sm" id="copyShareBtn">Copy Link</button>
                             </div>
                             <label style="display:flex; align-items:center; gap:0.65rem; color: var(--text-secondary); margin-bottom: 1rem;">
@@ -256,7 +257,7 @@
                         </section>
 
                         <section class="article-side article-section">
-                            <h3>Desk Ownership</h3>
+                            <h3>Author</h3>
                             <div class="author-chip">
                                 <span class="author-badge" id="authorBadge">C</span>
                                 <div>
@@ -267,16 +268,16 @@
                         </section>
 
                         <section class="article-side article-section">
-                            <h3>Related Ideas</h3>
+                            <h3>Related Notes</h3>
                             <div class="related-list" id="relatedIdeas">
-                                <span style="color: var(--text-secondary);">Loading related ideas...</span>
+                                <span style="color: var(--text-secondary);">Loading related notes...</span>
                             </div>
                         </section>
 
                         <section class="article-side article-section">
                             <h3>Version History</h3>
                             <div id="versionList">
-                                <span style="color: var(--text-secondary);">Loading article versions...</span>
+                                <span style="color: var(--text-secondary);">Loading note versions...</span>
                             </div>
                         </section>
                     </aside>

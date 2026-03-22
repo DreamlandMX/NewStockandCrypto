@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shared Idea - StockandCrypto</title>
+    <title>Shared Note - StockandCrypto</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/components.css">
     <style>
@@ -90,8 +90,8 @@
                 </a>
             </div>
             <div class="nav-actions">
-                <a href="notes.html" class="btn btn-secondary btn-sm">Explore Ideas Feed</a>
-                <a href="register.html?redirect=notes.html" class="btn btn-primary btn-sm">Join Community</a>
+                <a href="notes.html?view=shared" class="btn btn-secondary btn-sm">Open Shared Notes</a>
+                <a href="register.html?redirect=notes.html%3Fview%3Dmy" class="btn btn-primary btn-sm">Create Notes Account</a>
             </div>
         </div>
     </header>
@@ -100,13 +100,13 @@
         <div class="container">
             <div id="loadingState" class="loading-wrap">
                 <div class="spinner"></div>
-                <p style="margin-top: 1rem;">Loading shared idea...</p>
+                <p style="margin-top: 1rem;">Loading shared note...</p>
             </div>
 
             <div id="errorState" class="error-wrap" style="display:none;">
-                <h2>Shared Idea Not Available</h2>
-                <p style="color: var(--text-secondary);">This idea is private, missing, or the share link is no longer valid.</p>
-                <a href="notes.html" class="btn btn-primary" style="margin-top: 1rem;">Browse Community Ideas</a>
+                <h2>Shared Note Not Available</h2>
+                <p style="color: var(--text-secondary);">This note is private, missing, or the share link is no longer valid.</p>
+                <a href="notes.html?view=shared" class="btn btn-primary" style="margin-top: 1rem;">Browse Shared Notes</a>
             </div>
 
             <div id="publicState" style="display:none;">
@@ -115,10 +115,10 @@
                         <div class="public-hero">
                             <div style="display:flex; justify-content:space-between; gap:1rem; align-items:flex-start;">
                                 <span class="status-badge info" id="noteMarket">General</span>
-                                <span class="section-tag">Shared Idea</span>
+                                <span class="section-tag">Shared Note</span>
                             </div>
                             <div>
-                                <h1 class="public-title" id="noteTitle">Idea title</h1>
+                                <h1 class="public-title" id="noteTitle">Note title</h1>
                                 <div class="public-meta">
                                     <span id="noteAuthor">By Community Member</span>
                                     <span id="noteDate">Published --</span>
@@ -136,14 +136,14 @@
                         <section class="public-side public-section">
                             <h3 style="margin:0 0 0.85rem;">Why this page is shareable</h3>
                             <p style="color: var(--text-secondary); line-height: 1.7; margin:0;">
-                                Public ideas are readable without signing in. Private drafts stay inside the author's own workspace until they choose to publish them.
+                                Published notes are readable without signing in. Private drafts stay inside the author's own workspace until they choose to publish them.
                             </p>
                         </section>
 
                         <section class="public-side public-section">
-                            <h3 style="margin:0 0 0.85rem;">Related ideas</h3>
+                            <h3 style="margin:0 0 0.85rem;">Related notes</h3>
                             <div class="related-list" id="relatedIdeas">
-                                <span style="color: var(--text-secondary);">Loading related ideas...</span>
+                                <span style="color: var(--text-secondary);">Loading related notes...</span>
                             </div>
                         </section>
                     </aside>

@@ -302,11 +302,15 @@
             const mode = await getNotesMode();
             if (mode === 'legacy') {
                 const query = new URLSearchParams();
+                if (options.notebook_id !== undefined && options.notebook_id !== null && options.notebook_id !== '') {
+                    query.set('notebook_id', String(options.notebook_id));
+                }
                 if (options.market) query.set('market', options.market);
                 if (options.tag) query.set('tag', options.tag);
                 if (options.search) query.set('search', options.search);
                 if (options.is_pinned !== undefined) query.set('pinned', String(options.is_pinned));
                 if (options.is_favorite !== undefined) query.set('favorite', String(options.is_favorite));
+                if (options.recent !== undefined) query.set('recent', String(options.recent));
                 if (options.orderBy || options.sortBy) query.set('sortBy', options.orderBy || options.sortBy);
                 if (options.sortOrder) query.set('sortOrder', options.sortOrder);
                 if (options.ascending !== undefined) query.set('ascending', String(options.ascending));
@@ -425,6 +429,7 @@
                 .from('notes')
                 .insert({
                     user_id: user.id,
+                    notebook_id: note.notebook_id ?? null,
                     title: note.title || 'Untitled',
                     content: note.content || '',
                     market: note.market || 'General',
@@ -531,21 +536,10 @@
          * Get popular tags for current user
          */
         async getPopularTags(limit = 10) {
-            await initSupabase();
-            const user = await auth.getCurrentUser();
-            if (!user) return [];
-
-            const { data, error } = await supabase
-                .from('notes')
-                .select('tags')
-                .eq('user_id', user.id);
-
-            if (error) throw error;
-
-            // Count tags
+            const rows = await this.get({ limit: 1000 });
             const tagCounts = {};
-            (data || []).forEach(note => {
-                (note.tags || []).forEach(tag => {
+            (rows || []).forEach((note) => {
+                (note.tags || []).forEach((tag) => {
                     tagCounts[tag] = (tagCounts[tag] || 0) + 1;
                 });
             });
@@ -560,10 +554,8 @@
          * Get statistics
          */
         async getStats() {
-            await initSupabase();
-            const user = await auth.getCurrentUser();
-            if (!user) return { total: 0, week: 0, crypto: 0, equity: 0 };
-
+            const mode = await getNotesMode();
+            if (!mode) return { total: 0, week: 0, crypto: 0, equity: 0 };
             const notes = await this.get({ limit: 1000 });
             const now = new Date();
             const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -574,6 +566,40 @@
                 crypto: notes.filter(n => n.market === 'Crypto').length,
                 equity: notes.filter(n => ['CN A-Shares', 'US Equities'].includes(n.market)).length
             };
+        }
+    };
+
+    const notebooks = {
+        async list() {
+            const payload = await legacyNotesRequest('/notebooks');
+            return payload.notebooks || [];
+        },
+
+        async getOne(notebookId) {
+            const payload = await legacyNotesRequest(`/notebooks/${encodeURIComponent(notebookId)}`);
+            return payload.notebook || null;
+        },
+
+        async create(notebook) {
+            const payload = await legacyNotesRequest('/notebooks', {
+                method: 'POST',
+                body: notebook
+            });
+            return payload.notebook || null;
+        },
+
+        async update(notebookId, updates) {
+            const payload = await legacyNotesRequest(`/notebooks/${encodeURIComponent(notebookId)}`, {
+                method: 'PATCH',
+                body: updates
+            });
+            return payload.notebook || null;
+        },
+
+        async delete(notebookId) {
+            return legacyNotesRequest(`/notebooks/${encodeURIComponent(notebookId)}`, {
+                method: 'DELETE'
+            });
         }
     };
 
@@ -1202,6 +1228,7 @@
         
         auth,
         notes,
+        notebooks,
         communityNotes,
         chat,
         channels,

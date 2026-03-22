@@ -464,6 +464,7 @@ function requireAuthenticatedSiteUser(req, res) {
 
 function normalizeNotePayload(body = {}) {
     return {
+        notebook_id: body.notebook_id ?? body.notebookId ?? null,
         title: body.title,
         content: body.content,
         market: body.market,
@@ -471,6 +472,15 @@ function normalizeNotePayload(body = {}) {
         is_pinned: body.is_pinned,
         is_favorite: body.is_favorite,
         is_public: body.is_public
+    };
+}
+
+function normalizeNotebookPayload(body = {}) {
+    return {
+        name: body.name,
+        color: body.color,
+        icon: body.icon,
+        sort_order: body.sort_order ?? body.sortOrder ?? 0
     };
 }
 
@@ -524,11 +534,13 @@ async function handleNotesCollectionRoute(req, res, parsedUrl) {
 
     if (req.method === 'GET') {
         const notes = notesStore.listNotes(user.id, {
+            notebook_id: parsedUrl.searchParams.get('notebook_id') || parsedUrl.searchParams.get('notebookId'),
             market: parsedUrl.searchParams.get('market'),
             tag: parsedUrl.searchParams.get('tag'),
             search: parsedUrl.searchParams.get('search'),
             pinned: parsedUrl.searchParams.get('pinned'),
             favorite: parsedUrl.searchParams.get('favorite'),
+            recent: parsedUrl.searchParams.get('recent'),
             sortBy: parsedUrl.searchParams.get('sortBy') || parsedUrl.searchParams.get('orderBy'),
             sortOrder: parsedUrl.searchParams.get('sortOrder') || (parsedUrl.searchParams.get('ascending') === 'true' ? 'asc' : 'desc'),
             limit: parsedUrl.searchParams.get('limit'),
@@ -548,6 +560,75 @@ async function handleNotesCollectionRoute(req, res, parsedUrl) {
     sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
 }
 
+async function handleNotebooksCollectionRoute(req, res) {
+    const user = requireAuthenticatedSiteUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (req.method === 'GET') {
+        const notebooks = notesStore.listNotebooks(user.id);
+        sendJson(res, 200, { success: true, notebooks });
+        return;
+    }
+
+    if (req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const notebook = notesStore.createNotebook(user.id, normalizeNotebookPayload(body));
+        sendJson(res, 201, { success: true, notebook });
+        return;
+    }
+
+    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+}
+
+async function handleNotebookItemRoute(req, res, notebookId) {
+    const user = requireAuthenticatedSiteUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (req.method === 'GET') {
+        const notebook = notesStore.getNotebook(user.id, notebookId);
+        if (!notebook) {
+            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Notebook not found.' });
+            return;
+        }
+        sendJson(res, 200, { success: true, notebook });
+        return;
+    }
+
+    if (req.method === 'PATCH' || req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        const notebook = notesStore.updateNotebook(user.id, notebookId, normalizeNotebookPayload(body));
+        if (!notebook) {
+            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Notebook not found.' });
+            return;
+        }
+        sendJson(res, 200, { success: true, notebook });
+        return;
+    }
+
+    if (req.method === 'DELETE') {
+        const result = notesStore.deleteNotebook(user.id, notebookId);
+        if (!result.ok) {
+            const message = result.reason === 'default_notebook'
+                ? 'The default notebook cannot be deleted.'
+                : 'Notebook not found.';
+            sendJson(res, result.reason === 'default_notebook' ? 400 : 404, {
+                success: false,
+                error: result.reason === 'default_notebook' ? 'DEFAULT_NOTEBOOK' : 'NOT_FOUND',
+                message
+            });
+            return;
+        }
+        sendJson(res, 200, { success: true, ...result });
+        return;
+    }
+
+    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
+}
+
 async function handleNoteItemRoute(req, res, noteId) {
     const user = requireAuthenticatedSiteUser(req, res);
     if (!user) {
@@ -555,7 +636,7 @@ async function handleNoteItemRoute(req, res, noteId) {
     }
 
     if (req.method === 'GET') {
-        const note = notesStore.getNoteForUser(user.id, noteId);
+        const note = notesStore.getNoteForUser(user.id, noteId, { touch: true });
         if (!note) {
             sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
             return;
@@ -7852,6 +7933,15 @@ const server = http.createServer((req, res) => {
     }
     if (parsedUrl.pathname === '/api/chat/presence') {
         handleAsyncRoute(res, handleChatPresenceRoute(req, res, parsedUrl), 'CHAT_PRESENCE_FAILED');
+        return;
+    }
+    if (parsedUrl.pathname === '/api/notebooks') {
+        handleAsyncRoute(res, handleNotebooksCollectionRoute(req, res), 'NOTEBOOKS_FAILED');
+        return;
+    }
+    if (/^\/api\/notebooks\/\d+$/.test(parsedUrl.pathname)) {
+        const notebookId = Number(parsedUrl.pathname.split('/')[3]);
+        handleAsyncRoute(res, handleNotebookItemRoute(req, res, notebookId), 'NOTEBOOK_ITEM_FAILED');
         return;
     }
     if (parsedUrl.pathname === '/api/notes') {

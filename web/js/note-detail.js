@@ -73,7 +73,7 @@ async function initializeNoteDetail() {
             document.getElementById('shareLink')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     } catch (error) {
-        console.error('Failed to load idea article:', error);
+        console.error('Failed to load note detail:', error);
         showError();
     }
 }
@@ -81,12 +81,12 @@ async function initializeNoteDetail() {
 async function renderArticle() {
     const noteBody = document.getElementById('noteBody');
     const marketClass = getMarketClass(currentNote.market);
-    const visibilityText = currentNote.is_public ? 'Public Idea' : 'Private Draft';
+    const visibilityText = currentNote.is_public ? 'Published Note' : 'Private Draft';
     const visibilityTone = currentNote.is_public ? 'success' : 'warning';
     const authorName = currentNote.author?.display_name || 'Community Member';
     const shareLink = currentNote.share_id ? `${window.location.origin}/note-view.html?share=${currentNote.share_id}` : '';
 
-    document.getElementById('noteTitle').textContent = currentNote.title || 'Untitled Idea';
+    document.getElementById('noteTitle').textContent = currentNote.title || 'Untitled Note';
     document.getElementById('noteMarket').textContent = currentNote.market || 'General';
     document.getElementById('noteMarket').className = `status-badge ${marketClass}`;
     document.getElementById('articleVisibility').textContent = visibilityText;
@@ -97,7 +97,7 @@ async function renderArticle() {
     document.getElementById('noteReadTime').textContent = `${currentNote.stats?.read_minutes || estimateReadMinutes(currentNote.content)} min read`;
     document.getElementById('authorName').textContent = authorName;
     document.getElementById('authorBadge').textContent = authorName.charAt(0).toUpperCase() || 'C';
-    document.getElementById('authorRole').textContent = currentNote.is_owner ? 'Your published desk idea' : 'Community contributor';
+    document.getElementById('authorRole').textContent = currentNote.is_owner ? 'Your note workspace' : 'Shared notes contributor';
     document.getElementById('publicToggle').checked = Boolean(currentNote.is_public);
     document.getElementById('shareLink').value = currentNote.is_public ? shareLink : '';
     document.getElementById('pinBtn').textContent = currentNote.is_pinned ? 'Unpin' : 'Pin';
@@ -112,6 +112,7 @@ async function renderArticle() {
     renderStats();
     renderRelatedIdeas();
     updateOwnerControls();
+    updateBackLinks();
 }
 
 function updateOwnerControls() {
@@ -155,14 +156,14 @@ function renderStats() {
 function renderRelatedIdeas() {
     const container = document.getElementById('relatedIdeas');
     if (!relatedIdeas.length) {
-        container.innerHTML = '<span style="color: var(--text-secondary);">No related ideas yet.</span>';
+        container.innerHTML = '<span style="color: var(--text-secondary);">No related notes yet.</span>';
         return;
     }
 
     container.innerHTML = relatedIdeas.map((idea) => `
         <a class="related-card" href="note-detail.html?id=${idea.id}">
             <span class="status-badge ${getMarketClass(idea.market)}">${escapeHtml(idea.market || 'General')}</span>
-            <h4>${escapeHtml(idea.title || 'Untitled Idea')}</h4>
+            <h4>${escapeHtml(idea.title || 'Untitled Note')}</h4>
             <p style="margin:0; color: var(--text-secondary); font-size: 0.86rem; line-height: 1.55;">${escapeHtml(idea.excerpt || '')}</p>
         </a>
     `).join('');
@@ -196,7 +197,7 @@ async function loadVersions() {
 
 function bindControls() {
     document.getElementById('editBtn')?.addEventListener('click', () => {
-        window.location.href = `notes.html?edit=${currentNote.id}`;
+        window.location.href = `notes.html?view=my&edit=${currentNote.id}`;
     });
 
     document.getElementById('pinBtn')?.addEventListener('click', async () => {
@@ -218,7 +219,7 @@ function bindControls() {
             currentNote = payload.note;
             relatedIdeas = payload.related || [];
             await renderArticle();
-            showToast(currentNote.is_public ? 'Idea published to the feed.' : 'Idea returned to private draft mode.', 'success');
+            showToast(currentNote.is_public ? 'Note published to shared notes.' : 'Note returned to private draft mode.', 'success');
         } catch (error) {
             console.error('Failed to update publish state:', error);
             event.target.checked = !event.target.checked;
@@ -236,16 +237,16 @@ function bindControls() {
 
     document.getElementById('deleteBtn')?.addEventListener('click', async () => {
         if (!currentNote.is_owner) return;
-        if (!window.confirm('Delete this idea permanently?')) return;
+        if (!window.confirm('Delete this note permanently?')) return;
         try {
             await window.SupabaseClient.notes.delete(currentNote.id);
-            showToast('Idea deleted.', 'success');
+            showToast('Note deleted.', 'success');
             window.setTimeout(() => {
-                window.location.href = 'notes.html';
+                window.location.href = 'notes.html?view=my';
             }, 500);
         } catch (error) {
-            console.error('Failed to delete idea:', error);
-            showToast('Unable to delete the idea.', 'error');
+            console.error('Failed to delete note:', error);
+            showToast('Unable to delete the note.', 'error');
         }
     });
 }
@@ -260,14 +261,14 @@ async function toggleOwnerState(updateAction) {
         await renderArticle();
     } catch (error) {
         console.error('Failed to update owner state:', error);
-        showToast('Unable to update the article.', 'error');
+        showToast('Unable to update the note.', 'error');
     }
 }
 
 async function copyShareLink() {
     if (!currentNote.is_public) {
         if (!currentNote.is_owner) {
-            showToast('This idea is private and cannot be shared publicly.', 'error');
+            showToast('This note is private and cannot be shared publicly.', 'error');
             return;
         }
 
@@ -279,14 +280,31 @@ async function copyShareLink() {
             await renderArticle();
         } catch (error) {
             console.error('Failed to publish before sharing:', error);
-            showToast('Publish the idea before sharing it.', 'error');
+            showToast('Publish the note before sharing it.', 'error');
             return;
         }
     }
 
     const shareUrl = `${window.location.origin}/note-view.html?share=${currentNote.share_id}`;
     await copyToClipboard(shareUrl);
-    showToast('Public share link copied.', 'success');
+    showToast('Public note link copied.', 'success');
+}
+
+function updateBackLinks() {
+    const targetView = currentNote?.is_owner ? 'my' : 'shared';
+    const href = `notes.html?view=${targetView}`;
+    const label = targetView === 'my' ? 'Back to Notes' : 'Back to Shared Notes';
+    const backButton = document.getElementById('backToNotesBtn');
+    const errorBackButton = document.getElementById('errorBackBtn');
+
+    if (backButton) {
+        backButton.href = href;
+        backButton.textContent = label;
+    }
+    if (errorBackButton) {
+        errorBackButton.href = href;
+        errorBackButton.textContent = label;
+    }
 }
 
 function showError() {

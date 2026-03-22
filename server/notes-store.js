@@ -3,6 +3,16 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
+const DEFAULT_NOTEBOOK_NAME = 'My Notes';
+const DEFAULT_NOTEBOOK_COLOR = 'blue';
+const DEFAULT_NOTEBOOK_ICON = 'book';
+const NOTEBOOK_COLORS = ['blue', 'green', 'orange', 'pink', 'yellow', 'gray'];
+const NOTEBOOK_ICONS = ['book', 'folder', 'archive', 'bookmark', 'pen', 'file'];
+
+module.exports = {
+    createNotesStore
+};
+
 function nowIso() {
     return new Date().toISOString();
 }
@@ -35,20 +45,11 @@ function normalizeBoolean(value, fallback = false) {
 
 function normalizeTags(tags) {
     if (Array.isArray(tags)) {
-        return tags
-            .map((tag) => String(tag || '').trim())
-            .filter(Boolean)
-            .slice(0, 30);
+        return tags.map((tag) => String(tag || '').trim()).filter(Boolean).slice(0, 30);
     }
-
     if (typeof tags === 'string') {
-        return tags
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean)
-            .slice(0, 30);
+        return tags.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 30);
     }
-
     return [];
 }
 
@@ -56,11 +57,9 @@ function parseTags(rawValue) {
     if (!rawValue) {
         return [];
     }
-
     if (Array.isArray(rawValue)) {
         return rawValue;
     }
-
     try {
         const parsed = JSON.parse(rawValue);
         return Array.isArray(parsed) ? parsed : [];
@@ -101,7 +100,24 @@ function estimateReadMinutes(content) {
     return Math.max(1, Math.ceil(words / 200));
 }
 
-function mapNoteRow(row) {
+function slugifyNotebookName(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'notebook';
+}
+
+function normalizeNotebookPayload(notebook = {}) {
+    return {
+        name: String(notebook.name || '').trim() || DEFAULT_NOTEBOOK_NAME,
+        color: String(notebook.color || DEFAULT_NOTEBOOK_COLOR).trim() || DEFAULT_NOTEBOOK_COLOR,
+        icon: String(notebook.icon || DEFAULT_NOTEBOOK_ICON).trim() || DEFAULT_NOTEBOOK_ICON,
+        sort_order: Number.isFinite(Number(notebook.sort_order)) ? Number(notebook.sort_order) : 0
+    };
+}
+
+function mapNotebookRow(row) {
     if (!row) {
         return null;
     }
@@ -109,8 +125,30 @@ function mapNoteRow(row) {
     return {
         id: row.id,
         user_id: row.user_id,
+        name: row.name,
+        slug: row.slug,
+        color: row.color,
+        icon: row.icon,
+        sort_order: Number(row.sort_order) || 0,
+        is_default: Boolean(row.is_default),
+        created_at: row.created_at,
+        updated_at: row.updated_at
+    };
+}
+
+function mapNoteRow(row) {
+    if (!row) {
+        return null;
+    }
+
+    const content = normalizeTextContent(row.content);
+    return {
+        id: row.id,
+        user_id: row.user_id,
+        notebook_id: row.notebook_id ?? null,
         title: row.title,
-        content: normalizeTextContent(row.content),
+        content,
+        excerpt: buildExcerpt(content),
         market: row.market,
         tags: parseTags(row.tags),
         is_pinned: Boolean(row.is_pinned),
@@ -118,7 +156,20 @@ function mapNoteRow(row) {
         is_public: Boolean(row.is_public),
         share_id: row.share_id,
         created_at: row.created_at,
-        updated_at: row.updated_at
+        updated_at: row.updated_at,
+        last_opened_at: row.last_opened_at || null,
+        notebook: row.notebook_name ? {
+            id: row.notebook_id,
+            name: row.notebook_name,
+            slug: row.notebook_slug,
+            color: row.notebook_color,
+            icon: row.notebook_icon,
+            is_default: Boolean(row.notebook_is_default)
+        } : null,
+        stats: {
+            read_minutes: estimateReadMinutes(content),
+            word_count: stripMarkdown(content).split(/\s+/).filter(Boolean).length
+        }
     };
 }
 
@@ -127,25 +178,11 @@ function mapIdeaRow(row, viewerUserId = null) {
         return null;
     }
 
-    const tags = parseTags(row.tags);
+    const note = mapNoteRow(row);
     const isOwner = viewerUserId !== null && Number(row.user_id) === Number(viewerUserId);
-    const visibility = row.is_public ? 'public' : 'private';
-
     return {
-        id: row.id,
-        user_id: row.user_id,
-        title: row.title,
-        content: normalizeTextContent(row.content),
-        excerpt: buildExcerpt(row.content),
-        market: row.market,
-        tags,
-        is_pinned: Boolean(row.is_pinned),
-        is_favorite: Boolean(row.is_favorite),
-        is_public: Boolean(row.is_public),
-        share_id: row.share_id,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        visibility,
+        ...note,
+        visibility: row.is_public ? 'public' : 'private',
         is_owner: isOwner,
         author: {
             id: row.user_id,
@@ -156,10 +193,6 @@ function mapIdeaRow(row, viewerUserId = null) {
             reactions: 0,
             comments: 0,
             shares: row.is_public ? 1 : 0
-        },
-        stats: {
-            read_minutes: estimateReadMinutes(row.content),
-            word_count: stripMarkdown(row.content).split(/\s+/).filter(Boolean).length
         }
     };
 }
@@ -175,9 +208,27 @@ function createNotesStore(options = {}) {
     db.pragma('foreign_keys = ON');
 
     db.exec(`
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '${DEFAULT_NOTEBOOK_COLOR}',
+            icon TEXT NOT NULL DEFAULT '${DEFAULT_NOTEBOOK_ICON}',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_notebooks_user_slug ON notebooks(user_id, slug);
+        CREATE INDEX IF NOT EXISTS idx_notebooks_user_id ON notebooks(user_id);
+
         CREATE TABLE IF NOT EXISTS notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            notebook_id INTEGER,
             title TEXT NOT NULL,
             content TEXT NOT NULL DEFAULT '',
             market TEXT NOT NULL DEFAULT 'General',
@@ -186,9 +237,11 @@ function createNotesStore(options = {}) {
             is_favorite INTEGER NOT NULL DEFAULT 0,
             is_public INTEGER NOT NULL DEFAULT 0,
             share_id TEXT NOT NULL UNIQUE,
+            last_opened_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS note_versions (
@@ -207,23 +260,89 @@ function createNotesStore(options = {}) {
         CREATE INDEX IF NOT EXISTS idx_note_versions_note_id ON note_versions(note_id);
     `);
 
-    const getNoteByIdStmt = db.prepare(`
+    const noteColumns = db.prepare(`PRAGMA table_info(notes)`).all().map((row) => row.name);
+    if (!noteColumns.includes('notebook_id')) {
+        db.exec('ALTER TABLE notes ADD COLUMN notebook_id INTEGER');
+    }
+    if (!noteColumns.includes('last_opened_at')) {
+        db.exec('ALTER TABLE notes ADD COLUMN last_opened_at TEXT');
+    }
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_notebook_id ON notes(notebook_id);
+        CREATE INDEX IF NOT EXISTS idx_notes_last_opened_at ON notes(last_opened_at);
+    `);
+
+    const getNotebookByIdStmt = db.prepare(`
         SELECT *
-        FROM notes
+        FROM notebooks
         WHERE id = ? AND user_id = ?
         LIMIT 1
     `);
 
-    const getPublicNoteByShareIdStmt = db.prepare(`
+    const getDefaultNotebookStmt = db.prepare(`
         SELECT *
+        FROM notebooks
+        WHERE user_id = ? AND is_default = 1
+        ORDER BY id ASC
+        LIMIT 1
+    `);
+
+    const insertNotebookStmt = db.prepare(`
+        INSERT INTO notebooks (
+            user_id,
+            name,
+            slug,
+            color,
+            icon,
+            sort_order,
+            is_default,
+            created_at,
+            updated_at
+        ) VALUES (
+            @user_id,
+            @name,
+            @slug,
+            @color,
+            @icon,
+            @sort_order,
+            @is_default,
+            @created_at,
+            @updated_at
+        )
+    `);
+
+    const getNoteByIdStmt = db.prepare(`
+        SELECT
+            notes.*,
+            notebooks.name AS notebook_name,
+            notebooks.slug AS notebook_slug,
+            notebooks.color AS notebook_color,
+            notebooks.icon AS notebook_icon,
+            notebooks.is_default AS notebook_is_default
         FROM notes
-        WHERE share_id = ? AND is_public = 1
+        LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
+        WHERE notes.id = ? AND notes.user_id = ?
+        LIMIT 1
+    `);
+
+    const getPublicNoteByShareIdStmt = db.prepare(`
+        SELECT
+            notes.*,
+            notebooks.name AS notebook_name,
+            notebooks.slug AS notebook_slug,
+            notebooks.color AS notebook_color,
+            notebooks.icon AS notebook_icon,
+            notebooks.is_default AS notebook_is_default
+        FROM notes
+        LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
+        WHERE notes.share_id = ? AND notes.is_public = 1
         LIMIT 1
     `);
 
     const insertNoteStmt = db.prepare(`
         INSERT INTO notes (
             user_id,
+            notebook_id,
             title,
             content,
             market,
@@ -232,10 +351,12 @@ function createNotesStore(options = {}) {
             is_favorite,
             is_public,
             share_id,
+            last_opened_at,
             created_at,
             updated_at
         ) VALUES (
             @user_id,
+            @notebook_id,
             @title,
             @content,
             @market,
@@ -244,6 +365,7 @@ function createNotesStore(options = {}) {
             @is_favorite,
             @is_public,
             @share_id,
+            @last_opened_at,
             @created_at,
             @updated_at
         )
@@ -267,68 +389,279 @@ function createNotesStore(options = {}) {
         )
     `);
 
+    const touchNoteStmt = db.prepare(`
+        UPDATE notes
+        SET last_opened_at = ?
+        WHERE id = ? AND user_id = ?
+    `);
+
     const deleteNoteStmt = db.prepare(`
         DELETE FROM notes
         WHERE id = ? AND user_id = ?
     `);
 
+    const getNotebookBySlugStmt = db.prepare(`
+        SELECT *
+        FROM notebooks
+        WHERE user_id = ? AND slug = ?
+        LIMIT 1
+    `);
+
+    const listNotebooksStmt = db.prepare(`
+        SELECT *
+        FROM notebooks
+        WHERE user_id = ?
+        ORDER BY is_default DESC, sort_order ASC, name COLLATE NOCASE ASC, id ASC
+    `);
+
+    const getMaxNotebookSortStmt = db.prepare(`
+        SELECT COALESCE(MAX(sort_order), 0) AS max_sort
+        FROM notebooks
+        WHERE user_id = ?
+    `);
+
+    const updateNotebookStmt = db.prepare(`
+        UPDATE notebooks
+        SET
+            name = @name,
+            slug = @slug,
+            color = @color,
+            icon = @icon,
+            sort_order = @sort_order,
+            updated_at = @updated_at
+        WHERE id = @id AND user_id = @user_id
+    `);
+
+    const deleteNotebookStmt = db.prepare(`
+        DELETE FROM notebooks
+        WHERE id = ? AND user_id = ?
+    `);
+
+    const reassignNotesNotebookStmt = db.prepare(`
+        UPDATE notes
+        SET notebook_id = ?
+        WHERE user_id = ? AND notebook_id = ?
+    `);
+
+    const backfillUserNotesStmt = db.prepare(`
+        UPDATE notes
+        SET notebook_id = COALESCE(notebook_id, ?)
+        WHERE user_id = ? AND notebook_id IS NULL
+    `);
+
+    function uniqueNotebookSlug(userId, name, excludeNotebookId = null) {
+        const baseSlug = slugifyNotebookName(name);
+        let slug = baseSlug;
+        let counter = 2;
+
+        while (true) {
+            const existing = getNotebookBySlugStmt.get(userId, slug);
+            if (!existing || Number(existing.id) === Number(excludeNotebookId)) {
+                return slug;
+            }
+            slug = `${baseSlug}-${counter}`;
+            counter += 1;
+        }
+    }
+
+    function ensureDefaultNotebook(userId) {
+        let notebook = mapNotebookRow(getDefaultNotebookStmt.get(userId));
+        if (!notebook) {
+            const timestamp = nowIso();
+            const payload = normalizeNotebookPayload({
+                name: DEFAULT_NOTEBOOK_NAME,
+                color: DEFAULT_NOTEBOOK_COLOR,
+                icon: DEFAULT_NOTEBOOK_ICON,
+                sort_order: 0
+            });
+            const result = insertNotebookStmt.run({
+                user_id: userId,
+                name: payload.name,
+                slug: uniqueNotebookSlug(userId, payload.name),
+                color: NOTEBOOK_COLORS.includes(payload.color) ? payload.color : DEFAULT_NOTEBOOK_COLOR,
+                icon: NOTEBOOK_ICONS.includes(payload.icon) ? payload.icon : DEFAULT_NOTEBOOK_ICON,
+                sort_order: 0,
+                is_default: 1,
+                created_at: timestamp,
+                updated_at: timestamp
+            });
+            notebook = mapNotebookRow(getNotebookByIdStmt.get(result.lastInsertRowid, userId));
+        }
+
+        backfillUserNotesStmt.run(notebook.id, userId);
+        return notebook;
+    }
+
+    function getNotebook(userId, notebookId) {
+        ensureDefaultNotebook(userId);
+        return mapNotebookRow(getNotebookByIdStmt.get(notebookId, userId));
+    }
+
+    function resolveNotebookId(userId, notebookId) {
+        const defaultNotebook = ensureDefaultNotebook(userId);
+        if (notebookId === undefined || notebookId === null || notebookId === '') {
+            return defaultNotebook.id;
+        }
+
+        const notebook = getNotebook(userId, notebookId);
+        return notebook ? notebook.id : defaultNotebook.id;
+    }
+
+    function listNotebooks(userId) {
+        ensureDefaultNotebook(userId);
+        return listNotebooksStmt.all(userId).map(mapNotebookRow);
+    }
+
+    function createNotebook(userId, notebook = {}) {
+        const payload = normalizeNotebookPayload(notebook);
+        ensureDefaultNotebook(userId);
+        const timestamp = nowIso();
+        const maxSort = Number(getMaxNotebookSortStmt.get(userId)?.max_sort || 0);
+        const result = insertNotebookStmt.run({
+            user_id: userId,
+            name: payload.name,
+            slug: uniqueNotebookSlug(userId, payload.name),
+            color: NOTEBOOK_COLORS.includes(payload.color) ? payload.color : DEFAULT_NOTEBOOK_COLOR,
+            icon: NOTEBOOK_ICONS.includes(payload.icon) ? payload.icon : DEFAULT_NOTEBOOK_ICON,
+            sort_order: payload.sort_order || maxSort + 1,
+            is_default: 0,
+            created_at: timestamp,
+            updated_at: timestamp
+        });
+
+        return getNotebook(userId, result.lastInsertRowid);
+    }
+
+    function updateNotebook(userId, notebookId, updates = {}) {
+        const current = getNotebook(userId, notebookId);
+        if (!current) {
+            return null;
+        }
+
+        const payload = normalizeNotebookPayload({
+            name: updates.name !== undefined ? updates.name : current.name,
+            color: updates.color !== undefined ? updates.color : current.color,
+            icon: updates.icon !== undefined ? updates.icon : current.icon,
+            sort_order: updates.sort_order !== undefined ? updates.sort_order : current.sort_order
+        });
+
+        updateNotebookStmt.run({
+            id: current.id,
+            user_id: userId,
+            name: payload.name,
+            slug: uniqueNotebookSlug(userId, payload.name, current.id),
+            color: NOTEBOOK_COLORS.includes(payload.color) ? payload.color : current.color,
+            icon: NOTEBOOK_ICONS.includes(payload.icon) ? payload.icon : current.icon,
+            sort_order: payload.sort_order,
+            updated_at: nowIso()
+        });
+
+        return getNotebook(userId, current.id);
+    }
+
+    function deleteNotebook(userId, notebookId) {
+        const notebook = getNotebook(userId, notebookId);
+        if (!notebook) {
+            return { ok: false, reason: 'not_found' };
+        }
+        if (notebook.is_default) {
+            return { ok: false, reason: 'default_notebook' };
+        }
+
+        const fallbackNotebook = ensureDefaultNotebook(userId);
+        reassignNotesNotebookStmt.run(fallbackNotebook.id, userId, notebook.id);
+        deleteNotebookStmt.run(notebook.id, userId);
+        return { ok: true, notebookId: notebook.id, fallbackNotebookId: fallbackNotebook.id };
+    }
+
+    function buildNoteSelectSql(whereClauses, orderBy, direction) {
+        return `
+            SELECT
+                notes.*,
+                notebooks.name AS notebook_name,
+                notebooks.slug AS notebook_slug,
+                notebooks.color AS notebook_color,
+                notebooks.icon AS notebook_icon,
+                notebooks.is_default AS notebook_is_default
+            FROM notes
+            LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
+            WHERE ${whereClauses.join(' AND ')}
+            ORDER BY ${orderBy} ${direction}
+            LIMIT ? OFFSET ?
+        `;
+    }
+
     function listNotes(userId, options = {}) {
-        const clauses = ['user_id = ?'];
+        ensureDefaultNotebook(userId);
+        const clauses = ['notes.user_id = ?'];
         const values = [userId];
 
+        if (options.notebook_id) {
+            clauses.push('notes.notebook_id = ?');
+            values.push(resolveNotebookId(userId, options.notebook_id));
+        }
+
         if (options.market) {
-            clauses.push('market = ?');
+            clauses.push('notes.market = ?');
             values.push(String(options.market));
         }
 
         if (options.tag) {
-            clauses.push('tags LIKE ?');
+            clauses.push('notes.tags LIKE ?');
             values.push(`%${String(options.tag).trim()}%`);
         }
 
         if (options.search) {
-            clauses.push('(title LIKE ? OR content LIKE ?)');
+            clauses.push('(notes.title LIKE ? OR notes.content LIKE ? OR notes.tags LIKE ?)');
             const term = `%${String(options.search).trim()}%`;
-            values.push(term, term);
+            values.push(term, term, term);
         }
 
         if (options.pinned !== undefined) {
-            clauses.push('is_pinned = ?');
+            clauses.push('notes.is_pinned = ?');
             values.push(normalizeBoolean(options.pinned) ? 1 : 0);
         }
 
         if (options.favorite !== undefined) {
-            clauses.push('is_favorite = ?');
+            clauses.push('notes.is_favorite = ?');
             values.push(normalizeBoolean(options.favorite) ? 1 : 0);
         }
 
+        if (normalizeBoolean(options.recent, false)) {
+            clauses.push('notes.last_opened_at IS NOT NULL');
+        }
+
         const orderByMap = {
-            created_at: 'created_at',
-            updated_at: 'updated_at',
-            title: 'title COLLATE NOCASE',
-            market: 'market COLLATE NOCASE'
+            created_at: 'notes.created_at',
+            updated_at: 'notes.updated_at',
+            last_opened_at: 'COALESCE(notes.last_opened_at, notes.updated_at)',
+            title: 'notes.title COLLATE NOCASE',
+            market: 'notes.market COLLATE NOCASE'
         };
 
-        const requestedSort = String(options.sortBy || options.orderBy || 'updated_at');
+        const requestedSort = normalizeBoolean(options.recent, false)
+            ? 'last_opened_at'
+            : String(options.sortBy || options.orderBy || 'updated_at');
         const orderBy = orderByMap[requestedSort] || orderByMap.updated_at;
         const direction = String(options.sortOrder || (options.ascending ? 'asc' : 'desc')).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-        const limit = clampLimit(options.limit, 50);
+        const limit = clampLimit(options.limit, 80);
         const offset = Math.max(Number(options.offset) || 0, 0);
 
-        const sql = `
-            SELECT *
-            FROM notes
-            WHERE ${clauses.join(' AND ')}
-            ORDER BY ${orderBy} ${direction}
-            LIMIT ? OFFSET ?
-        `;
-
-        const rows = db.prepare(sql).all(...values, limit, offset);
-        return rows.map(mapNoteRow);
+        const sql = buildNoteSelectSql(clauses, orderBy, direction);
+        return db.prepare(sql).all(...values, limit, offset).map(mapNoteRow);
     }
 
-    function getNoteForUser(userId, noteId) {
-        return mapNoteRow(getNoteByIdStmt.get(noteId, userId));
+    function getNoteForUser(userId, noteId, options = {}) {
+        ensureDefaultNotebook(userId);
+        const row = getNoteByIdStmt.get(noteId, userId);
+        if (!row) {
+            return null;
+        }
+        if (normalizeBoolean(options.touch, false)) {
+            touchNoteStmt.run(nowIso(), noteId, userId);
+            return mapNoteRow(getNoteByIdStmt.get(noteId, userId));
+        }
+        return mapNoteRow(row);
     }
 
     function getNoteByShareId(shareId) {
@@ -340,6 +673,7 @@ function createNotesStore(options = {}) {
         const values = [];
 
         if (viewerUserId !== null && viewerUserId !== undefined) {
+            ensureDefaultNotebook(viewerUserId);
             clauses.push('(notes.is_public = 1 OR notes.user_id = ?)');
             values.push(viewerUserId);
         } else {
@@ -357,9 +691,9 @@ function createNotesStore(options = {}) {
         }
 
         if (options.search) {
-            clauses.push('(notes.title LIKE ? OR notes.content LIKE ?)');
+            clauses.push('(notes.title LIKE ? OR notes.content LIKE ? OR notes.tags LIKE ?)');
             const term = `%${String(options.search).trim()}%`;
-            values.push(term, term);
+            values.push(term, term, term);
         }
 
         if (options.visibility === 'public') {
@@ -382,30 +716,36 @@ function createNotesStore(options = {}) {
         const requestedSort = String(options.sortBy || options.orderBy || 'updated_at');
         const orderBy = orderByMap[requestedSort] || orderByMap.updated_at;
         const direction = String(options.sortOrder || (options.ascending ? 'asc' : 'desc')).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-        const limit = clampLimit(options.limit, 24);
+        const limit = clampLimit(options.limit, 40);
         const offset = Math.max(Number(options.offset) || 0, 0);
 
         const sql = `
             SELECT
                 notes.*,
+                notebooks.name AS notebook_name,
+                notebooks.slug AS notebook_slug,
+                notebooks.color AS notebook_color,
+                notebooks.icon AS notebook_icon,
+                notebooks.is_default AS notebook_is_default,
                 users.display_name AS author_display_name,
                 users.email AS author_email
             FROM notes
             JOIN users ON users.id = notes.user_id
+            LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
             WHERE ${clauses.join(' AND ')}
             ORDER BY ${orderBy} ${direction}
             LIMIT ? OFFSET ?
         `;
 
-        const rows = db.prepare(sql).all(...values, limit, offset);
-        return rows.map((row) => mapIdeaRow(row, viewerUserId));
+        return db.prepare(sql).all(...values, limit, offset).map((row) => mapIdeaRow(row, viewerUserId));
     }
 
-    function getNoteForViewer(viewerUserId, noteId) {
+    function getNoteForViewer(viewerUserId, noteId, options = {}) {
         const params = [noteId];
         let viewerClause = 'notes.is_public = 1';
 
         if (viewerUserId !== null && viewerUserId !== undefined) {
+            ensureDefaultNotebook(viewerUserId);
             viewerClause = '(notes.is_public = 1 OR notes.user_id = ?)';
             params.push(viewerUserId);
         }
@@ -413,14 +753,27 @@ function createNotesStore(options = {}) {
         const row = db.prepare(`
             SELECT
                 notes.*,
+                notebooks.name AS notebook_name,
+                notebooks.slug AS notebook_slug,
+                notebooks.color AS notebook_color,
+                notebooks.icon AS notebook_icon,
+                notebooks.is_default AS notebook_is_default,
                 users.display_name AS author_display_name,
                 users.email AS author_email
             FROM notes
             JOIN users ON users.id = notes.user_id
+            LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
             WHERE notes.id = ? AND ${viewerClause}
             LIMIT 1
         `).get(...params);
 
+        if (!row) {
+            return null;
+        }
+        if (viewerUserId !== null && viewerUserId !== undefined && normalizeBoolean(options.touch, false) && Number(row.user_id) === Number(viewerUserId)) {
+            touchNoteStmt.run(nowIso(), noteId, viewerUserId);
+            return getNoteForViewer(viewerUserId, noteId, { touch: false });
+        }
         return mapIdeaRow(row, viewerUserId);
     }
 
@@ -428,10 +781,16 @@ function createNotesStore(options = {}) {
         const row = db.prepare(`
             SELECT
                 notes.*,
+                notebooks.name AS notebook_name,
+                notebooks.slug AS notebook_slug,
+                notebooks.color AS notebook_color,
+                notebooks.icon AS notebook_icon,
+                notebooks.is_default AS notebook_is_default,
                 users.display_name AS author_display_name,
                 users.email AS author_email
             FROM notes
             JOIN users ON users.id = notes.user_id
+            LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
             WHERE notes.share_id = ? AND notes.is_public = 1
             LIMIT 1
         `).get(String(shareId || '').trim());
@@ -451,9 +810,12 @@ function createNotesStore(options = {}) {
             params.push(viewerUserId);
         }
 
-        let marketClause = '';
-        if (note.market) {
-            marketClause = 'AND notes.market = ?';
+        let notebookClause = '';
+        if (note.notebook_id) {
+            notebookClause = 'AND notes.notebook_id = ?';
+            params.push(note.notebook_id);
+        } else if (note.market) {
+            notebookClause = 'AND notes.market = ?';
             params.push(note.market);
         }
 
@@ -462,14 +824,20 @@ function createNotesStore(options = {}) {
         const rows = db.prepare(`
             SELECT
                 notes.*,
+                notebooks.name AS notebook_name,
+                notebooks.slug AS notebook_slug,
+                notebooks.color AS notebook_color,
+                notebooks.icon AS notebook_icon,
+                notebooks.is_default AS notebook_is_default,
                 users.display_name AS author_display_name,
                 users.email AS author_email
             FROM notes
             JOIN users ON users.id = notes.user_id
+            LEFT JOIN notebooks ON notebooks.id = notes.notebook_id
             WHERE notes.id != ?
               AND ${visibilityClause}
-              ${marketClause}
-            ORDER BY notes.updated_at DESC
+              ${notebookClause}
+            ORDER BY COALESCE(notes.last_opened_at, notes.updated_at) DESC
             LIMIT ?
         `).all(...params);
 
@@ -478,8 +846,10 @@ function createNotesStore(options = {}) {
 
     function createNote(userId, note) {
         const timestamp = nowIso();
+        const notebookId = resolveNotebookId(userId, note.notebook_id);
         const payload = {
             user_id: userId,
+            notebook_id: notebookId,
             title: String(note.title || 'Untitled').trim() || 'Untitled',
             content: normalizeTextContent(note.content),
             market: String(note.market || 'General'),
@@ -488,6 +858,7 @@ function createNotesStore(options = {}) {
             is_favorite: normalizeBoolean(note.is_favorite) ? 1 : 0,
             is_public: normalizeBoolean(note.is_public) ? 1 : 0,
             share_id: createShareId(),
+            last_opened_at: timestamp,
             created_at: timestamp,
             updated_at: timestamp
         };
@@ -516,10 +887,12 @@ function createNotesStore(options = {}) {
             content: updates.content !== undefined ? normalizeTextContent(updates.content) : current.content,
             market: updates.market !== undefined ? String(updates.market || 'General') : current.market,
             tags: updates.tags !== undefined ? JSON.stringify(normalizeTags(updates.tags)) : current.tags,
+            notebook_id: updates.notebook_id !== undefined ? resolveNotebookId(userId, updates.notebook_id) : current.notebook_id,
             is_pinned: updates.is_pinned !== undefined ? (normalizeBoolean(updates.is_pinned) ? 1 : 0) : current.is_pinned,
             is_favorite: updates.is_favorite !== undefined ? (normalizeBoolean(updates.is_favorite) ? 1 : 0) : current.is_favorite,
             is_public: updates.is_public !== undefined ? (normalizeBoolean(updates.is_public) ? 1 : 0) : current.is_public,
             updated_at: nowIso(),
+            last_opened_at: nowIso(),
             id: current.id,
             user_id: userId
         };
@@ -527,6 +900,7 @@ function createNotesStore(options = {}) {
         db.prepare(`
             UPDATE notes
             SET
+                notebook_id = @notebook_id,
                 title = @title,
                 content = @content,
                 market = @market,
@@ -534,11 +908,21 @@ function createNotesStore(options = {}) {
                 is_pinned = @is_pinned,
                 is_favorite = @is_favorite,
                 is_public = @is_public,
-                updated_at = @updated_at
+                updated_at = @updated_at,
+                last_opened_at = @last_opened_at
             WHERE id = @id AND user_id = @user_id
         `).run(next);
 
         return getNoteForUser(userId, current.id);
+    }
+
+    function touchNote(userId, noteId) {
+        const current = getNoteByIdStmt.get(noteId, userId);
+        if (!current) {
+            return null;
+        }
+        touchNoteStmt.run(nowIso(), noteId, userId);
+        return getNoteForUser(userId, noteId);
     }
 
     function deleteNote(userId, noteId) {
@@ -563,7 +947,7 @@ function createNotesStore(options = {}) {
             id: row.id,
             note_id: row.note_id,
             title: row.title,
-            content: row.content,
+            content: normalizeTextContent(row.content),
             market: row.market,
             tags: parseTags(row.tags),
             created_at: row.created_at
@@ -572,6 +956,11 @@ function createNotesStore(options = {}) {
 
     return {
         dbPath,
+        listNotebooks,
+        getNotebook,
+        createNotebook,
+        updateNotebook,
+        deleteNotebook,
         listNotes,
         listIdeas,
         getNoteForUser,
@@ -581,12 +970,8 @@ function createNotesStore(options = {}) {
         getRelatedIdeas,
         createNote,
         updateNote,
+        touchNote,
         deleteNote,
         getNoteVersions
     };
 }
-
-module.exports = {
-    createNotesStore
-};
-

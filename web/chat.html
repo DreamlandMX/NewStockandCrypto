@@ -516,7 +516,7 @@
                     <li class="nav-dropdown">
                         <button class="nav-link nav-dropdown-toggle active" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="communityMenu">Community</button>
                         <ul class="nav-dropdown-menu" id="communityMenu">
-                            <li><a href="notes.html" class="nav-link">Ideas Feed</a></li>
+                            <li><a href="notes.html?view=shared" class="nav-link">Notes</a></li>
                             <li><a href="chat.html" class="nav-link active">Market Lounges</a></li>
                         </ul></li><li><a href="positions.html" class="nav-link">Positions</a></li></ul><button class="nav-backdrop" type="button" aria-label="Close navigation"></button>
             </nav>
@@ -532,10 +532,10 @@
                 <div class="community-hero-copy">
                     <span class="section-tag">Community</span>
                     <h1>Market Lounges</h1>
-                    <p>Trade desks move between published ideas and live discussion. Use the lounges to pressure-test setups, coordinate with other traders, and jump into the latest market narratives without leaving the community surface.</p>
+                    <p>Move between shared notes and live discussion without leaving the community surface. Use the lounges to pressure-test setups, coordinate with other traders, and keep context close to the conversation.</p>
                 </div>
                 <div class="community-hero-actions">
-                    <a href="notes.html" class="btn btn-secondary">Browse Ideas Feed</a>
+                    <a href="notes.html?view=shared" class="btn btn-secondary">Browse Shared Notes</a>
                     <button class="btn btn-primary" type="button" onclick="showCreateChannelModal()">Create Lounge</button>
                 </div>
             </section>
@@ -583,7 +583,7 @@
                     <div class="chat-messages" id="messagesContainer">
                         <div class="empty-chat">
                             <h3>Welcome to the community desk</h3>
-                            <p>Pick a lounge from the left to open the stream. Each lounge acts like a TradingView-style market room with fast reactions, replies, and idea-driven discussion.</p>
+                            <p>Pick a lounge from the left to open the stream. Each lounge acts like a market room with fast reactions, replies, and note-linked discussion.</p>
                         </div>
                     </div>
 
@@ -597,10 +597,10 @@
 
                 <aside class="idea-rail">
                     <section class="idea-rail-card card-section">
-                        <h3>Featured Ideas</h3>
-                        <p class="muted-copy" style="margin-bottom: 0.85rem;">Fresh ideas from the feed so lounge discussion stays anchored to published analysis.</p>
+                        <h3>Featured Notes</h3>
+                        <p class="muted-copy" style="margin-bottom: 0.85rem;">Fresh shared notes keep lounge discussion anchored to something concrete without forcing everyone into the full trading workflow.</p>
                         <div class="idea-rail-list" id="ideasRail">
-                            <div class="muted-copy">Loading community ideas...</div>
+                            <div class="muted-copy">Loading shared notes...</div>
                         </div>
                     </section>
 
@@ -609,7 +609,7 @@
                         <div class="lounge-guidelines">
                             <span>Keep messages market-relevant and actionable.</span>
                             <span>Reply directly to preserve context around a setup.</span>
-                            <span>Move polished market theses into the Ideas Feed when they are ready to be shared.</span>
+                            <span>Move polished notes into the shared stream when they are ready to be published.</span>
                         </div>
                     </section>
                 </aside>
@@ -656,7 +656,7 @@
         <div class="container">
             <div style="text-align: center;">
                 <p style="color: var(--text-muted); font-size: 0.8rem;">
-                    Community Lounges - live market discussion layered on top of the Ideas Feed.
+                    Community Lounges - live market discussion layered on top of shared notes.
                 </p>
             </div>
         </div>
