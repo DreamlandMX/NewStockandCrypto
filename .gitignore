@@ -38,6 +38,7 @@ dist/
 build/
 .cache/
 .local-tools/
+.worktrees/
 *.egg-info/
 .eggs/
 
