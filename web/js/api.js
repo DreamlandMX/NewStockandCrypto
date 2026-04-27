@@ -257,6 +257,10 @@ const api = {
         return this.post('/model-explorer/v1/backtest/run', payload);
     },
 
+    async getSystemConfig() {
+        return this.get('/system/config');
+    },
+
     // ==================== Quant Router ====================
 
     async getQuantRouterRuns() {

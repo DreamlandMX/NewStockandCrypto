@@ -386,6 +386,7 @@ document.addEventListener('DOMContentLoaded', init);
     }
 
     function collectRouterElements() {
+        els.routerSection = byId('quantRouterSection');
         els.runSelect = byId('qrRunSelect');
         els.reloadBtn = byId('qrReloadBtn');
         els.statusNote = byId('qrStatusNote');
@@ -407,6 +408,18 @@ document.addEventListener('DOMContentLoaded', init);
         els.regimeCanvas = byId('qrRegimeChart');
         els.walkForwardCanvas = byId('qrWalkForwardChart');
         els.benchmarkCanvas = byId('qrBenchmarkChart');
+    }
+
+    async function shouldHideRouterSection() {
+        if (window.location.hostname.endsWith('.onrender.com')) return true;
+        if (!window.api || !api.getSystemConfig) return false;
+        try {
+            const config = await api.getSystemConfig();
+            return config?.features?.quantRouterVisible === false || Boolean(config?.runtime?.isRender);
+        } catch (error) {
+            console.warn('Unable to load system config for router visibility:', error);
+            return false;
+        }
     }
 
     function setRouterStatus(text) {
@@ -689,6 +702,10 @@ document.addEventListener('DOMContentLoaded', init);
 
     async function initRouterSection() {
         collectRouterElements();
+        if (await shouldHideRouterSection()) {
+            if (els.routerSection) els.routerSection.hidden = true;
+            return;
+        }
         bindRouterEvents();
         if (!els.runSelect) return;
         try {
