@@ -289,17 +289,36 @@
         ]);
     }
 
+    function delay(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
     async function requestLegacy(endpoint, options = {}) {
-        const response = await fetch(`${LEGACY_AUTH_BASE_URL}${endpoint}`, {
-            method: options.method || 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-                ...(options.headers || {})
-            },
-            credentials: 'same-origin',
-            body: options.body ? JSON.stringify(options.body) : undefined
-        });
+        let response;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                response = await fetch(`${LEGACY_AUTH_BASE_URL}${endpoint}`, {
+                    method: options.method || 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        ...(options.headers || {})
+                    },
+                    credentials: 'same-origin',
+                    body: options.body ? JSON.stringify(options.body) : undefined
+                });
+                break;
+            } catch (error) {
+                if (attempt === 0) {
+                    await delay(900);
+                    continue;
+                }
+                const networkError = new Error('Sign-in service is temporarily unreachable. Render may be waking up or redeploying; please retry in a moment.');
+                networkError.status = 0;
+                networkError.cause = error;
+                throw networkError;
+            }
+        }
 
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -322,6 +341,15 @@
 
         if (lower.includes('invalid login credentials')) {
             return 'Invalid login credentials. If this account was created with the local site account flow, use that password and the app will keep you on the local community session.';
+        }
+
+        if (
+            lower.includes('failed to fetch')
+            || lower.includes('networkerror')
+            || lower.includes('load failed')
+            || lower.includes('temporarily unreachable')
+        ) {
+            return 'Sign-in service is temporarily unreachable. This is usually Render waking up or redeploying, not a database password issue. Please wait a few seconds and try again.';
         }
 
         if (lower.includes('email not confirmed')) {
@@ -941,6 +969,9 @@
                     }, 1200);
                     return;
                 } catch (legacyError) {
+                    if (Number(legacyError?.status || 0) === 0 && legacyError?.message) {
+                        throw legacyError;
+                    }
                     if (Number(legacyError?.status || 0) && Number(legacyError?.status || 0) !== 401) {
                         throw legacyError;
                     }
