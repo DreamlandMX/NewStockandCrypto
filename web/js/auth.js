@@ -343,6 +343,10 @@
             return 'Invalid login credentials. If this account was created with the local site account flow, use that password and the app will keep you on the local community session.';
         }
 
+        if (lower.includes('local_site_credentials_not_found')) {
+            return 'No matching local site account was found for this email and password. Please check the password, or create a new site account with Sign up.';
+        }
+
         if (
             lower.includes('failed to fetch')
             || lower.includes('networkerror')
@@ -975,6 +979,10 @@
                     if (Number(legacyError?.status || 0) && Number(legacyError?.status || 0) !== 401) {
                         throw legacyError;
                     }
+                }
+
+                if (window.location.hostname.endsWith('.onrender.com')) {
+                    throw new Error('LOCAL_SITE_CREDENTIALS_NOT_FOUND');
                 }
 
                 await safeReady();
