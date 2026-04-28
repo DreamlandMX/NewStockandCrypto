@@ -358,14 +358,11 @@ async function refreshData(showToast = false) {
             api.getCNEquityIndicesHistory({ symbols: indexMeta.historyKey, interval: '1m', session: 'auto' })
         ]);
 
-        if (historyResult.status !== 'fulfilled') {
-            throw historyResult.reason || new Error(`${indexMeta.displayName} history seed failed.`);
-        }
-
-        const historyPayload = historyResult.value;
-        const pricesPayload = pricesResult.status === 'fulfilled'
-            ? pricesResult.value
-            : buildFallbackPricesPayload(historyPayload, pricesResult.reason, indexMeta);
+        const livePricesPayload = pricesResult.status === 'fulfilled' ? pricesResult.value : null;
+        const historyPayload = historyResult.status === 'fulfilled'
+            ? historyResult.value
+            : buildFallbackHistoryPayload(livePricesPayload, historyResult.reason, indexMeta);
+        const pricesPayload = livePricesPayload || buildFallbackPricesPayload(historyPayload, pricesResult.reason, indexMeta);
         const predictionPayload = predictionResult.status === 'fulfilled'
             ? predictionResult.value
             : buildFallbackPredictionPayload(historyPayload, pricesPayload, predictionResult.reason, indexMeta);
@@ -417,6 +414,91 @@ function buildViewModel(pricesPayload, predictionPayload, historyPayload, indexM
         dataSourceText: pricesPayload?.meta?.delayNote || 'Data Source: EastMoney API | Delay: ~3-10s (Level-1)',
         disclaimer: resolvedIndexMeta.disclaimer
     };
+}
+
+function buildFallbackHistoryPayload(pricesPayload, error, indexMeta) {
+    const resolvedIndexMeta = indexMeta || currentIndexMeta();
+    const quote = pricesPayload?.indices?.[resolvedIndexMeta.quoteKey] || {};
+    const price = asNumber(quote.price, null);
+    if (!Number.isFinite(price) || price <= 0) {
+        throw error || new Error(`${resolvedIndexMeta.displayName} history seed failed.`);
+    }
+
+    const prevClose = asNumber(quote.prevClose, price);
+    const open = asNumber(quote.open, prevClose);
+    const high = Math.max(asNumber(quote.high, price), price, open);
+    const low = Math.min(asNumber(quote.low, price), price, open);
+    const series = buildSyntheticSessionSeries({ open, high, low, close: price });
+
+    return {
+        meta: {
+            source: 'client_quote_synthetic_history',
+            timestamp: pricesPayload?.meta?.timestamp || new Date().toISOString(),
+            stale: true,
+            staleReason: error?.message || 'EastMoney index history unavailable',
+            synthesized: true
+        },
+        marketSession: pricesPayload?.marketSession || null,
+        selectedSession: null,
+        series: {
+            [resolvedIndexMeta.historyKey]: series
+        },
+        openClose: {
+            [resolvedIndexMeta.historyKey]: {
+                open,
+                close: price,
+                high,
+                low,
+                final: false
+            }
+        }
+    };
+}
+
+function buildSyntheticSessionSeries({ open, high, low, close }) {
+    const points = [];
+    const dateKey = currentBjtDateKey();
+    const schedule = [
+        ['09:30', open],
+        ['10:00', open + (high - open) * 0.48],
+        ['11:30', high],
+        ['13:00', open + (low - open) * 0.45],
+        ['14:00', low],
+        ['15:00', close]
+    ];
+
+    for (let i = 0; i < schedule.length - 1; i += 1) {
+        const [startTime, startPrice] = schedule[i];
+        const [, endPrice] = schedule[i + 1];
+        const steps = i === 2 ? 1 : 6;
+        for (let step = 0; step < steps; step += 1) {
+            const ratio = step / steps;
+            points.push({
+                timestamp: `${dateKey}T${startTime}:00+08:00`,
+                price: Number((startPrice + (endPrice - startPrice) * ratio).toFixed(3))
+            });
+        }
+        if (i === schedule.length - 2) {
+            const [endTime, finalPrice] = schedule[i + 1];
+            points.push({
+                timestamp: `${dateKey}T${endTime}:00+08:00`,
+                price: Number(finalPrice.toFixed(3))
+            });
+        }
+    }
+
+    return points;
+}
+
+function currentBjtDateKey() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: BJT_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+    const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
 function buildFallbackPricesPayload(historyPayload, error, indexMeta) {
