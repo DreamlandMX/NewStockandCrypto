@@ -390,6 +390,21 @@ function buildMetricsSnapshot() {
     };
 }
 
+function buildSystemConfigSnapshot() {
+    return {
+        ok: true,
+        service: 'newstockandcrypto',
+        version: APP_VERSION,
+        runtime: {
+            isRender: IS_RENDER_RUNTIME,
+            appVersion: APP_VERSION
+        },
+        features: {
+            quantRouterVisible: !IS_RENDER_RUNTIME
+        }
+    };
+}
+
 async function buildHealthSnapshot() {
     const modelExplorer = await probeModelExplorerHealth();
     const authDbExists = fs.existsSync(authStore.dbPath);
@@ -8326,6 +8341,10 @@ const server = http.createServer((req, res) => {
     }
     if (parsedUrl.pathname === '/api/system/metrics') {
         handleSystemMetricsRoute(req, res);
+        return;
+    }
+    if (parsedUrl.pathname === '/api/system/config') {
+        sendJson(res, 200, buildSystemConfigSnapshot());
         return;
     }
 

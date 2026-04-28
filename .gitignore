@@ -38,6 +38,7 @@ dist/
 build/
 .cache/
 .local-tools/
+.worktools/
 .worktrees/
 *.egg-info/
 .eggs/
@@ -56,6 +57,7 @@ data/*.db-wal
 *.tmp
 *.temp
 .temp/
+tmp/
 tmp_*_extracted.txt
 
 # Local browser automation artifacts
@@ -70,3 +72,9 @@ docs/FEATURE_ENHANCEMENT_PLAN.md
 docs/NOTES_CHAT_MISSING_FEATURES.md
 docs/NOTES_CHAT_SETUP_GUIDE.md
 docs/SUPABASE_SETUP_GUIDE.md
+
+# Generated user manual artifacts
+docs/StockandCrypto User Manual_Youkai_Zhou.pdf
+docs/StockandCrypto_User_Manual_Youkai_Zhou.docx
+docs/StockandCrypto_User_Manual_Youkai_Zhou.pdf
+docs/user-manual-assets/
