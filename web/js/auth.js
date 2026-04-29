@@ -118,6 +118,147 @@
         });
     }
 
+<<<<<<< HEAD
+=======
+    function withTimeout(promise, timeoutMs, fallbackValue = null) {
+        return Promise.race([
+            promise,
+            new Promise((resolve) => {
+                window.setTimeout(() => resolve(fallbackValue), timeoutMs);
+            })
+        ]);
+    }
+
+    function delay(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    async function requestLegacy(endpoint, options = {}) {
+        let response;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+                response = await fetch(`${LEGACY_AUTH_BASE_URL}${endpoint}`, {
+                    method: options.method || 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        ...(options.headers || {})
+                    },
+                    credentials: 'same-origin',
+                    body: options.body ? JSON.stringify(options.body) : undefined
+                });
+                break;
+            } catch (error) {
+                if (attempt === 0) {
+                    await delay(900);
+                    continue;
+                }
+                const networkError = new Error('Sign-in service is temporarily unreachable. Render may be waking up or redeploying; please retry in a moment.');
+                networkError.status = 0;
+                networkError.cause = error;
+                throw networkError;
+            }
+        }
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const error = new Error(payload.message || payload.error || `Legacy auth HTTP ${response.status}`);
+            error.status = response.status;
+            error.payload = payload;
+            throw error;
+        }
+        return payload;
+    }
+
+    function normalizeAuthError(error, mode = 'login') {
+        const raw = error?.message || error?.error_description || error?.description || 'Authentication failed.';
+        const message = String(raw);
+        const lower = message.toLowerCase();
+
+        if (lower.includes('email address') && lower.includes('invalid')) {
+            return 'Use a real deliverable email address. Demo or fake domains may be rejected by Supabase.';
+        }
+
+        if (lower.includes('invalid login credentials')) {
+            return 'Invalid login credentials. If this account was created with the local site account flow, use that password and the app will keep you on the local community session.';
+        }
+
+        if (lower.includes('local_site_credentials_not_found')) {
+            return 'No matching local site account was found for this email and password. Please check the password, or create a new site account with Sign up.';
+        }
+
+        if (
+            lower.includes('failed to fetch')
+            || lower.includes('networkerror')
+            || lower.includes('load failed')
+            || lower.includes('temporarily unreachable')
+        ) {
+            return 'Sign-in service is temporarily unreachable. This is usually Render waking up or redeploying, not a database password issue. Please wait a few seconds and try again.';
+        }
+
+        if (lower.includes('email not confirmed')) {
+            return 'Check your inbox and confirm the email address before signing in.';
+        }
+
+        if (lower.includes('email rate limit exceeded')) {
+            return 'Too many confirmation emails were requested. Wait a few minutes before trying again.';
+        }
+
+        if (mode === 'register' && lower.includes('user already registered')) {
+            return 'This email is already registered. Try signing in instead.';
+        }
+
+        return message;
+    }
+
+    function ensureMessageContainer(form) {
+        let container = form.querySelector('.auth-message');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'auth-message';
+            container.style.marginBottom = '1rem';
+            container.style.padding = '0.75rem 0.9rem';
+            container.style.borderRadius = '10px';
+            container.style.fontSize = '0.875rem';
+            container.style.display = 'none';
+            form.prepend(container);
+        }
+        return container;
+    }
+
+    function renderFormMessage(form, message, type = 'error') {
+        const container = ensureMessageContainer(form);
+        if (!message) {
+            container.textContent = '';
+            container.style.display = 'none';
+            return;
+        }
+        container.textContent = message;
+        container.style.display = 'block';
+        if (type === 'success' || type === 'info') {
+            container.style.border = '1px solid rgba(16, 185, 129, 0.35)';
+            container.style.background = 'rgba(16, 185, 129, 0.12)';
+            container.style.color = '#A7F3D0';
+            return;
+        }
+        container.style.border = '1px solid rgba(248, 113, 113, 0.35)';
+        container.style.background = 'rgba(127, 29, 29, 0.18)';
+        container.style.color = '#FECACA';
+    }
+
+    function setButtonBusy(button, busy, label) {
+        if (!button) return;
+        if (busy) {
+            button.dataset.originalLabel = button.textContent;
+            button.textContent = label || 'Please wait...';
+            button.disabled = true;
+            return;
+        }
+        button.textContent = button.dataset.originalLabel || button.textContent;
+        button.disabled = false;
+    }
+
+>>>>>>> a88512ba3be42b9ef220a264c0cbabb8dd91909f
     function dispatchAuthChange() {
         const detail = {
             ...authState,
