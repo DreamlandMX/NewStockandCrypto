@@ -51,7 +51,25 @@
         button.disabled = false;
     }
 
+    function getRegisterFormError(values = {}) {
+        const fullName = String(values.fullName || '').trim();
+        const email = String(values.email || '').trim();
+        const password = String(values.password || '');
+        const confirmPassword = String(values.confirmPassword || '');
+
+        if (!fullName) return 'Enter your full name.';
+        if (!email) return 'Enter your email address.';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address.';
+        if (!password) return 'Enter a password.';
+        if (password.length < 8) return 'Password must be at least 8 characters.';
+        if (!confirmPassword) return 'Repeat your password.';
+        if (password !== confirmPassword) return 'Passwords do not match.';
+        if (!values.termsAccepted) return 'Please agree to the Terms of Service and Privacy Policy.';
+        return '';
+    }
+
     const api = {
+        getRegisterFormError,
         renderFormMessage,
         setButtonBusy
     };

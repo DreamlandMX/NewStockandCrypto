@@ -13,6 +13,7 @@ globalThis.document = {
 };
 
 const {
+    getRegisterFormError,
     renderFormMessage,
     setButtonBusy
 } = require('../web/js/auth-form-ui');
@@ -65,4 +66,46 @@ test('form UI toggles button busy state', () => {
     setButtonBusy(button, false);
     assert.equal(button.disabled, false);
     assert.equal(button.textContent, 'Sign In');
+});
+
+test('register validation explains the first missing field', () => {
+    assert.equal(getRegisterFormError({}), 'Enter your full name.');
+    assert.equal(getRegisterFormError({ fullName: 'Ada' }), 'Enter your email address.');
+    assert.equal(
+        getRegisterFormError({ fullName: 'Ada', email: 'ada@example.com', password: 'short' }),
+        'Password must be at least 8 characters.'
+    );
+});
+
+test('register validation requires matching password and terms agreement', () => {
+    assert.equal(
+        getRegisterFormError({
+            fullName: 'Ada',
+            email: 'ada@example.com',
+            password: 'Password123',
+            confirmPassword: 'Password124',
+            termsAccepted: true
+        }),
+        'Passwords do not match.'
+    );
+    assert.equal(
+        getRegisterFormError({
+            fullName: 'Ada',
+            email: 'ada@example.com',
+            password: 'Password123',
+            confirmPassword: 'Password123',
+            termsAccepted: false
+        }),
+        'Please agree to the Terms of Service and Privacy Policy.'
+    );
+    assert.equal(
+        getRegisterFormError({
+            fullName: 'Ada',
+            email: 'ada@example.com',
+            password: 'Password123',
+            confirmPassword: 'Password123',
+            termsAccepted: true
+        }),
+        ''
+    );
 });

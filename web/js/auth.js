@@ -29,7 +29,7 @@
         withTimeout
     } = window.StockAuthUtils || {};
     const { buildProfileMenuMarkup } = window.StockAuthProfileMenu;
-    const { renderFormMessage, setButtonBusy } = window.StockAuthFormUi;
+    const { getRegisterFormError, renderFormMessage, setButtonBusy } = window.StockAuthFormUi;
     const { createLegacyAuthApi } = window.StockAuthLegacyApi;
     const legacyAuthApi = createLegacyAuthApi({
         baseUrl: LEGACY_AUTH_BASE_URL,
@@ -796,16 +796,23 @@
             const email = form.querySelector('#email')?.value?.trim() || '';
             const password = form.querySelector('#password')?.value || '';
             const confirmPassword = form.querySelector('#confirmPassword')?.value || '';
+            const termsAccepted = Boolean(form.querySelector('#terms')?.checked);
 
-            if (password !== confirmPassword) {
-                renderFormMessage(form, 'Passwords do not match.');
+            const validationMessage = getRegisterFormError({
+                fullName,
+                email,
+                password,
+                confirmPassword,
+                termsAccepted
+            });
+            if (validationMessage) {
+                renderFormMessage(form, validationMessage);
                 return;
             }
 
             setButtonBusy(submitButton, true, 'Creating Account...');
 
             try {
-                await safeReady();
                 try {
                     await legacyRegister(fullName, email, password, confirmPassword);
                     const loginResponse = await legacyLogin(email, password, true);
