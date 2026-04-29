@@ -27,6 +27,61 @@ const { createServerConfig } = require('./server/server-config');
 const { startUnifiedHttpServer } = require('./server/server-lifecycle');
 const { createTrackingSnapshotStore } = require('./server/tracking-snapshot-store');
 const {
+    computeMarketSession,
+    makeShanghaiDate,
+    nextTradingDateKey,
+    previousShanghaiTradingDateKey,
+    toShanghaiNow
+} = require('./server/cn-market-session');
+const {
+    US_EARLY_CLOSE_2026,
+    US_SESSION_TIMEZONE,
+    computeUsMarketSession,
+    isUsTradingDate,
+    makeNewYorkDate,
+    nextUsTradingDateKey,
+    previousUsTradingDateKey,
+    toNewYorkNow
+} = require('./server/us-market-session');
+const {
+    appendProviderSource,
+    buildStooqBatchUrl,
+    buildUsCoverageStats,
+    buildYahooSparkUrl,
+    normalizeUsSymbol,
+    parseAlphaGlobalQuote,
+    parseStooqCsvRows,
+    parseYahooSparkQuoteRow,
+    stooqSymbolToYahooSymbol,
+    usQuoteFromStooqRow
+} = require('./server/us-market-data');
+const {
+    loadCsi300Snapshot,
+    loadSp500Snapshot
+} = require('./server/market-snapshot-loaders');
+const {
+    calculateUsPolicy,
+    calculateUsPrediction,
+    calculateUsTpSl
+} = require('./server/us-trading-rules');
+const {
+    computeLimitStatus,
+    detectBoardType,
+    detectStFlag,
+    resolveLimitPct,
+    translateSectorToEnglish
+} = require('./server/cn-equity-rules');
+const {
+    buildBinanceKlinesUrl,
+    buildCoinGeckoMarketChartUrl,
+    cryptoBaseSymbol,
+    normalizeCoinGeckoMarketChartRows,
+    normalizeCryptoSymbol,
+    normalizeKlineRows,
+    normalizeTickerRows,
+    resolveCryptoHistoryRange
+} = require('./server/crypto-market-data');
+const {
     clamp,
     deepCopy,
     parseInteger,
@@ -74,12 +129,9 @@ const US_INDEX_HISTORY_CACHE_TTL_MS = Number(process.env.US_INDEX_HISTORY_CACHE_
 const US_INDEX_HISTORY_DEFAULT_RANGE = '2d';
 const US_INDEX_HISTORY_DEFAULT_INTERVAL = '5m';
 const BINANCE_US_URL = 'https://api.binance.us/api/v3/ticker/24hr?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22%5D';
-const BINANCE_US_KLINES_BASE = 'https://api.binance.us/api/v3/klines';
 const EASTMONEY_ULIST_FIELDS = 'f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f20,f21,f47,f48,f100,f103,f115';
 const EASTMONEY_ULIST_BASE = 'https://push2.eastmoney.com/api/qt/ulist.np/get';
-const STOOQ_BATCH_BASE = 'https://stooq.com/q/l/?f=sd2t2ohlcv&h&e=csv&s=';
 const YAHOO_CHART_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-const YAHOO_SPARK_BASE = 'https://query1.finance.yahoo.com/v7/finance/spark';
 const US_YAHOO_SPARK_RANGE = '1d';
 const US_YAHOO_SPARK_INTERVAL = '1m';
 const US_YAHOO_SPARK_CHUNK_SIZE = Number(process.env.US_YAHOO_SPARK_CHUNK_SIZE || 20);
@@ -114,17 +166,11 @@ const CN_INDEX_HISTORY_SYMBOLS = {
     sse: { key: 'sse', code: '000001.SH', secid: INDEX_SECIDS['000001.SH'], name: 'SSE Composite' },
     csi300: { key: 'csi300', code: '000300.SH', secid: INDEX_SECIDS['000300.SH'], name: 'CSI 300' }
 };
-const MARKET_SESSION_TIMEZONE = 'Asia/Shanghai';
-const MARKET_SESSION_TIMEZONE_LABEL = 'Beijing Time (CST, UTC+8)';
 const CN_DELAY_NOTE = 'Data Source: EastMoney API | Delay: ~3-10s (Level-1)';
 const CN_DISCLAIMER = 'Not for actual trading - Simulation only';
 const CN_POLICY_SHORT_REASON = 'CN policy mode: strict no-short';
 const US_DELAY_NOTE = 'US Level-1 quote feed; normal delay depends on venue';
 const US_DISCLAIMER = 'Not for actual trading - simulation only';
-const US_SESSION_TIMEZONE = 'America/New_York';
-const US_BEIJING_LABEL = 'Beijing Time (CST, UTC+8)';
-const US_MAX_LEVERAGE = 2.0;
-const US_LIMIT_POSITION = 2.0;
 const US_INDEX_SYMBOL_CONFIG = {
     '^DJI': { symbol: '^DJI', aliases: ['^DJI', 'DJI'], name: 'Dow Jones' },
     '^NDX': { symbol: '^NDX', aliases: ['^NDX', 'NDX'], name: 'Nasdaq 100' },
@@ -155,7 +201,6 @@ const CN_MIN_CONSTITUENT_COVERAGE_PCT = Number(process.env.CN_MIN_CONSTITUENT_CO
 const CN_LIVE_FETCH_TIMEOUT_MS = Number(process.env.CN_LIVE_FETCH_TIMEOUT_MS || 6000);
 const CN_FAILURE_BACKOFF_MS = Number(process.env.CN_FAILURE_BACKOFF_MS || 60000);
 const COINGECKO_MARKETS_BASE = 'https://api.coingecko.com/api/v3/coins/markets';
-const COINGECKO_MARKET_CHART_BASE = 'https://api.coingecko.com/api/v3/coins';
 const TRACKING_CACHE_DIR = path.join(__dirname, 'output', 'tracking-cache');
 const TRACKING_FACTOR_WEIGHTS = Object.freeze({
     momentum: 0.30,
@@ -357,412 +402,6 @@ const appRouter = createAppRouter({
     serveStatic
 });
 
-function toShanghaiNow(now = new Date()) {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: MARKET_SESSION_TIMEZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        weekday: 'short',
-        hourCycle: 'h23',
-        hour12: false
-    });
-    const parts = Object.fromEntries(formatter.formatToParts(now).map((part) => [part.type, part.value]));
-    const year = Number(parts.year);
-    const month = Number(parts.month);
-    const day = Number(parts.day);
-    const hour = Number(parts.hour);
-    const minute = Number(parts.minute);
-    const second = Number(parts.second);
-    const weekday = parts.weekday;
-    const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
-    const normalizedHour = hour === 24 ? 0 : hour;
-    const date = new Date(Date.UTC(year, month - 1, day, normalizedHour - 8, minute, second));
-    return { year, month, day, hour, minute, second, weekday, dateKey, date };
-}
-
-function makeShanghaiDate(dateKey, hour, minute, second = 0) {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || '').trim());
-    if (!match) {
-        return new Date(Number.NaN);
-    }
-    const [, yearRaw, monthRaw, dayRaw] = match;
-    const normalizedHour = Number(hour) === 24 ? 0 : Number(hour);
-    return new Date(Date.UTC(
-        Number(yearRaw),
-        Number(monthRaw) - 1,
-        Number(dayRaw),
-        normalizedHour - 8,
-        Number(minute),
-        Number(second)
-    ));
-}
-
-function nextTradingDateKey(currentDate) {
-    const date = new Date(currentDate.getTime());
-    while (true) {
-        date.setUTCDate(date.getUTCDate() + 1);
-        const shanghai = toShanghaiNow(date);
-        if (shanghai.weekday !== 'Sat' && shanghai.weekday !== 'Sun') {
-            return shanghai.dateKey;
-        }
-    }
-}
-
-function previousShanghaiTradingDateKey(currentDate) {
-    const date = new Date(currentDate.getTime());
-    while (true) {
-        date.setUTCDate(date.getUTCDate() - 1);
-        const shanghai = toShanghaiNow(date);
-        if (shanghai.weekday !== 'Sat' && shanghai.weekday !== 'Sun') {
-            return shanghai.dateKey;
-        }
-    }
-}
-
-function computeMarketSession(now = new Date()) {
-    const shanghai = toShanghaiNow(now);
-    const isWeekend = shanghai.weekday === 'Sat' || shanghai.weekday === 'Sun';
-
-    const preOpenStart = makeShanghaiDate(shanghai.dateKey, 9, 15);
-    const preOpenEnd = makeShanghaiDate(shanghai.dateKey, 9, 25);
-    const amStart = makeShanghaiDate(shanghai.dateKey, 9, 30);
-    const amEnd = makeShanghaiDate(shanghai.dateKey, 11, 30);
-    const pmStart = makeShanghaiDate(shanghai.dateKey, 13, 0);
-    const closeAuctionStart = makeShanghaiDate(shanghai.dateKey, 14, 57);
-    const marketClose = makeShanghaiDate(shanghai.dateKey, 15, 0);
-
-    const phases = [
-        { code: 'PRE_OPEN_AUCTION', label: 'Pre-Open Auction', tone: 'warning', start: preOpenStart, end: preOpenEnd },
-        { code: 'CONTINUOUS_AM', label: 'Continuous Trading', tone: 'success', start: amStart, end: amEnd },
-        { code: 'LUNCH_BREAK', label: 'Lunch Break', tone: 'muted', start: amEnd, end: pmStart },
-        { code: 'CONTINUOUS_PM', label: 'Continuous Trading', tone: 'success', start: pmStart, end: closeAuctionStart },
-        { code: 'CLOSE_AUCTION', label: 'Close Auction', tone: 'warning', start: closeAuctionStart, end: marketClose }
-    ];
-
-    const nowMs = shanghai.date.getTime();
-    let current = null;
-    for (const phase of phases) {
-        if (nowMs >= phase.start.getTime() && nowMs < phase.end.getTime()) {
-            current = phase;
-            break;
-        }
-    }
-
-    let nextPhase = null;
-    if (isWeekend) {
-        const nextTrading = nextTradingDateKey(shanghai.date);
-        nextPhase = {
-            code: 'PRE_OPEN_AUCTION',
-            label: 'Pre-Open Auction',
-            at: makeShanghaiDate(nextTrading, 9, 15)
-        };
-    } else if (current) {
-        const currentIndex = phases.findIndex((phase) => phase.code === current.code);
-        if (currentIndex > -1 && currentIndex < phases.length - 1) {
-            const candidate = phases[currentIndex + 1];
-            nextPhase = { code: candidate.code, label: candidate.label, at: candidate.start };
-        } else {
-            const nextTrading = nextTradingDateKey(shanghai.date);
-            nextPhase = {
-                code: 'PRE_OPEN_AUCTION',
-                label: 'Pre-Open Auction',
-                at: makeShanghaiDate(nextTrading, 9, 15)
-            };
-        }
-    } else {
-        const upcomingToday = phases.find((phase) => nowMs < phase.start.getTime());
-        if (upcomingToday) {
-            nextPhase = { code: upcomingToday.code, label: upcomingToday.label, at: upcomingToday.start };
-        } else {
-            const nextTrading = nextTradingDateKey(shanghai.date);
-            nextPhase = {
-                code: 'PRE_OPEN_AUCTION',
-                label: 'Pre-Open Auction',
-                at: makeShanghaiDate(nextTrading, 9, 15)
-            };
-        }
-    }
-
-    const fallbackPhase = {
-        code: 'CLOSED',
-        label: 'Post-Market Closed',
-        tone: 'danger'
-    };
-    const activePhase = current || fallbackPhase;
-    const countdownSec = nextPhase ? Math.max(0, Math.floor((nextPhase.at.getTime() - nowMs) / 1000)) : 0;
-
-    return {
-        timezone: MARKET_SESSION_TIMEZONE,
-        timezoneLabel: MARKET_SESSION_TIMEZONE_LABEL,
-        phaseCode: activePhase.code,
-        phaseLabel: activePhase.label,
-        phaseTone: activePhase.tone,
-        nextPhaseCode: nextPhase ? nextPhase.code : null,
-        nextPhaseLabel: nextPhase ? nextPhase.label : null,
-        nextPhaseAt: nextPhase ? nextPhase.at.toISOString() : null,
-        countdownSec
-    };
-}
-
-const US_HOLIDAYS_2026 = new Set([
-    '2026-01-01',
-    '2026-01-19',
-    '2026-02-16',
-    '2026-04-03',
-    '2026-05-25',
-    '2026-07-03',
-    '2026-09-07',
-    '2026-11-26',
-    '2026-12-25'
-]);
-
-const US_EARLY_CLOSE_2026 = new Set([
-    '2026-07-03',
-    '2026-11-27',
-    '2026-12-24'
-]);
-
-function parseOffsetMinutes(offsetValue) {
-    const normalized = String(offsetValue || '').replace('GMT', '').trim();
-    const match = normalized.match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
-    if (!match) return 0;
-    const sign = match[1] === '-' ? -1 : 1;
-    const hours = Number(match[2] || 0);
-    const minutes = Number(match[3] || 0);
-    return sign * (hours * 60 + minutes);
-}
-
-function offsetMinutesToIso(minutes) {
-    const sign = minutes < 0 ? '-' : '+';
-    const abs = Math.abs(minutes);
-    const hh = String(Math.floor(abs / 60)).padStart(2, '0');
-    const mm = String(abs % 60).padStart(2, '0');
-    return `${sign}${hh}:${mm}`;
-}
-
-function getTimeZoneOffsetMinutes(timeZone, refDate) {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        timeZoneName: 'shortOffset'
-    });
-    const tzPart = formatter.formatToParts(refDate).find((part) => part.type === 'timeZoneName');
-    return parseOffsetMinutes(tzPart?.value || 'GMT+0');
-}
-
-function toNewYorkNow(now = new Date()) {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: US_SESSION_TIMEZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        weekday: 'short',
-        hour12: false
-    });
-    const parts = Object.fromEntries(formatter.formatToParts(now).map((part) => [part.type, part.value]));
-    const year = Number(parts.year);
-    const month = Number(parts.month);
-    const day = Number(parts.day);
-    const hour = Number(parts.hour);
-    const minute = Number(parts.minute);
-    const second = Number(parts.second);
-    const weekday = parts.weekday;
-    const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
-    const offsetMinutes = getTimeZoneOffsetMinutes(US_SESSION_TIMEZONE, now);
-    const isoOffset = offsetMinutesToIso(offsetMinutes);
-    const date = new Date(`${dateKey}T${parts.hour}:${parts.minute}:${parts.second}${isoOffset}`);
-    return { year, month, day, hour, minute, second, weekday, dateKey, date, offsetMinutes };
-}
-
-function makeNewYorkDate(dateKey, hour, minute, second = 0) {
-    const [year, month, day] = String(dateKey).split('-').map((value) => Number(value));
-    const probe = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-    const offsetMinutes = getTimeZoneOffsetMinutes(US_SESSION_TIMEZONE, probe);
-    const isoOffset = offsetMinutesToIso(offsetMinutes);
-    const hh = String(hour).padStart(2, '0');
-    const mm = String(minute).padStart(2, '0');
-    const ss = String(second).padStart(2, '0');
-    return new Date(`${dateKey}T${hh}:${mm}:${ss}${isoOffset}`);
-}
-
-function isUsTradingDate(dateKey, weekday) {
-    if (weekday === 'Sat' || weekday === 'Sun') return false;
-    if (US_HOLIDAYS_2026.has(dateKey)) return false;
-    return true;
-}
-
-function nextUsTradingDateKey(currentDate) {
-    const date = new Date(currentDate.getTime());
-    while (true) {
-        date.setUTCDate(date.getUTCDate() + 1);
-        const ny = toNewYorkNow(date);
-        if (isUsTradingDate(ny.dateKey, ny.weekday)) {
-            return ny.dateKey;
-        }
-    }
-}
-
-function previousUsTradingDateKey(currentDate) {
-    const date = new Date(currentDate.getTime());
-    while (true) {
-        date.setUTCDate(date.getUTCDate() - 1);
-        const ny = toNewYorkNow(date);
-        if (isUsTradingDate(ny.dateKey, ny.weekday)) {
-            return ny.dateKey;
-        }
-    }
-}
-
-function computeUsMarketSession(now = new Date()) {
-    const ny = toNewYorkNow(now);
-    const isTradingDate = isUsTradingDate(ny.dateKey, ny.weekday);
-    const isEarlyClose = US_EARLY_CLOSE_2026.has(ny.dateKey);
-    const regularCloseHour = isEarlyClose ? 13 : 16;
-
-    const premarketStart = makeNewYorkDate(ny.dateKey, 4, 0);
-    const regularStart = makeNewYorkDate(ny.dateKey, 9, 30);
-    const regularEnd = makeNewYorkDate(ny.dateKey, regularCloseHour, 0);
-    const afterHoursEnd = makeNewYorkDate(ny.dateKey, 20, 0);
-
-    const phases = isTradingDate
-        ? [
-            { code: 'PREMARKET', label: 'Pre-market', tone: 'info', start: premarketStart, end: regularStart },
-            { code: 'REGULAR', label: 'Regular Hours', tone: 'success', start: regularStart, end: regularEnd },
-            { code: 'AFTER_HOURS', label: 'After-hours', tone: 'warning', start: regularEnd, end: afterHoursEnd }
-        ]
-        : [];
-
-    const nowMs = ny.date.getTime();
-    let current = null;
-    for (const phase of phases) {
-        if (nowMs >= phase.start.getTime() && nowMs < phase.end.getTime()) {
-            current = phase;
-            break;
-        }
-    }
-
-    let nextPhase = null;
-    if (current) {
-        const currentIndex = phases.findIndex((phase) => phase.code === current.code);
-        if (currentIndex > -1 && currentIndex < phases.length - 1) {
-            const candidate = phases[currentIndex + 1];
-            nextPhase = { code: candidate.code, label: candidate.label, at: candidate.start };
-        } else {
-            nextPhase = { code: 'CLOSED', label: 'Closed', at: afterHoursEnd };
-        }
-    } else if (isTradingDate && nowMs < premarketStart.getTime()) {
-        nextPhase = { code: 'PREMARKET', label: 'Pre-market', at: premarketStart };
-    } else {
-        const nextDateKey = nextUsTradingDateKey(ny.date);
-        nextPhase = {
-            code: 'PREMARKET',
-            label: 'Pre-market',
-            at: makeNewYorkDate(nextDateKey, 4, 0)
-        };
-    }
-
-    const fallbackPhase = { code: 'CLOSED', label: 'Closed', tone: 'danger' };
-    const activePhase = current || fallbackPhase;
-    const countdownSec = nextPhase ? Math.max(0, Math.floor((nextPhase.at.getTime() - nowMs) / 1000)) : 0;
-
-    return {
-        timezone: US_SESSION_TIMEZONE,
-        timezoneLabel: 'New York Time (ET)',
-        beijingLabel: US_BEIJING_LABEL,
-        phaseCode: activePhase.code,
-        phaseLabel: activePhase.label,
-        phaseTone: activePhase.tone,
-        nextPhaseCode: nextPhase ? nextPhase.code : null,
-        nextPhaseLabel: nextPhase ? nextPhase.label : null,
-        nextPhaseAt: nextPhase ? nextPhase.at.toISOString() : null,
-        countdownSec,
-        isHoliday: US_HOLIDAYS_2026.has(ny.dateKey),
-        isEarlyClose
-    };
-}
-
-function translateSectorToEnglish(rawSector) {
-    const text = String(rawSector || '').trim();
-    if (!text) return 'Other';
-    if (/(\u94f6\u884c|bank)/i.test(text)) return 'Banking';
-    if (/(\u4fdd\u9669|insurance)/i.test(text)) return 'Insurance';
-    if (/(\u767d\u9152|\u98df\u54c1|\u996e\u6599|\u6d88\u8d39|consumer)/i.test(text)) return 'Consumer Staples';
-    if (/(\u534a\u5bfc\u4f53|\u7535\u5b50|\u8f6f\u4ef6|\u901a\u4fe1|tech)/i.test(text)) return 'Technology';
-    if (/(\u7535\u529b|\u80fd\u6e90|\u7164\u70ad|\u77f3\u6cb9|\u5929\u7136\u6c14|energy)/i.test(text)) return 'Energy';
-    if (/(\u533b\u836f|\u533b\u7597|\u751f\u7269|health)/i.test(text)) return 'Healthcare';
-    if (/(\u8bc1\u5238|\u91d1\u878d|financial)/i.test(text)) return 'Financials';
-    if (/(\u5730\u4ea7|\u623f\u5730\u4ea7|real estate)/i.test(text)) return 'Real Estate';
-    if (/(\u6709\u8272|\u94a2\u94c1|\u6750\u6599|\u5316\u5de5|material)/i.test(text)) return 'Materials';
-    if (/(\u6c7d\u8f66|\u673a\u68b0|\u5236\u9020|\u519b\u5de5|industrial)/i.test(text)) return 'Industrials';
-    if (/(\u5bb6\u7535|\u7eba\u7ec7|\u96f6\u552e|retail|discretionary)/i.test(text)) return 'Consumer Discretionary';
-    if (/(\u516c\u7528|utility)/i.test(text)) return 'Utilities';
-    return 'Other';
-}
-
-function detectBoardType(code) {
-    if (String(code).startsWith('688')) return 'STAR';
-    if (String(code).startsWith('300')) return 'CHINEXT';
-    return 'MAIN';
-}
-
-function detectStFlag(name) {
-    const upper = String(name || '').toUpperCase();
-    return upper.includes('ST');
-}
-
-function resolveLimitPct(boardType, isSt) {
-    if (isSt) return 0.05;
-    if (boardType === 'STAR' || boardType === 'CHINEXT') return 0.20;
-    return 0.10;
-}
-
-function computeLimitStatus(changePct, limitPct) {
-    if (!Number.isFinite(changePct)) return 'NORMAL';
-    const limitUpTrigger = limitPct * 100 - 0.1;
-    const limitDownTrigger = -limitPct * 100 + 0.1;
-    if (changePct >= limitUpTrigger) return 'LIMIT_UP';
-    if (changePct <= limitDownTrigger) return 'LIMIT_DOWN';
-    return 'NORMAL';
-}
-
-function normalizeTickerRows(rows) {
-    if (!Array.isArray(rows)) {
-        throw new Error('Unexpected Binance US payload');
-    }
-
-    const bySymbol = Object.fromEntries(rows.map((row) => [row.symbol, row]));
-    const extract = (symbol) => {
-        const row = bySymbol[symbol];
-        if (!row) throw new Error(`Missing symbol ${symbol}`);
-
-        const price = parseNumber(row.lastPrice);
-        const change = parseNumber(row.priceChangePercent);
-        const volume = parseNumber(row.quoteVolume);
-        if (price === null || change === null || volume === null) {
-            throw new Error(`Invalid numeric field for ${symbol}`);
-        }
-
-        return { symbol, price, change, volume };
-    };
-
-    return {
-        meta: {
-            source: 'binance_us',
-            timestamp: new Date().toISOString(),
-            stale: false
-        },
-        btc: extract('BTCUSDT'),
-        eth: extract('ETHUSDT'),
-        sol: extract('SOLUSDT')
-    };
-}
-
 function fetchJsonFromHttps(url, timeoutMs = 5000, redirectCount = 0) {
     return new Promise((resolve, reject) => {
         const request = https.request(
@@ -857,124 +496,6 @@ function fetchTextFromHttps(url, timeoutMs = 5000, redirectCount = 0, headers = 
 
 function fetchBinanceUS() {
     return fetchJsonFromHttps(BINANCE_US_URL, 5000).then(normalizeTickerRows);
-}
-
-function resolveCryptoHistoryRange(rawRange) {
-    const normalized = String(rawRange || '24h').trim().toLowerCase();
-    return Object.prototype.hasOwnProperty.call(CRYPTO_HISTORY_RANGE_CONFIG, normalized) ? normalized : null;
-}
-
-function buildBinanceKlinesUrl(symbol, interval, limit) {
-    const query = new URLSearchParams({
-        symbol,
-        interval,
-        limit: String(limit)
-    });
-    return `${BINANCE_US_KLINES_BASE}?${query.toString()}`;
-}
-
-function normalizeCryptoSymbol(rawSymbol) {
-    const normalized = String(rawSymbol || '').trim().toUpperCase().replace(/\//g, '');
-    if (!normalized) return null;
-    if (normalized.endsWith('USDT')) return normalized;
-    return `${normalized}USDT`;
-}
-
-function cryptoBaseSymbol(symbol) {
-    const normalized = normalizeCryptoSymbol(symbol);
-    if (!normalized) return null;
-    return normalized.endsWith('USDT') ? normalized.slice(0, -4) : normalized;
-}
-
-function buildCoinGeckoMarketChartUrl(coinId, days) {
-    const query = new URLSearchParams({
-        vs_currency: 'usd',
-        days: String(days)
-    });
-    return `${COINGECKO_MARKET_CHART_BASE}/${encodeURIComponent(coinId)}/market_chart?${query.toString()}`;
-}
-
-function normalizeKlineRows(rows) {
-    if (!Array.isArray(rows)) {
-        throw new Error('Unexpected Binance US kline payload');
-    }
-
-    const series = rows
-        .map((row) => {
-            if (!Array.isArray(row) || row.length < 7) return null;
-
-            const openTime = Number(row[0]);
-            const open = parseNumber(row[1]);
-            const high = parseNumber(row[2]);
-            const low = parseNumber(row[3]);
-            const close = parseNumber(row[4]);
-            const volume = parseNumber(row[5]);
-
-            if (
-                !Number.isFinite(openTime)
-                || open === null
-                || high === null
-                || low === null
-                || close === null
-                || volume === null
-            ) {
-                return null;
-            }
-
-            return {
-                ts: new Date(openTime).toISOString(),
-                open,
-                high,
-                low,
-                close,
-                volume
-            };
-        })
-        .filter((row) => row !== null)
-        .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-
-    if (!series.length) {
-        throw new Error('No valid kline points from Binance US');
-    }
-
-    return series;
-}
-
-function normalizeCoinGeckoMarketChartRows(payload, windowMs = null, limit = 240) {
-    const prices = Array.isArray(payload?.prices) ? payload.prices : [];
-    const volumes = Array.isArray(payload?.total_volumes) ? payload.total_volumes : [];
-    const floorTs = Number.isFinite(windowMs) && windowMs > 0 ? Date.now() - windowMs : 0;
-
-    const series = prices.map((point, index) => {
-        const openTime = parseNumber(point?.[0]);
-        const price = parseNumber(point?.[1]);
-        const volumePoint = Array.isArray(volumes[index]) ? volumes[index] : null;
-        const volume = parseNumber(volumePoint?.[1]) ?? 0;
-        if (!Number.isFinite(openTime) || !Number.isFinite(price)) {
-            return null;
-        }
-        if (floorTs && openTime < floorTs) {
-            return null;
-        }
-        return {
-            ts: new Date(openTime).toISOString(),
-            open: price,
-            high: price,
-            low: price,
-            close: price,
-            volume
-        };
-    }).filter((row) => row !== null);
-
-    if (!series.length) {
-        throw new Error('No valid CoinGecko market chart points');
-    }
-
-    const normalized = series.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-    if (normalized.length <= limit) {
-        return normalized;
-    }
-    return normalized.slice(normalized.length - limit);
 }
 
 async function getCryptoHistoryWithCache(symbol, range) {
@@ -2177,85 +1698,6 @@ function fetchTextFromHttps(url, timeoutMs = 5000, redirectCount = 0) {
     });
 }
 
-function buildStooqBatchUrl(symbols) {
-    const symbolPart = symbols.map((symbol) => encodeURIComponent(symbol)).join('+');
-    return `${STOOQ_BATCH_BASE}${symbolPart}`;
-}
-
-function stooqSymbolToYahooSymbol(symbol) {
-    const normalized = String(symbol || '').trim().toUpperCase();
-    if (normalized === '^SPX') return '^GSPC';
-    if (normalized.endsWith('.US')) {
-        return normalized.replace(/\.US$/, '').replace(/\./g, '-');
-    }
-    return normalized;
-}
-
-function yahooSymbolToStooqSymbol(symbol) {
-    const normalized = String(symbol || '').trim().toUpperCase();
-    if (normalized === '^GSPC') return '^SPX';
-    if (normalized.startsWith('^')) return normalized;
-    return `${normalized}.US`;
-}
-
-function buildYahooSparkUrl(symbols, range = US_YAHOO_SPARK_RANGE, interval = US_YAHOO_SPARK_INTERVAL) {
-    const symbolPart = symbols.map((symbol) => encodeURIComponent(symbol)).join(',');
-    const rangePart = encodeURIComponent(range);
-    const intervalPart = encodeURIComponent(interval);
-    return `${YAHOO_SPARK_BASE}?symbols=${symbolPart}&range=${rangePart}&interval=${intervalPart}`;
-}
-
-function isStooqRateLimitText(payloadText) {
-    const text = String(payloadText || '');
-    return /daily hits limit/i.test(text) || /too many requests/i.test(text);
-}
-
-function parseStooqCsvRows(csvText) {
-    const payloadText = String(csvText || '').trim();
-    if (!payloadText) {
-        throw new Error('Empty Stooq response');
-    }
-    if (isStooqRateLimitText(payloadText)) {
-        throw new Error('Stooq daily hits limit exceeded');
-    }
-    const lines = payloadText.split(/\r?\n/);
-    const header = String(lines[0] || '').replace(/^\uFEFF/, '').trim().toLowerCase();
-    if (header !== 'symbol,date,time,open,high,low,close,volume') {
-        throw new Error(`Unexpected Stooq CSV header: ${header || '<empty>'}`);
-    }
-    if (lines.length <= 1) return [];
-    const rows = [];
-    for (let i = 1; i < lines.length; i += 1) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const cells = line.split(',');
-        if (cells.length < 8) continue;
-        const symbol = String(cells[0] || '').trim().toUpperCase();
-        const date = String(cells[1] || '').trim();
-        const time = String(cells[2] || '').trim();
-        const open = parseNumber(cells[3]);
-        const high = parseNumber(cells[4]);
-        const low = parseNumber(cells[5]);
-        const close = parseNumber(cells[6]);
-        const volume = parseNumber(cells[7]);
-        const changePct = Number.isFinite(open) && Number.isFinite(close) && open !== 0
-            ? Number((((close - open) / open) * 100).toFixed(4))
-            : null;
-        rows.push({
-            symbol,
-            date,
-            time,
-            open,
-            high,
-            low,
-            price: close,
-            volume,
-            changePct
-        });
-    }
-    return rows;
-}
-
 async function fetchStooqQuotes(sourceSymbols) {
     const CHUNK_SIZE = 40;
     const bySymbol = new Map();
@@ -2271,101 +1713,6 @@ async function fetchStooqQuotes(sourceSymbols) {
         throw new Error('Stooq returned zero quote rows');
     }
     return bySymbol;
-}
-
-function firstFiniteNumber(values) {
-    if (!Array.isArray(values)) return null;
-    for (const value of values) {
-        const parsed = parseNumber(value);
-        if (parsed !== null) return parsed;
-    }
-    return null;
-}
-
-function lastFiniteNumber(values) {
-    if (!Array.isArray(values)) return null;
-    for (let i = values.length - 1; i >= 0; i -= 1) {
-        const parsed = parseNumber(values[i]);
-        if (parsed !== null) return parsed;
-    }
-    return null;
-}
-
-function minFiniteNumber(values) {
-    if (!Array.isArray(values)) return null;
-    const finite = values.map((value) => parseNumber(value)).filter((value) => value !== null);
-    if (!finite.length) return null;
-    return Math.min(...finite);
-}
-
-function maxFiniteNumber(values) {
-    if (!Array.isArray(values)) return null;
-    const finite = values.map((value) => parseNumber(value)).filter((value) => value !== null);
-    if (!finite.length) return null;
-    return Math.max(...finite);
-}
-
-function formatEpochToEtDateTime(epochSeconds) {
-    if (!Number.isFinite(epochSeconds)) {
-        return { date: null, time: null };
-    }
-    const dt = new Date(epochSeconds * 1000);
-    if (!Number.isFinite(dt.getTime())) {
-        return { date: null, time: null };
-    }
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: US_SESSION_TIMEZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-    const parts = formatter.formatToParts(dt);
-    const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    if (!map.year || !map.month || !map.day) {
-        return { date: null, time: null };
-    }
-    return {
-        date: `${map.year}-${map.month}-${map.day}`,
-        time: map.hour && map.minute && map.second ? `${map.hour}:${map.minute}:${map.second}` : null
-    };
-}
-
-function parseYahooSparkQuoteRow(entry) {
-    const yahooSymbol = String(entry?.symbol || '').trim().toUpperCase();
-    if (!yahooSymbol) return null;
-    const stooqSymbol = yahooSymbolToStooqSymbol(yahooSymbol);
-    const response = Array.isArray(entry?.response) ? entry.response[0] : null;
-    const meta = response?.meta || {};
-    const closes = response?.indicators?.quote?.[0]?.close || [];
-    const firstClose = firstFiniteNumber(closes);
-    const lastClose = lastFiniteNumber(closes);
-    const price = parseNumber(meta.regularMarketPrice) ?? lastClose;
-    if (price === null) return null;
-    const high = parseNumber(meta.regularMarketDayHigh) ?? maxFiniteNumber(closes);
-    const low = parseNumber(meta.regularMarketDayLow) ?? minFiniteNumber(closes);
-    const open = firstClose ?? parseNumber(meta.chartPreviousClose) ?? parseNumber(meta.previousClose);
-    const volume = parseNumber(meta.regularMarketVolume);
-    const previousClose = parseNumber(meta.previousClose) ?? parseNumber(meta.chartPreviousClose);
-    const changePct = previousClose !== null && previousClose !== 0
-        ? Number((((price - previousClose) / previousClose) * 100).toFixed(4))
-        : null;
-    const marketTime = parseNumber(meta.regularMarketTime);
-    const dateTime = formatEpochToEtDateTime(marketTime);
-    return {
-        symbol: stooqSymbol,
-        date: dateTime.date,
-        time: dateTime.time,
-        open,
-        high,
-        low,
-        price,
-        volume,
-        changePct
-    };
 }
 
 async function fetchYahooSparkQuotes(stooqSymbols, range = US_YAHOO_SPARK_RANGE, interval = US_YAHOO_SPARK_INTERVAL) {
@@ -2389,28 +1736,6 @@ async function fetchYahooSparkQuotes(stooqSymbols, range = US_YAHOO_SPARK_RANGE,
         }
     }
     return bySymbol;
-}
-
-function parseAlphaGlobalQuote(payload) {
-    const row = payload?.['Global Quote'];
-    if (!row || typeof row !== 'object') return null;
-    const price = parseNumber(row['05. price']);
-    if (price === null) return null;
-    const open = parseNumber(row['02. open']);
-    const high = parseNumber(row['03. high']);
-    const low = parseNumber(row['04. low']);
-    const volume = parseNumber(row['06. volume']);
-    const changePctRaw = String(row['10. change percent'] || '').replace('%', '').trim();
-    const changePct = parseNumber(changePctRaw);
-    return {
-        symbol: String(row['01. symbol'] || '').toUpperCase(),
-        open,
-        high,
-        low,
-        price,
-        volume,
-        changePct
-    };
 }
 
 async function fetchAlphaGlobalQuote(symbol) {
@@ -2439,114 +1764,10 @@ async function fetchAlphaIndexQuote(indexSymbol) {
     return null;
 }
 
-function loadCsi300Snapshot() {
-    if (!fs.existsSync(CSI300_SNAPSHOT_PATH)) {
-        throw new Error(`Missing CSI300 snapshot file: ${CSI300_SNAPSHOT_PATH}`);
-    }
-
-    let parsed;
-    try {
-        const raw = fs.readFileSync(CSI300_SNAPSHOT_PATH, 'utf8').replace(/^\uFEFF/, '');
-        parsed = JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`Failed to parse CSI300 snapshot: ${error.message}`);
-    }
-
-    if (!Array.isArray(parsed.constituents)) {
-        throw new Error('Invalid CSI300 snapshot format: constituents must be an array');
-    }
-
-    if (parsed.constituents.length !== 300) {
-        throw new Error(`Invalid CSI300 snapshot size: expected 300, got ${parsed.constituents.length}`);
-    }
-
-    const seenSecids = new Set();
-    return parsed.constituents.map((row, index) => {
-        const code = String(row.code || '').trim();
-        const name = String(row.name || '').trim();
-        const market = String(row.market || '').toUpperCase();
-        const secid = String(row.secid || '').trim();
-        const expectedSecid = `${market === 'SH' ? 1 : 0}.${code}`;
-
-        if (!/^\d{6}$/.test(code)) {
-            throw new Error(`Invalid code at row ${index + 1}: ${code}`);
-        }
-        if (market !== 'SH' && market !== 'SZ') {
-            throw new Error(`Invalid market at row ${index + 1}: ${market}`);
-        }
-        if (secid !== expectedSecid) {
-            throw new Error(`Invalid secid at row ${index + 1}: ${secid}, expected ${expectedSecid}`);
-        }
-        if (seenSecids.has(secid)) {
-            throw new Error(`Duplicate secid at row ${index + 1}: ${secid}`);
-        }
-        seenSecids.add(secid);
-
-        return { code, name, market, secid };
-    });
-}
-
-function normalizeUsSourceSymbol(symbol) {
-    return `${String(symbol || '').trim().toUpperCase().replace(/\./g, '-')}.US`;
-}
-
-function normalizeUsSymbol(rawSymbol) {
-    return String(rawSymbol || '')
-        .trim()
-        .toUpperCase()
-        .replace(/\.US$/, '')
-        .replace(/-/g, '.');
-}
-
-function loadSp500Snapshot() {
-    if (!fs.existsSync(SP500_SNAPSHOT_PATH)) {
-        throw new Error(`Missing S&P 500 snapshot file: ${SP500_SNAPSHOT_PATH}`);
-    }
-
-    let parsed;
-    try {
-        const raw = fs.readFileSync(SP500_SNAPSHOT_PATH, 'utf8').replace(/^\uFEFF/, '');
-        parsed = JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`Failed to parse S&P 500 snapshot: ${error.message}`);
-    }
-
-    if (!Array.isArray(parsed.constituents)) {
-        throw new Error('Invalid S&P 500 snapshot format: constituents must be an array');
-    }
-    if (parsed.constituents.length !== 500) {
-        throw new Error(`Invalid S&P 500 snapshot size: expected 500, got ${parsed.constituents.length}`);
-    }
-
-    const seen = new Set();
-    return parsed.constituents.map((row, index) => {
-        const symbol = normalizeUsSymbol(row.symbol);
-        const name = String(row.name || '').trim();
-        const sector = String(row.sector || '').trim() || 'Other';
-        const sourceSymbol = String(row.sourceSymbol || normalizeUsSourceSymbol(symbol)).trim().toUpperCase();
-
-        if (!symbol || !/^[A-Z0-9.]+$/.test(symbol)) {
-            throw new Error(`Invalid symbol at row ${index + 1}: ${row.symbol}`);
-        }
-        if (!name) {
-            throw new Error(`Missing security name at row ${index + 1}`);
-        }
-        if (!sourceSymbol.endsWith('.US')) {
-            throw new Error(`Invalid sourceSymbol at row ${index + 1}: ${sourceSymbol}`);
-        }
-        if (seen.has(symbol)) {
-            throw new Error(`Duplicate symbol at row ${index + 1}: ${symbol}`);
-        }
-        seen.add(symbol);
-
-        return { symbol, name, sector, sourceSymbol };
-    });
-}
-
-const csi300Snapshot = loadCsi300Snapshot();
+const csi300Snapshot = loadCsi300Snapshot(CSI300_SNAPSHOT_PATH);
 const csi300ByCode = new Map(csi300Snapshot.map((row) => [row.code, row]));
 const csi300Secids = csi300Snapshot.map((row) => row.secid);
-const sp500Snapshot = loadSp500Snapshot();
+const sp500Snapshot = loadSp500Snapshot(SP500_SNAPSHOT_PATH);
 const sp500BySymbol = new Map(sp500Snapshot.map((row) => [row.symbol, row]));
 const sp500SourceSymbols = sp500Snapshot.map((row) => row.sourceSymbol);
 
@@ -2609,7 +1830,7 @@ async function handleCryptoHistory(req, res, parsedUrl, rawSymbol) {
     }
     const symbol = resolved.symbol;
 
-    const range = resolveCryptoHistoryRange(parsedUrl.searchParams.get('range') || '24h');
+    const range = resolveCryptoHistoryRange(parsedUrl.searchParams.get('range') || '24h', CRYPTO_HISTORY_RANGE_CONFIG);
     if (!range) {
         sendJson(res, 400, { error: 'Invalid range. Allowed values: 1h, 24h, 7d.' });
         return;
@@ -4201,48 +3422,6 @@ function normalizeUsIndexSymbol(rawIndexSymbol) {
     return null;
 }
 
-function usQuoteFromStooqRow(stooqRow) {
-    if (!stooqRow) return null;
-    return {
-        open: stooqRow.open,
-        high: stooqRow.high,
-        low: stooqRow.low,
-        price: stooqRow.price,
-        volume: stooqRow.volume,
-        changePct: stooqRow.changePct,
-        quoteDate: stooqRow.date || null,
-        quoteTime: stooqRow.time || null,
-        quoteTimezone: 'ET'
-    };
-}
-
-function appendProviderSource(baseSource, providerTag) {
-    const parts = String(baseSource || '')
-        .split('+')
-        .map((part) => part.trim())
-        .filter(Boolean);
-    if (!parts.includes(providerTag)) {
-        parts.push(providerTag);
-    }
-    return parts.join('+');
-}
-
-function buildUsCoverageStats(quoteMap, symbols) {
-    const total = symbols.length;
-    if (!total) {
-        return { total: 0, live: 0, pct: 0 };
-    }
-    let live = 0;
-    for (const symbol of symbols) {
-        const quote = usQuoteFromStooqRow(quoteMap.get(symbol));
-        if (quote && Number.isFinite(quote.price)) {
-            live += 1;
-        }
-    }
-    const pct = Number(((live / total) * 100).toFixed(2));
-    return { total, live, pct };
-}
-
 async function fetchUsQuoteMapWithFallback(symbols, options = {}) {
     const minCoveragePct = Number.isFinite(options.minCoveragePct) ? options.minCoveragePct : US_MIN_LIVE_COVERAGE_PCT;
     const requiredSymbols = Array.isArray(options.requiredSymbols) ? options.requiredSymbols : [];
@@ -4297,157 +3476,6 @@ async function fetchUsQuoteMapWithFallback(symbols, options = {}) {
         liveCoveragePct: finalCoverage.pct,
         liveCount: finalCoverage.live,
         totalCount: finalCoverage.total
-    };
-}
-
-function calculateUsPrediction(quote) {
-    const price = quote?.price ?? null;
-    const open = quote?.open ?? price ?? null;
-    const high = quote?.high ?? price ?? null;
-    const low = quote?.low ?? price ?? null;
-    const changePct = quote?.changePct ?? 0;
-
-    const intradayPct = Number.isFinite(price) && Number.isFinite(open) && open !== 0
-        ? ((price - open) / open) * 100
-        : 0;
-    const rangePct = Number.isFinite(high) && Number.isFinite(low) && Number.isFinite(open) && open !== 0
-        ? (high - low) / open
-        : 0;
-
-    const trendComponent = clamp(changePct / 5, -1, 1);
-    const intradayComponent = clamp(intradayPct / 4, -1, 1);
-    const pUp = clamp(0.5 + trendComponent * 0.24 + intradayComponent * 0.16, 0.02, 0.98);
-    const pDown = clamp(1 - pUp, 0.02, 0.98);
-
-    const distance = Math.abs(pUp - 0.5) * 2;
-    const rangePenalty = clamp(rangePct / 0.07, 0, 1);
-    const confidence = clamp(0.82 + distance * 0.18 - rangePenalty * 0.10, 0.75, 0.99);
-
-    const center = clamp((changePct / 100) * 0.38 + (pUp - 0.5) * 0.06, -0.11, 0.11);
-    const spread = clamp(0.012 + rangePct * 0.55 + (1 - confidence) * 0.05, 0.01, 0.09);
-    let q10 = clamp(center - spread * 0.95, -0.15, 0.15);
-    let q50 = clamp(center, -0.12, 0.12);
-    let q90 = clamp(center + spread * 0.95, -0.15, 0.15);
-    [q10, q50, q90] = [q10, q50, q90].sort((a, b) => a - b);
-
-    let signal = 'FLAT';
-    if (pUp >= 0.65 && confidence >= 0.95) signal = 'STRONG LONG';
-    else if (pUp >= 0.55 && confidence >= 0.90) signal = 'LONG';
-    else if (pUp <= 0.35 && confidence >= 0.95) signal = 'STRONG SHORT';
-    else if (pUp <= 0.45 && confidence >= 0.90) signal = 'SHORT';
-
-    let w1 = clamp(0.26 + (pUp - 0.5) * 0.35, 0.08, 0.55);
-    let w2 = clamp(0.28 + distance * 0.12, 0.10, 0.50);
-    let w3 = clamp(0.24 + (0.5 - Math.abs(pUp - 0.5)) * 0.12, 0.08, 0.45);
-    let w0 = Math.max(0.02, 1 - (w1 + w2 + w3));
-    const total = w0 + w1 + w2 + w3;
-    w0 /= total;
-    w1 /= total;
-    w2 /= total;
-    w3 /= total;
-    const window = {
-        W0: Number(w0.toFixed(4)),
-        W1: Number(w1.toFixed(4)),
-        W2: Number(w2.toFixed(4)),
-        W3: Number(w3.toFixed(4)),
-        mostLikely: Object.entries({ W0: w0, W1: w1, W2: w2, W3: w3 }).sort((a, b) => b[1] - a[1])[0][0]
-    };
-
-    return {
-        pUp: Number(pUp.toFixed(4)),
-        pDown: Number(pDown.toFixed(4)),
-        confidence: Number(confidence.toFixed(4)),
-        signal,
-        q10: Number(q10.toFixed(4)),
-        q50: Number(q50.toFixed(4)),
-        q90: Number(q90.toFixed(4)),
-        window
-    };
-}
-
-function calculateUsPolicy(prediction) {
-    const pUp = prediction.pUp;
-    const confidence = prediction.confidence;
-    const q10 = prediction.q10;
-    const q50 = prediction.q50;
-
-    let signal = 'FLAT';
-    let action = 'Hold';
-    if (pUp >= 0.65 && confidence >= 0.95) {
-        signal = 'STRONG LONG';
-        action = 'Buy (aggressive)';
-    } else if (pUp >= 0.55 && confidence >= 0.90) {
-        signal = 'LONG';
-        action = 'Buy';
-    } else if (pUp <= 0.35 && confidence >= 0.95) {
-        signal = 'STRONG SHORT';
-        action = 'Sell short (aggressive)';
-    } else if (pUp <= 0.45 && confidence >= 0.90) {
-        signal = 'SHORT';
-        action = 'Sell short';
-    }
-
-    let positionSize = 0;
-    if (signal !== 'FLAT') {
-        const isLong = signal.includes('LONG');
-        const winProb = isLong ? pUp : 1 - pUp;
-        const winReturn = Math.max(isLong ? q50 : Math.abs(q10), 0.001);
-        const lossReturn = Math.max(isLong ? Math.abs(q10) : q50, 0.001);
-        const kelly = (winProb * winReturn - (1 - winProb) * lossReturn) / winReturn;
-        const capped = clamp(Math.abs(kelly), 0, US_LIMIT_POSITION);
-        positionSize = clamp(capped * confidence, 0, US_LIMIT_POSITION);
-    }
-
-    return {
-        signal,
-        action,
-        positionSize: Number(positionSize.toFixed(4)),
-        shortAllowed: true,
-        leverage: US_MAX_LEVERAGE
-    };
-}
-
-function calculateUsTpSl(entryPrice, prediction, signal) {
-    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-        return {
-            entryPrice: null,
-            stopLoss: null,
-            stopLossPct: null,
-            takeProfit1: null,
-            takeProfit1Pct: null,
-            takeProfit2: null,
-            takeProfit2Pct: null
-        };
-    }
-
-    const q10 = prediction.q10;
-    const q50 = prediction.q50;
-    const q90 = prediction.q90;
-    if (signal === 'FLAT') {
-        return {
-            entryPrice: Number(entryPrice.toFixed(4)),
-            stopLoss: null,
-            stopLossPct: null,
-            takeProfit1: null,
-            takeProfit1Pct: null,
-            takeProfit2: null,
-            takeProfit2Pct: null
-        };
-    }
-
-    const isLong = signal.includes('LONG');
-    const stopLossPct = isLong ? q10 * 0.9 : -q90 * 0.9;
-    const takeProfit1Pct = isLong ? q50 * 0.8 : -q10 * 0.8;
-    const takeProfit2Pct = isLong ? q90 * 0.7 : -q10 * 1.5;
-
-    return {
-        entryPrice: Number(entryPrice.toFixed(4)),
-        stopLoss: Number((entryPrice * (1 + stopLossPct)).toFixed(4)),
-        stopLossPct: Number(stopLossPct.toFixed(4)),
-        takeProfit1: Number((entryPrice * (1 + takeProfit1Pct)).toFixed(4)),
-        takeProfit1Pct: Number(takeProfit1Pct.toFixed(4)),
-        takeProfit2: Number((entryPrice * (1 + takeProfit2Pct)).toFixed(4)),
-        takeProfit2Pct: Number(takeProfit2Pct.toFixed(4))
     };
 }
 

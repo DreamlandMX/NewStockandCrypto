@@ -157,36 +157,21 @@ MODEL_EXPLORER_MODE=live MODEL_ARTIFACT_DIR=artifacts/latest uvicorn app.main:ap
 
 Open browser: `http://localhost:9000`
 
-### 5. Expose Your Local Stack to the Public Internet
+### 5. Deploy on Render
 
-If you want a free public URL without moving the stack to paid cloud hosting, use Cloudflare Tunnel.
+This project keeps public hosting on Render. The repository includes `render.yaml`, so Render can start the Node server and the ML service from the same deploy configuration.
 
-```powershell
-npm run public:local
-```
-
-This starts:
-
-- the Node server on `127.0.0.1:9000`
-- the ML service on `127.0.0.1:8000`
-- a Cloudflare quick tunnel that publishes the Node server to a random `*.trycloudflare.com` URL
-- automatic fallback to nearby free ports if `9000` or `8000` are already in use
-- a status file at `logs/local-public/public-site-status.json`
-- your default browser after the public URL becomes reachable
-
-Stop the tracked local processes with:
+Local development stays simple:
 
 ```powershell
-npm run public:stop
+npm run start:stack
 ```
 
-Check the current local/public URLs and health state with:
+Public production hosting stays on Render:
 
-```powershell
-npm run public:status
-```
-
-Detailed instructions: [LOCAL_PUBLIC_HOSTING_WITH_CLOUDFLARE.md](/e:/NewStockandCrypto/docs/LOCAL_PUBLIC_HOSTING_WITH_CLOUDFLARE.md)
+- main web app: Render Node service
+- ML API: Render Python service
+- persistent app data: Render disk mounted at `/opt/render/project/src/data`
 
 ---
 

@@ -14,10 +14,6 @@
     "test": "npm run test:node",
     "test:node": "node --test tests",
     "test:python": "cd ml-service && py -3 -m unittest discover -s tests -p \"test_*.py\"",
-    "public:local": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Start-LocalPublicSite.ps1 -ModelMode live -DownloadCloudflared",
-    "public:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Stop-LocalPublicStack.ps1",
-    "public:status": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Get-LocalPublicStatus.ps1",
-    "cloudflared:get": "powershell -ExecutionPolicy Bypass -File .\\scripts\\Get-Cloudflared.ps1 -DownloadIfMissing",
     "postinstall": "npm rebuild better-sqlite3 || true"
   },
   "dependencies": {

@@ -1138,7 +1138,7 @@
   function shanghaiNow() {
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Shanghai',
-      hour12: false,
+      hourCycle: 'h23',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit'
@@ -1148,10 +1148,15 @@
       map[part.type] = part.value;
     });
     return {
-      hour: Number(map.hour),
+      hour: normalizeClockHour(map.hour),
       minute: Number(map.minute),
       second: Number(map.second)
     };
+  }
+
+  function normalizeClockHour(value) {
+    const hour = Number(value);
+    return hour === 24 ? 0 : hour;
   }
 
   function sessionFromMinute(minute) {
