@@ -1,7 +1,11 @@
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
+const { openAppDatabase } = require('./sqlite-store-helpers');
+const {
+    clampLimit,
+    normalizeBoolean,
+    normalizeTextContent,
+    nowIso
+} = require('./store-helpers');
 
 const DEFAULT_NOTEBOOK_NAME = 'My Notes';
 const DEFAULT_NOTEBOOK_COLOR = 'blue';
@@ -13,34 +17,8 @@ module.exports = {
     createNotesStore
 };
 
-function nowIso() {
-    return new Date().toISOString();
-}
-
 function createShareId() {
     return crypto.randomBytes(10).toString('hex');
-}
-
-function clampLimit(value, fallback = 50) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-        return fallback;
-    }
-    return Math.min(Math.floor(numeric), 500);
-}
-
-function normalizeBoolean(value, fallback = false) {
-    if (value === undefined || value === null) {
-        return fallback;
-    }
-    if (typeof value === 'boolean') {
-        return value;
-    }
-    if (typeof value === 'number') {
-        return value !== 0;
-    }
-    const normalized = String(value).trim().toLowerCase();
-    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
 function normalizeTags(tags) {
@@ -66,14 +44,6 @@ function parseTags(rawValue) {
     } catch (error) {
         return [];
     }
-}
-
-function normalizeTextContent(value) {
-    return String(value || '')
-        .replace(/\r\n?/g, '\n')
-        .replace(/`r`n/g, '\n')
-        .replace(/`n/g, '\n')
-        .replace(/\\n/g, '\n');
 }
 
 function stripMarkdown(value) {
@@ -198,14 +168,7 @@ function mapIdeaRow(row, viewerUserId = null) {
 }
 
 function createNotesStore(options = {}) {
-    const baseDir = options.baseDir || process.cwd();
-    const dataDir = options.dataDir || process.env.APP_DATA_DIR || path.join(baseDir, 'data');
-    const dbPath = path.join(dataDir, 'stockandcrypto.db');
-    fs.mkdirSync(dataDir, { recursive: true });
-
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    const { db, dbPath } = openAppDatabase(options);
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS notebooks (

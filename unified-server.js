@@ -1,8 +1,6 @@
 // Unified server for StockandCrypto.
 // Exposes static frontend and API routes on the same port (default: 9000).
 
-const crypto = require('crypto');
-const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
@@ -13,33 +11,51 @@ const { createPositionsStore } = require('./server/positions-store');
 const { createProfileStore } = require('./server/profile-store');
 const { createUploadStore } = require('./server/upload-store');
 const { buildPolicyPacket, deriveLegacyPolicy, deriveLegacyTpSl } = require('./server/policy-engine');
+const { createQuantRouterService } = require('./server/quant-router-service');
+const { createApiProxy, createModelExplorerProxy } = require('./server/proxy-service');
+const { createStaticFileService } = require('./server/static-file-service');
+const { readJsonBody } = require('./server/http-body');
+const { createRuntimeService } = require('./server/runtime-service');
+const { createQuantRouterRoutes } = require('./server/quant-router-routes');
+const { createAppRouter } = require('./server/app-router');
+const { handleAsyncRoute, sendJson } = require('./server/http-response');
+const { createAlertContractRoute } = require('./server/alert-contract-route');
+const { logStartupSummary } = require('./server/startup-summary');
+const { createSiteRouteBundle } = require('./server/site-route-bundle');
+const { createMarketRouteBundle } = require('./server/market-route-bundle');
+const { createServerConfig } = require('./server/server-config');
+const { startUnifiedHttpServer } = require('./server/server-lifecycle');
+const { createTrackingSnapshotStore } = require('./server/tracking-snapshot-store');
+const {
+    clamp,
+    deepCopy,
+    parseInteger,
+    parseNumber,
+    sleep,
+    withTimeout
+} = require('./server/value-helpers');
 
-const HOST = process.env.HOST || '127.0.0.1';
-const PORT = Number(process.env.PORT || 9000);
-const API_HOST = process.env.API_HOST || '127.0.0.1';
-const API_PORT = Number(process.env.API_PORT || 5001);
-const IS_RENDER_RUNTIME = Boolean(process.env.RENDER || process.env.RENDER_EXTERNAL_URL);
-const MODEL_EXPLORER_SCHEME = String(
-    process.env.MODEL_EXPLORER_SCHEME || (IS_RENDER_RUNTIME ? 'https' : 'http')
-).trim().toLowerCase() === 'https' ? 'https' : 'http';
-const MODEL_EXPLORER_HOST = process.env.MODEL_EXPLORER_HOST || (
-    IS_RENDER_RUNTIME ? 'newstockandcrypto-ml.onrender.com' : '127.0.0.1'
-);
-const MODEL_EXPLORER_PORT = Number(
-    process.env.MODEL_EXPLORER_PORT || (IS_RENDER_RUNTIME ? 443 : 8000)
-);
-const WEB_ROOT = path.join(__dirname, 'web');
-const APP_DATA_DIR = process.env.APP_DATA_DIR || path.join(__dirname, 'data');
-const LOCAL_UPLOADS_ROOT = path.join(APP_DATA_DIR, 'uploads');
-const NEW_QUANT_MODEL_ROOT = process.env.NEW_QUANT_MODEL_ROOT || 'E:\\NewQuantModel';
-const NEW_QUANT_OUTPUT_DIR = path.join(NEW_QUANT_MODEL_ROOT, 'output');
-const NEW_QUANT_RUNS_DIR = path.join(NEW_QUANT_OUTPUT_DIR, 'runs');
-const NEW_QUANT_ARCHIVE_DIR = path.join(NEW_QUANT_OUTPUT_DIR, 'archive');
-const NEW_QUANT_CACHE_DIR = path.join(NEW_QUANT_OUTPUT_DIR, 'cache');
-const NEW_QUANT_PIPELINE_STATUS_PATH = path.join(NEW_QUANT_CACHE_DIR, 'pipeline_status.json');
-const APP_VERSION = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || 'local';
+const serverConfig = createServerConfig({ env: process.env, baseDir: __dirname });
+const HOST = serverConfig.host;
+const PORT = serverConfig.port;
+const API_HOST = serverConfig.apiHost;
+const API_PORT = serverConfig.apiPort;
+const IS_RENDER_RUNTIME = serverConfig.isRenderRuntime;
+const MODEL_EXPLORER_SCHEME = serverConfig.modelExplorer.scheme;
+const MODEL_EXPLORER_HOST = serverConfig.modelExplorer.host;
+const MODEL_EXPLORER_PORT = serverConfig.modelExplorer.port;
+const WEB_ROOT = serverConfig.webRoot;
+const APP_DATA_DIR = serverConfig.appDataDir;
+const LOCAL_UPLOADS_ROOT = serverConfig.localUploadsRoot;
+const NEW_QUANT_MODEL_ROOT = serverConfig.newQuant.modelRoot;
+const NEW_QUANT_OUTPUT_DIR = serverConfig.newQuant.outputDir;
+const NEW_QUANT_RUNS_DIR = serverConfig.newQuant.runsDir;
+const NEW_QUANT_ARCHIVE_DIR = serverConfig.newQuant.archiveDir;
+const NEW_QUANT_CACHE_DIR = serverConfig.newQuant.cacheDir;
+const NEW_QUANT_PIPELINE_STATUS_PATH = serverConfig.newQuant.pipelineStatusPath;
+const APP_VERSION = serverConfig.appVersion;
 const SERVER_STARTED_AT = new Date();
-const REQUEST_LOGGING_ENABLED = String(process.env.REQUEST_LOGGING || 'true').toLowerCase() !== 'false';
+const REQUEST_LOGGING_ENABLED = serverConfig.requestLoggingEnabled;
 
 const CRYPTO_CACHE_TTL_MS = Number(process.env.CRYPTO_CACHE_TTL_MS || 9000);
 const CN_CACHE_TTL_MS = Number(process.env.CN_CACHE_TTL_MS || 9000);
@@ -169,6 +185,14 @@ const LIMIT_STATUS_ORDER = {
     LIMIT_DOWN: 2,
     NORMAL: 1
 };
+const trackingSnapshotStore = createTrackingSnapshotStore({ cacheDir: TRACKING_CACHE_DIR });
+const readTrackingSnapshot = trackingSnapshotStore.readSnapshot;
+const writeTrackingSnapshot = trackingSnapshotStore.writeSnapshot;
+const markTrackingBucketStale = trackingSnapshotStore.markBucketStale;
+const readTrackingBucketSnapshot = readTrackingSnapshot;
+const writeTrackingBucketSnapshot = writeTrackingSnapshot;
+const readCnLiveSnapshot = () => readTrackingSnapshot('cn-live');
+const writeCnLiveSnapshot = (payload) => writeTrackingSnapshot('cn-live', payload);
 
 let cryptoPriceCache = null;
 let cryptoPriceCacheAt = 0;
@@ -204,12 +228,6 @@ let trackingAggregatePromise = null;
 let homeLandingCache = null;
 let homeLandingCacheAt = 0;
 let homeLandingPromise = null;
-const quantRouterCache = {
-    runs: null,
-    latest: null,
-    bundles: new Map(),
-    status: null
-};
 let trackingActionLog = [];
 let trackingLatestActionAt = null;
 let trackingPreviousTrackedState = new Map();
@@ -220,1040 +238,124 @@ const notesStore = createNotesStore({ baseDir: __dirname, dataDir: APP_DATA_DIR 
 const positionsStore = createPositionsStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
 const profileStore = createProfileStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
 const uploadStore = createUploadStore({ baseDir: __dirname, dataDir: APP_DATA_DIR });
-const REQUEST_METRICS = {
-    total: 0,
-    inFlight: 0,
-    byMethod: Object.create(null),
-    byStatusClass: {
-        '2xx': 0,
-        '3xx': 0,
-        '4xx': 0,
-        '5xx': 0,
-        other: 0
+const quantRouter = createQuantRouterService({
+    runsDir: NEW_QUANT_RUNS_DIR,
+    archiveDir: NEW_QUANT_ARCHIVE_DIR,
+    pipelineStatusPath: NEW_QUANT_PIPELINE_STATUS_PATH,
+    isRenderRuntime: IS_RENDER_RUNTIME,
+    sendJson
+});
+const proxyApi = createApiProxy({
+    host: API_HOST,
+    port: API_PORT,
+    sendJson
+});
+const proxyModelExplorer = createModelExplorerProxy({
+    scheme: MODEL_EXPLORER_SCHEME,
+    host: MODEL_EXPLORER_HOST,
+    port: MODEL_EXPLORER_PORT,
+    sendJson
+});
+const staticFiles = createStaticFileService({
+    webRoot: WEB_ROOT,
+    uploadsRoot: LOCAL_UPLOADS_ROOT,
+    sendJson
+});
+const serveStatic = staticFiles.serveStatic;
+const serveUploads = staticFiles.serveUploads;
+const runtime = createRuntimeService({
+    appVersion: APP_VERSION,
+    startedAt: SERVER_STARTED_AT,
+    appDataDir: APP_DATA_DIR,
+    isRenderRuntime: IS_RENDER_RUNTIME,
+    requestLoggingEnabled: REQUEST_LOGGING_ENABLED,
+    modelExplorer: {
+        scheme: MODEL_EXPLORER_SCHEME,
+        host: MODEL_EXPLORER_HOST,
+        port: MODEL_EXPLORER_PORT
     },
-    errors: 0,
-    lastRequestAt: null,
-    lastErrorAt: null
-};
-
-const MIME_TYPES = {
-    '.html': 'text/html; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.js': 'application/javascript; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.svg': 'image/svg+xml',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.ico': 'image/x-icon',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2'
-};
-
-function sendJson(res, statusCode, payload) {
-    const body = JSON.stringify(payload);
-    res.writeHead(statusCode, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Content-Length': Buffer.byteLength(body),
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-    });
-    res.end(body);
-}
-
-function logEvent(level, event, details = {}) {
-    const entry = {
-        ts: new Date().toISOString(),
-        level,
-        event,
-        ...details
-    };
-    const serialized = JSON.stringify(entry);
-    if (level === 'error') {
-        console.error(serialized);
-        return;
-    }
-    console.log(serialized);
-}
-
-function buildServiceBaseUrl(scheme, host, port) {
-    const normalizedScheme = String(scheme || 'http').toLowerCase() === 'https' ? 'https' : 'http';
-    const normalizedHost = String(host || '').trim();
-    const numericPort = Number(port);
-    const isDefaultPort = (normalizedScheme === 'https' && numericPort === 443)
-        || (normalizedScheme === 'http' && numericPort === 80);
-    const portSuffix = normalizedHost && Number.isFinite(numericPort) && !isDefaultPort
-        ? `:${numericPort}`
-        : '';
-    return `${normalizedScheme}://${normalizedHost}${portSuffix}`;
-}
-
-function getStatusClass(statusCode) {
-    if (statusCode >= 200 && statusCode < 300) return '2xx';
-    if (statusCode >= 300 && statusCode < 400) return '3xx';
-    if (statusCode >= 400 && statusCode < 500) return '4xx';
-    if (statusCode >= 500 && statusCode < 600) return '5xx';
-    return 'other';
-}
-
-function beginRequestTracking(req, res) {
-    const requestId = crypto.randomUUID();
-    const startedAt = process.hrtime.bigint();
-    REQUEST_METRICS.inFlight += 1;
-    REQUEST_METRICS.byMethod[req.method] = (REQUEST_METRICS.byMethod[req.method] || 0) + 1;
-    res.setHeader('X-Request-Id', requestId);
-
-    res.once('finish', () => {
-        const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
-        const statusClass = getStatusClass(res.statusCode || 0);
-        REQUEST_METRICS.inFlight = Math.max(0, REQUEST_METRICS.inFlight - 1);
-        REQUEST_METRICS.total += 1;
-        REQUEST_METRICS.byStatusClass[statusClass] = (REQUEST_METRICS.byStatusClass[statusClass] || 0) + 1;
-        REQUEST_METRICS.lastRequestAt = new Date().toISOString();
-
-        if ((res.statusCode || 0) >= 500) {
-            REQUEST_METRICS.errors += 1;
-            REQUEST_METRICS.lastErrorAt = REQUEST_METRICS.lastRequestAt;
-        }
-
-        if (REQUEST_LOGGING_ENABLED) {
-            logEvent((res.statusCode || 0) >= 500 ? 'error' : 'info', 'http_request', {
-                requestId,
-                method: req.method,
-                path: req.url,
-                statusCode: res.statusCode,
-                durationMs: Number(elapsedMs.toFixed(2))
-            });
-        }
-    });
-
-    return requestId;
-}
-
-async function probeModelExplorerHealth() {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    const target = `${buildServiceBaseUrl(MODEL_EXPLORER_SCHEME, MODEL_EXPLORER_HOST, MODEL_EXPLORER_PORT)}/health`;
-
-    try {
-        const response = await fetch(target, {
-            method: 'GET',
-            signal: controller.signal,
-            headers: { Accept: 'application/json' }
-        });
-        return {
-            ok: response.ok,
-            statusCode: response.status,
-            target
-        };
-    } catch (error) {
-        return {
-            ok: false,
-            statusCode: null,
-            target,
-            error: error instanceof Error ? error.message : String(error)
-        };
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
-function buildMetricsSnapshot() {
-    const memory = process.memoryUsage();
-    return {
-        ok: true,
-        service: 'newstockandcrypto',
-        version: APP_VERSION,
-        startedAt: SERVER_STARTED_AT.toISOString(),
-        uptimeSec: Math.round(process.uptime()),
-        requests: {
-            ...REQUEST_METRICS,
-            byMethod: { ...REQUEST_METRICS.byMethod },
-            byStatusClass: { ...REQUEST_METRICS.byStatusClass }
-        },
-        memory: {
-            rss: memory.rss,
-            heapTotal: memory.heapTotal,
-            heapUsed: memory.heapUsed,
-            external: memory.external
-        },
-        storage: {
-            appDataDir: APP_DATA_DIR,
-            authDbPath: authStore.dbPath,
-            chatDbPath: chatStore.dbPath,
-            notesDbPath: notesStore.dbPath,
-            positionsDbPath: positionsStore.dbPath
-        }
-    };
-}
-
-function buildSystemConfigSnapshot() {
-    return {
-        ok: true,
-        service: 'newstockandcrypto',
-        version: APP_VERSION,
-        runtime: {
-            isRender: IS_RENDER_RUNTIME,
-            appVersion: APP_VERSION
-        },
-        features: {
-            quantRouterVisible: !IS_RENDER_RUNTIME
-        }
-    };
-}
-
-async function buildHealthSnapshot() {
-    const modelExplorer = await probeModelExplorerHealth();
-    const authDbExists = fs.existsSync(authStore.dbPath);
-    const chatDbExists = fs.existsSync(chatStore.dbPath);
-    const notesDbExists = fs.existsSync(notesStore.dbPath);
-    const positionsDbExists = fs.existsSync(positionsStore.dbPath);
-    const storageReady = authDbExists && chatDbExists && notesDbExists && positionsDbExists;
-    const degraded = !modelExplorer.ok;
-
-    return {
-        ok: storageReady,
-        status: storageReady ? (degraded ? 'degraded' : 'ok') : 'error',
-        service: 'newstockandcrypto',
-        version: APP_VERSION,
-        startedAt: SERVER_STARTED_AT.toISOString(),
-        uptimeSec: Math.round(process.uptime()),
-        dependencies: {
-            storage: {
-                appDataDir: APP_DATA_DIR,
-                authDbExists,
-                chatDbExists,
-                notesDbExists,
-                positionsDbExists
-            },
-            modelExplorer
-        }
-    };
-}
-
-async function handleSystemHealthRoute(req, res) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-
-    const payload = await buildHealthSnapshot();
-    sendJson(res, payload.ok ? 200 : 503, payload);
-}
-
-function handleSystemMetricsRoute(req, res) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-
-    sendJson(res, 200, buildMetricsSnapshot());
-}
-
-function readJsonBody(req, maxBytes = 1_000_000) {
-    return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', (chunk) => {
-            body += chunk.toString('utf8');
-            if (body.length > maxBytes) {
-                const error = new Error('Request body too large');
-                error.status = 413;
-                error.code = 'PAYLOAD_TOO_LARGE';
-                reject(error);
-                req.destroy();
-            }
-        });
-        req.on('end', () => {
-            if (!body.trim()) {
-                resolve({});
-                return;
-            }
-            try {
-                resolve(JSON.parse(body));
-            } catch (error) {
-                const invalidJsonError = new Error(`Invalid JSON body: ${error.message}`);
-                invalidJsonError.status = 400;
-                invalidJsonError.code = 'INVALID_JSON';
-                reject(invalidJsonError);
-            }
-        });
-        req.on('error', reject);
-    });
-}
-
-function getAuthenticatedSiteUser(req) {
-    return authStore.getSessionUser(req);
-}
-
-function requireAuthenticatedSiteUser(req, res) {
-    const user = getAuthenticatedSiteUser(req);
-    if (!user) {
-        sendJson(res, 401, {
-            success: false,
-            error: 'UNAUTHORIZED',
-            message: 'Sign in is required.'
-        });
-        return null;
-    }
-    return user;
-}
-
-async function handleProfileRoute(req, res) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const profile = profileStore.getProfile(user);
-        sendJson(res, 200, { success: true, profile });
-        return;
-    }
-
-    if (req.method === 'PATCH' || req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        const profile = profileStore.updateProfile(user, normalizeProfilePayload(body));
-        sendJson(res, 200, { success: true, profile });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleProfileAvatarRoute(req, res) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const body = await readJsonBody(req, 4 * 1024 * 1024);
-    const upload = uploadStore.saveAvatar(user.id, body, { maxBytes: 2 * 1024 * 1024 });
-    const profile = profileStore.updateProfile(user, { avatar_url: upload.url });
-    sendJson(res, 200, { success: true, avatarUrl: upload.url, profile });
-}
-
-async function handleNoteImageUploadRoute(req, res) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const body = await readJsonBody(req, 8 * 1024 * 1024);
-    const file = uploadStore.saveNoteImage(user.id, body, { maxBytes: 5 * 1024 * 1024 });
-    sendJson(res, 200, { success: true, file });
-}
-
-function normalizeNotePayload(body = {}) {
-    return {
-        notebook_id: body.notebook_id ?? body.notebookId ?? null,
-        title: body.title,
-        content: body.content,
-        market: body.market,
-        tags: body.tags,
-        is_pinned: body.is_pinned,
-        is_favorite: body.is_favorite,
-        is_public: body.is_public
-    };
-}
-
-function normalizeNotebookPayload(body = {}) {
-    return {
-        name: body.name,
-        color: body.color,
-        icon: body.icon,
-        sort_order: body.sort_order ?? body.sortOrder ?? 0
-    };
-}
-
-function normalizeProfilePayload(body = {}) {
-    return {
-        username: body.username,
-        bio: body.bio,
-        website: body.website,
-        location: body.location
-    };
-}
-
-function normalizePositionPayload(body = {}) {
-    return {
-        symbol: body.symbol,
-        market: body.market,
-        side: body.side,
-        entry_price: body.entry_price,
-        quantity: body.quantity,
-        notes: body.notes
-    };
-}
-
-function normalizeStopOrderPayload(body = {}) {
-    return {
-        position_id: body.position_id,
-        order_type: body.order_type,
-        trigger_price: body.trigger_price,
-        trigger_type: body.trigger_type,
-        trail_percent: body.trail_percent,
-        highest_price: body.highest_price,
-        lowest_price: body.lowest_price,
-        quantity: body.quantity
-    };
-}
-
-function normalizeChatBoardPayload(body = {}) {
-    return {
-        name: body.name,
-        topic: body.topic,
-        is_public: body.is_public
-    };
-}
-
-function normalizeChatMessagePayload(body = {}) {
-    return {
-        content: body.content,
-        reply_to: body.reply_to ?? body.replyTo ?? null,
-        attachment_url: body.attachment_url ?? body.attachmentUrl ?? null,
-        attachment_type: body.attachment_type ?? body.attachmentType ?? null,
-        attachment_name: body.attachment_name ?? body.attachmentName ?? null
-    };
-}
-
-async function handleNotesCollectionRoute(req, res, parsedUrl) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const notes = notesStore.listNotes(user.id, {
-            notebook_id: parsedUrl.searchParams.get('notebook_id') || parsedUrl.searchParams.get('notebookId'),
-            market: parsedUrl.searchParams.get('market'),
-            tag: parsedUrl.searchParams.get('tag'),
-            search: parsedUrl.searchParams.get('search'),
-            pinned: parsedUrl.searchParams.get('pinned'),
-            favorite: parsedUrl.searchParams.get('favorite'),
-            recent: parsedUrl.searchParams.get('recent'),
-            sortBy: parsedUrl.searchParams.get('sortBy') || parsedUrl.searchParams.get('orderBy'),
-            sortOrder: parsedUrl.searchParams.get('sortOrder') || (parsedUrl.searchParams.get('ascending') === 'true' ? 'asc' : 'desc'),
-            limit: parsedUrl.searchParams.get('limit'),
-            offset: parsedUrl.searchParams.get('offset')
-        });
-        sendJson(res, 200, { success: true, notes });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const note = notesStore.createNote(user.id, normalizeNotePayload(body));
-        sendJson(res, 201, { success: true, note });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleNotebooksCollectionRoute(req, res) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const notebooks = notesStore.listNotebooks(user.id);
-        sendJson(res, 200, { success: true, notebooks });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const notebook = notesStore.createNotebook(user.id, normalizeNotebookPayload(body));
-        sendJson(res, 201, { success: true, notebook });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleNotebookItemRoute(req, res, notebookId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const notebook = notesStore.getNotebook(user.id, notebookId);
-        if (!notebook) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Notebook not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true, notebook });
-        return;
-    }
-
-    if (req.method === 'PATCH' || req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        const notebook = notesStore.updateNotebook(user.id, notebookId, normalizeNotebookPayload(body));
-        if (!notebook) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Notebook not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true, notebook });
-        return;
-    }
-
-    if (req.method === 'DELETE') {
-        const result = notesStore.deleteNotebook(user.id, notebookId);
-        if (!result.ok) {
-            const message = result.reason === 'default_notebook'
-                ? 'The default notebook cannot be deleted.'
-                : 'Notebook not found.';
-            sendJson(res, result.reason === 'default_notebook' ? 400 : 404, {
-                success: false,
-                error: result.reason === 'default_notebook' ? 'DEFAULT_NOTEBOOK' : 'NOT_FOUND',
-                message
-            });
-            return;
-        }
-        sendJson(res, 200, { success: true, ...result });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleNoteItemRoute(req, res, noteId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const note = notesStore.getNoteForUser(user.id, noteId, { touch: true });
-        if (!note) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true, note });
-        return;
-    }
-
-    if (req.method === 'PUT' || req.method === 'PATCH') {
-        const body = await readJsonBody(req);
-        const note = notesStore.updateNote(user.id, noteId, normalizeNotePayload(body));
-        if (!note) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true, note });
-        return;
-    }
-
-    if (req.method === 'DELETE') {
-        const deleted = notesStore.deleteNote(user.id, noteId);
-        if (!deleted) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleNoteVersionsRoute(req, res, noteId, parsedUrl) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const versions = notesStore.getNoteVersions(user.id, noteId, parsedUrl.searchParams.get('limit'));
-    if (!versions) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-        return;
-    }
-
-    sendJson(res, 200, { success: true, versions });
-}
-
-async function handleNoteShareRoute(req, res, shareId) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const note = notesStore.getNoteByShareId(shareId);
-    if (!note) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-        return;
-    }
-
-    sendJson(res, 200, { success: true, note });
-}
-
-async function handleSitePositionsCollectionRoute(req, res, parsedUrl) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const positions = positionsStore.listPositions(user.id, {
-            status: parsedUrl.searchParams.get('status'),
-            limit: parsedUrl.searchParams.get('limit')
-        });
-        sendJson(res, 200, { success: true, positions });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const position = positionsStore.createPosition(user.id, normalizePositionPayload(body));
-        sendJson(res, 201, { success: true, position });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleSitePositionCloseRoute(req, res, positionId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const body = await readJsonBody(req);
-    const result = positionsStore.closePosition(user.id, positionId, {
-        price: body.price,
-        quantity: body.quantity,
-        reason: body.reason
-    });
-
-    if (!result) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Position not found.' });
-        return;
-    }
-
-    sendJson(res, 200, { success: true, ...result });
-}
-
-async function handleSitePositionHistoryRoute(req, res, positionId, parsedUrl) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const history = positionsStore.listPositionHistory(user.id, positionId, parsedUrl.searchParams.get('limit'));
-    if (!history) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Position not found.' });
-        return;
-    }
-
-    sendJson(res, 200, { success: true, history });
-}
-
-async function handleSiteStopOrdersCollectionRoute(req, res, parsedUrl) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'GET') {
-        const orders = positionsStore.listStopOrders(user.id, {
-            status: parsedUrl.searchParams.get('status')
-        });
-        sendJson(res, 200, { success: true, orders });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const order = positionsStore.createStopOrder(user.id, normalizeStopOrderPayload(body));
-        sendJson(res, 201, { success: true, order });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleSiteStopOrderCancelRoute(req, res, stopOrderId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const cancelled = positionsStore.cancelStopOrder(user.id, stopOrderId);
-    if (!cancelled) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Stop order not found.' });
-        return;
-    }
-
-    sendJson(res, 200, { success: true });
-}
-
-async function handleCommunityIdeasRoute(req, res, parsedUrl) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const viewer = getAuthenticatedSiteUser(req);
-    const ideas = notesStore.listIdeas(viewer?.id ?? null, {
-        market: parsedUrl.searchParams.get('market'),
-        tag: parsedUrl.searchParams.get('tag'),
-        search: parsedUrl.searchParams.get('search'),
-        visibility: parsedUrl.searchParams.get('visibility'),
-        sortBy: parsedUrl.searchParams.get('sortBy') || parsedUrl.searchParams.get('orderBy'),
-        sortOrder: parsedUrl.searchParams.get('sortOrder') || (parsedUrl.searchParams.get('ascending') === 'true' ? 'asc' : 'desc'),
-        limit: parsedUrl.searchParams.get('limit'),
-        offset: parsedUrl.searchParams.get('offset')
-    });
-
-    sendJson(res, 200, {
-        success: true,
-        ideas,
-        viewer: viewer ? {
-            id: viewer.id,
-            displayName: viewer.displayName,
-            email: viewer.email
-        } : null
-    });
-}
-
-async function handleCommunityNoteRoute(req, res, noteId) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const viewer = getAuthenticatedSiteUser(req);
-    const note = notesStore.getNoteForViewer(viewer?.id ?? null, noteId);
-    if (!note) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-        return;
-    }
-
-    const related = notesStore.getRelatedIdeas(viewer?.id ?? null, note, 4);
-    sendJson(res, 200, {
-        success: true,
-        note,
-        related
-    });
-}
-
-async function handleCommunityShareRoute(req, res, shareId) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const note = notesStore.getSharedIdea(shareId);
-    if (!note) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Note not found.' });
-        return;
-    }
-
-    const related = notesStore.getRelatedIdeas(null, note, 4);
-    sendJson(res, 200, {
-        success: true,
-        note,
-        related
-    });
-}
-
-async function handleChatBoardsRoute(req, res) {
-    if (req.method === 'GET') {
-        sendJson(res, 200, {
-            success: true,
-            boards: chatStore.listBoards()
-        });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const user = requireAuthenticatedSiteUser(req, res);
-        if (!user) {
-            return;
-        }
-
-        const body = await readJsonBody(req);
-        const board = chatStore.createBoard(user.id, normalizeChatBoardPayload(body));
-        sendJson(res, 201, {
-            success: true,
-            board
-        });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleChatBoardJoinRoute(req, res, boardId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-        return;
-    }
-
-    const board = chatStore.joinBoard(user.id, boardId);
-    if (!board) {
-        sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Board not found.' });
-        return;
-    }
-
-    chatStore.updatePresence(user.id, 'online', boardId);
-    sendJson(res, 200, {
-        success: true,
-        board
-    });
-}
-
-async function handleChatBoardMessagesRoute(req, res, boardId, parsedUrl) {
-    if (req.method === 'GET') {
-        sendJson(res, 200, {
-            success: true,
-            messages: chatStore.listMessages(boardId, parsedUrl.searchParams.get('limit'))
-        });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const user = requireAuthenticatedSiteUser(req, res);
-        if (!user) {
-            return;
-        }
-
-        const body = await readJsonBody(req);
-        const message = chatStore.sendMessage(user.id, boardId, normalizeChatMessagePayload(body));
-        if (!message) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Board not found.' });
-            return;
-        }
-
-        chatStore.updatePresence(user.id, 'online', boardId);
-        sendJson(res, 201, {
-            success: true,
-            message
-        });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleChatMessageItemRoute(req, res, messageId) {
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'PUT' || req.method === 'PATCH') {
-        const body = await readJsonBody(req);
-        const message = chatStore.editMessage(user.id, messageId, body.content);
-        if (!message) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Message not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true, message });
-        return;
-    }
-
-    if (req.method === 'DELETE') {
-        const deleted = chatStore.deleteMessage(user.id, messageId);
-        if (!deleted) {
-            sendJson(res, 404, { success: false, error: 'NOT_FOUND', message: 'Message not found.' });
-            return;
-        }
-        sendJson(res, 200, { success: true });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleChatMessageReactionsRoute(req, res, messageId, parsedUrl) {
-    if (req.method === 'GET') {
-        sendJson(res, 200, {
-            success: true,
-            reactions: chatStore.listReactions(messageId)
-        });
-        return;
-    }
-
-    const user = requireAuthenticatedSiteUser(req, res);
-    if (!user) {
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const reactions = chatStore.addReaction(user.id, messageId, body.emoji);
-        sendJson(res, 200, { success: true, reactions });
-        return;
-    }
-
-    if (req.method === 'DELETE') {
-        const emoji = parsedUrl.searchParams.get('emoji');
-        const reactions = chatStore.removeReaction(user.id, messageId, emoji);
-        sendJson(res, 200, { success: true, reactions });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-async function handleChatPresenceRoute(req, res, parsedUrl) {
-    if (req.method === 'GET') {
-        const boardId = parsedUrl.searchParams.get('boardId');
-        sendJson(res, 200, {
-            success: true,
-            users: chatStore.listOnlineUsers(boardId)
-        });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        const user = requireAuthenticatedSiteUser(req, res);
-        if (!user) {
-            return;
-        }
-
-        const body = await readJsonBody(req);
-        chatStore.updatePresence(user.id, body.status, body.boardId ?? body.board_id ?? null);
-        sendJson(res, 200, { success: true });
-        return;
-    }
-
-    sendJson(res, 405, { success: false, error: 'METHOD_NOT_ALLOWED', message: 'Method not allowed.' });
-}
-
-function parseNumber(value) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function clamp(value, min, max) {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-}
-
-function deepCopy(value) {
-    return JSON.parse(JSON.stringify(value));
-}
-
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function withTimeout(promise, timeoutMs, message) {
-    let timer = null;
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-        })
-    ]).finally(() => {
-        if (timer) clearTimeout(timer);
-    });
-}
-
-function readTrackingSnapshot(name) {
-    try {
-        const filePath = path.join(TRACKING_CACHE_DIR, `${name}.json`);
-        if (!fs.existsSync(filePath)) {
-            return null;
-        }
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    } catch (error) {
-        return null;
-    }
-}
-
-function writeTrackingSnapshot(name, payload) {
-    try {
-        fs.mkdirSync(TRACKING_CACHE_DIR, { recursive: true });
-        fs.writeFileSync(path.join(TRACKING_CACHE_DIR, `${name}.json`), JSON.stringify(payload));
-    } catch (error) {
-        console.warn(`tracking snapshot write failed for ${name}: ${error.message}`);
-    }
-}
-
-function readTrackingBucketSnapshot(market) {
-    return readTrackingSnapshot(market);
-}
-
-function writeTrackingBucketSnapshot(market, bucket) {
-    writeTrackingSnapshot(market, bucket);
-}
-
-function markTrackingBucketStale(bucket, reason, fallbackSource = 'tracking') {
-    const stalePayload = deepCopy(bucket);
-    stalePayload.meta = {
-        ...stalePayload.meta,
-        source: stalePayload.meta?.source || fallbackSource,
-        stale: true,
-        staleReason: reason,
-        timestamp: new Date().toISOString()
-    };
-    stalePayload.rows = Array.isArray(stalePayload.rows)
-        ? stalePayload.rows.map((row) => ({
-            ...row,
-            stale: true,
-            staleReason: reason,
-            status: row.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'STALE'
-        }))
-        : [];
-    return stalePayload;
-}
-
-function readCnLiveSnapshot() {
-    return readTrackingSnapshot('cn-live');
-}
-
-function writeCnLiveSnapshot(payload) {
-    writeTrackingSnapshot('cn-live', payload);
-}
-
-function parseInteger(value, fallback) {
-    const parsed = Number.parseInt(String(value), 10);
-    return Number.isFinite(parsed) ? parsed : fallback;
-}
+    stores: {
+        auth: authStore,
+        chat: chatStore,
+        notes: notesStore,
+        positions: positionsStore
+    },
+    sendJson
+});
+const siteRoutes = createSiteRouteBundle({
+    authStore,
+    profileStore,
+    uploadStore,
+    notesStore,
+    positionsStore,
+    chatStore,
+    readJsonBody,
+    sendJson,
+    handleAsyncRoute
+});
+const routeSiteRequest = siteRoutes.routeSiteRequest;
+const routeMarketRequest = createMarketRouteBundle({
+    handleAsyncRoute,
+    crypto: {
+        prices: handleCryptoPrices,
+        universe: handleCryptoUniverse,
+        history: handleCryptoHistory,
+        prediction: handleCryptoPrediction,
+        performance: handleCryptoPerformance,
+        sessionForecast: handleCryptoSessionForecast
+    },
+    cn: {
+        live: handleCnLive,
+        prices: handleCnPrices,
+        indicesHistory: handleCnIndicesHistory,
+        quotes: handleCnQuotes,
+        ranking: handleCnRanking,
+        indexPrediction: handleCnIndexPrediction,
+        stock: handleCnStock,
+        predictionsAlias: handleCnPredictionsAlias
+    },
+    us: {
+        prices: handleUsPrices,
+        indicesHistory: handleUsIndicesHistory,
+        indices: handleUsIndices,
+        sp500Quotes: handleUsSp500Quotes,
+        topMovers: handleUsTopMovers,
+        indexPrediction: handleUsIndexPrediction,
+        stock: handleUsStock,
+        predictionsAlias: handleUsPredictionsAlias
+    },
+    tracking: {
+        summary: handleTrackingSummary,
+        universe: handleTrackingUniverse,
+        factors: handleTrackingFactors,
+        coverage: handleTrackingCoverage,
+        actions: handleTrackingActions,
+        simulate: handleTrackingSimulate
+    },
+    home: {
+        landing: handleHomeLanding
+    }
+});
+const routeQuantRouterRequest = createQuantRouterRoutes({
+    quantRouter,
+    handleAsyncRoute
+});
+const handleAlertContract = createAlertContractRoute({ sendJson });
+const appRouter = createAppRouter({
+    host: HOST,
+    port: PORT,
+    sendJson,
+    handleAsyncRoute,
+    runtime,
+    serveUploads,
+    routeSiteRequest,
+    routeMarketRequest,
+    routeQuantRouterRequest,
+    handleAlertContract,
+    proxyModelExplorer,
+    proxyApi,
+    serveStatic
+});
 
 function toShanghaiNow(now = new Date()) {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -7794,872 +6896,24 @@ async function handleTrackingSimulate(req, res) {
     }
 }
 
-function handleAlertContract(req, res) {
-    if (req.method === 'OPTIONS') {
-        sendJson(res, 200, { ok: true });
-        return;
-    }
-
-    const contract = {
-        route: '/api/alerts',
-        status: 'not_implemented',
-        storage: 'planned_server_storage',
-        current_mode: 'client_local_storage',
-        schema: {
-            id: 'string',
-            symbol: 'BTCUSDT|ETHUSDT|SOLUSDT|...',
-            type: 'move_gt_pct_24h',
-            thresholdPct: 'number',
-            enabled: 'boolean',
-            lastTriggeredAt: 'ISO8601|null',
-            createdAt: 'ISO8601'
-        }
-    };
-
-    if (req.method === 'GET') {
-        sendJson(res, 501, {
-            ...contract,
-            message: 'Use localStorage key "crypto_alerts_v1" for this phase.'
-        });
-        return;
-    }
-
-    if (req.method === 'POST') {
-        sendJson(res, 501, {
-            ...contract,
-            expected_request: {
-                symbol: 'BTCUSDT',
-                type: 'move_gt_pct_24h',
-                thresholdPct: 5,
-                enabled: true
-            }
-        });
-        return;
-    }
-
-    sendJson(res, 405, { error: 'Method not allowed' });
-}
-
-async function readJsonFileSafe(filePath, fallback = null) {
-    try {
-        const content = await fs.promises.readFile(filePath, 'utf8');
-        return JSON.parse(content);
-    } catch {
-        return fallback;
-    }
-}
-
-function parseCsvLine(line) {
-    const cells = [];
-    let current = '';
-    let inQuotes = false;
-    for (let index = 0; index < line.length; index += 1) {
-        const char = line[index] || '';
-        if (char === '"') {
-            const nextChar = line[index + 1] || '';
-            if (inQuotes && nextChar === '"') {
-                current += '"';
-                index += 1;
-            } else {
-                inQuotes = !inQuotes;
-            }
-            continue;
-        }
-        if (char === ',' && !inQuotes) {
-            cells.push(current);
-            current = '';
-            continue;
-        }
-        current += char;
-    }
-    cells.push(current);
-    return cells;
-}
-
-async function readCsvFileSafe(filePath) {
-    try {
-        const content = await fs.promises.readFile(filePath, 'utf8');
-        return content.trim() ? content.trim().split(/\r?\n/g).map(parseCsvLine) : [];
-    } catch {
-        return [];
-    }
-}
-
-function applyQuantManifestFlags(manifest) {
-    if (!manifest) return null;
-    const staleAfterHours = Number(manifest.staleAfterHours || 24);
-    const generatedAtMs = Date.parse(manifest.generatedAt || '');
-    const stale = Number.isFinite(generatedAtMs)
-        ? (Date.now() - generatedAtMs) > staleAfterHours * 60 * 60 * 1000
-        : Boolean(manifest.stale);
-    return {
-        ...manifest,
-        stale,
-        latestSignal: {
-            ...(manifest.latestSignal || {}),
-            stale
-        }
-    };
-}
-
-async function listQuantRunEntries() {
-    const roots = [
-        { root: NEW_QUANT_RUNS_DIR, archived: false },
-        { root: NEW_QUANT_ARCHIVE_DIR, archived: true }
-    ];
-    const entries = [];
-    for (const entry of roots) {
-        let dirents = [];
-        try {
-            dirents = await fs.promises.readdir(entry.root, { withFileTypes: true });
-        } catch {
-            dirents = [];
-        }
-        for (const dirent of dirents) {
-            if (!dirent.isDirectory()) continue;
-            const manifest = applyQuantManifestFlags(await readJsonFileSafe(path.join(entry.root, dirent.name, 'manifest.json'), null));
-            if (!manifest) continue;
-            entries.push({
-                runId: dirent.name,
-                archived: entry.archived,
-                manifest
-            });
-        }
-    }
-    return entries.sort((left, right) => String(right.manifest.generatedAt || '').localeCompare(String(left.manifest.generatedAt || '')));
-}
-
-async function resolveQuantRunDirectory(runId) {
-    for (const base of [NEW_QUANT_RUNS_DIR, NEW_QUANT_ARCHIVE_DIR]) {
-        const candidate = path.join(base, runId);
-        try {
-            await fs.promises.access(path.join(candidate, 'manifest.json'));
-            return candidate;
-        } catch {
-            continue;
-        }
-    }
-    return null;
-}
-
-async function readQuantPipelineStatus() {
-    return readJsonFileSafe(NEW_QUANT_PIPELINE_STATUS_PATH, {
-        stage: 'idle',
-        updating: false,
-        currentMode: null,
-        startedAt: null,
-        finishedAt: null,
-        lastSuccessfulRunId: null,
-        error: null
-    });
-}
-
-async function readQuantRunBundle(runId) {
-    const runDir = await resolveQuantRunDirectory(runId);
-    if (!runDir) return null;
-
-    const manifest = applyQuantManifestFlags(await readJsonFileSafe(path.join(runDir, 'manifest.json'), null));
-    if (!manifest) return null;
-
-    const [backtestSummary, walkForward, monteCarlo, pineExport, alertTemplate, equityRows, regimeRows] = await Promise.all([
-        readJsonFileSafe(path.join(runDir, 'backtest_summary.json'), {}),
-        readJsonFileSafe(path.join(runDir, 'walk_forward.json'), {}),
-        readJsonFileSafe(path.join(runDir, 'monte_carlo.json'), {}),
-        readJsonFileSafe(path.join(runDir, 'pine_export.json'), {}),
-        readJsonFileSafe(path.join(runDir, 'alert_template.json'), manifest.latestSignal || {}),
-        readCsvFileSafe(path.join(runDir, 'equity_curve.csv')),
-        readCsvFileSafe(path.join(runDir, 'regime_series.csv'))
-    ]);
-
-    return {
-        manifest,
-        backtestSummary,
-        walkForward,
-        monteCarlo,
-        pineExport,
-        alertTemplate,
-        equity: equityRows.slice(1).map((row) => ({
-            timestamp: row[0] || '',
-            equity: Number(row[1] || 0),
-            drawdown: Number(row[2] || 0),
-            regime: row[3] || 'neutral'
-        })),
-        regimeSeries: regimeRows.slice(1).map((row) => ({
-            timestamp: row[0] || '',
-            state: row[1] || 'neutral',
-            bullProb: Number(row[2] || 0),
-            bearProb: Number(row[3] || 0),
-            neutralProb: Number(row[4] || 0),
-            shockScore: Number(row[5] || 0)
-        }))
-    };
-}
-
-async function loadQuantRunsWithFallback() {
-    try {
-        const runs = await listQuantRunEntries();
-        const status = await readQuantPipelineStatus();
-        quantRouterCache.runs = runs;
-        quantRouterCache.status = status;
-        return { runs, status, degraded: false, cached: false };
-    } catch (error) {
-        if (quantRouterCache.runs) {
-            return {
-                runs: quantRouterCache.runs,
-                status: quantRouterCache.status || await readQuantPipelineStatus(),
-                degraded: true,
-                cached: true,
-                error: error instanceof Error ? error.message : String(error)
-            };
-        }
-        throw error;
-    }
-}
-
-async function loadQuantRunWithFallback(runId) {
-    try {
-        const run = await readQuantRunBundle(runId);
-        const status = await readQuantPipelineStatus();
-        if (!run) {
-            return { run: null, status, degraded: false, cached: false };
-        }
-        quantRouterCache.bundles.set(runId, run);
-        if (!quantRouterCache.latest || quantRouterCache.latest.manifest?.runId === runId) {
-            quantRouterCache.latest = run;
-        }
-        quantRouterCache.status = status;
-        return { run, status, degraded: false, cached: false };
-    } catch (error) {
-        const cachedRun = quantRouterCache.bundles.get(runId);
-        if (cachedRun) {
-            return {
-                run: cachedRun,
-                status: quantRouterCache.status || await readQuantPipelineStatus(),
-                degraded: true,
-                cached: true,
-                error: error instanceof Error ? error.message : String(error)
-            };
-        }
-        throw error;
-    }
-}
-
-async function handleQuantRouterRunsRoute(req, res) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-    try {
-        const payload = await loadQuantRunsWithFallback();
-        sendJson(res, 200, {
-            ok: true,
-            runs: payload.runs.map((entry) => ({
-                runId: entry.runId,
-                archived: entry.archived,
-                generatedAt: entry.manifest.generatedAt,
-                status: entry.manifest.status,
-                championStatus: entry.manifest.championStatus,
-                championSource: entry.manifest.championSource || 'new',
-                stale: Boolean(entry.manifest.stale),
-                updating: Boolean(payload.status?.updating)
-            })),
-            status: payload.status,
-            degraded: payload.degraded,
-            cached: payload.cached,
-            error: payload.error || null
-        });
-    } catch (error) {
-        sendJson(res, 503, {
-            ok: false,
-            error: 'QUANT_ROUTER_UNAVAILABLE',
-            detail: error instanceof Error ? error.message : String(error)
+startUnifiedHttpServer({
+    appRouter,
+    host: HOST,
+    port: PORT,
+    onStarted: () => {
+        logStartupSummary({
+            host: HOST,
+            port: PORT,
+            apiHost: API_HOST,
+            apiPort: API_PORT,
+            modelExplorerScheme: MODEL_EXPLORER_SCHEME,
+            modelExplorerHost: MODEL_EXPLORER_HOST,
+            modelExplorerPort: MODEL_EXPLORER_PORT,
+            webRoot: WEB_ROOT,
+            appDataDir: APP_DATA_DIR,
+            appVersion: APP_VERSION,
+            csi300Rows: csi300Snapshot.length,
+            sp500Rows: sp500Snapshot.length
         });
     }
-}
-
-async function handleQuantRouterLatestRoute(req, res) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-    try {
-        const runsPayload = await loadQuantRunsWithFallback();
-        const latestRunId = runsPayload.runs[0]?.runId;
-        if (!latestRunId) {
-            sendJson(res, 200, { ok: true, run: null, status: runsPayload.status, degraded: runsPayload.degraded, cached: runsPayload.cached });
-            return;
-        }
-        const runPayload = await loadQuantRunWithFallback(latestRunId);
-        quantRouterCache.latest = runPayload.run;
-        sendJson(res, 200, {
-            ok: true,
-            run: runPayload.run,
-            status: runPayload.status,
-            degraded: Boolean(runsPayload.degraded || runPayload.degraded),
-            cached: Boolean(runsPayload.cached || runPayload.cached),
-            error: runPayload.error || runsPayload.error || null
-        });
-    } catch (error) {
-        if (quantRouterCache.latest) {
-            sendJson(res, 200, {
-                ok: true,
-                run: quantRouterCache.latest,
-                status: quantRouterCache.status || await readQuantPipelineStatus(),
-                degraded: true,
-                cached: true,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            return;
-        }
-        sendJson(res, 503, {
-            ok: false,
-            error: 'QUANT_ROUTER_UNAVAILABLE',
-            detail: error instanceof Error ? error.message : String(error)
-        });
-    }
-}
-
-async function handleQuantRouterRunRoute(req, res, runId) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-    try {
-        const payload = await loadQuantRunWithFallback(runId);
-        if (!payload.run) {
-            sendJson(res, 404, { ok: false, error: 'RUN_NOT_FOUND' });
-            return;
-        }
-        sendJson(res, 200, {
-            ok: true,
-            run: payload.run,
-            status: payload.status,
-            degraded: payload.degraded,
-            cached: payload.cached,
-            error: payload.error || null
-        });
-    } catch (error) {
-        sendJson(res, 503, {
-            ok: false,
-            error: 'QUANT_ROUTER_UNAVAILABLE',
-            detail: error instanceof Error ? error.message : String(error)
-        });
-    }
-}
-
-async function handleQuantRouterFileRoute(req, res, runId, fileName) {
-    if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
-        return;
-    }
-    const runDir = await resolveQuantRunDirectory(runId);
-    if (!runDir) {
-        sendJson(res, 404, { ok: false, error: 'RUN_NOT_FOUND' });
-        return;
-    }
-    const safeName = path.basename(fileName);
-    const targetPath = path.join(runDir, safeName);
-    try {
-        await fs.promises.access(targetPath);
-        res.writeHead(200);
-        fs.createReadStream(targetPath).pipe(res);
-    } catch {
-        sendJson(res, 404, { ok: false, error: 'FILE_NOT_FOUND' });
-    }
-}
-
-function proxyApi(req, res) {
-    if (req.method === 'OPTIONS') {
-        sendJson(res, 200, { ok: true });
-        return;
-    }
-
-    const proxyReq = http.request(
-        {
-            hostname: API_HOST,
-            port: API_PORT,
-            path: req.url,
-            method: req.method,
-            headers: {
-                ...req.headers,
-                host: `${API_HOST}:${API_PORT}`
-            }
-        },
-        (proxyRes) => {
-            res.writeHead(proxyRes.statusCode || 502, {
-                ...proxyRes.headers,
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-            });
-            proxyRes.pipe(res);
-        }
-    );
-
-    proxyReq.on('error', (error) => {
-        sendJson(res, 502, {
-            error: 'API proxy failed',
-            detail: error.message
-        });
-    });
-
-    req.pipe(proxyReq);
-}
-
-function proxyModelExplorer(req, res, parsedUrl) {
-    if (req.method === 'OPTIONS') {
-        sendJson(res, 200, { ok: true });
-        return;
-    }
-
-    const rewrittenPathname = parsedUrl.pathname.replace(/^\/api\/model-explorer/, '') || '/';
-    const upstreamPath = `${rewrittenPathname}${parsedUrl.search || ''}`;
-    const requestClient = MODEL_EXPLORER_SCHEME === 'https' ? https : http;
-
-    const proxyReq = requestClient.request(
-        {
-            hostname: MODEL_EXPLORER_HOST,
-            port: MODEL_EXPLORER_PORT,
-            path: upstreamPath,
-            method: req.method,
-            headers: {
-                ...req.headers,
-                host: `${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}`
-            }
-        },
-        (proxyRes) => {
-            res.writeHead(proxyRes.statusCode || 502, {
-                ...proxyRes.headers,
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-            });
-            proxyRes.pipe(res);
-        }
-    );
-
-    proxyReq.on('error', (error) => {
-        sendJson(res, 502, {
-            error: 'Model explorer proxy failed',
-            detail: error.message
-        });
-    });
-
-    req.pipe(proxyReq);
-}
-
-function safeJoin(basePath, targetPath) {
-    const resolvedBase = path.resolve(basePath);
-    const sanitizedTarget = String(targetPath || '').replace(/^[\\/]+/, '');
-    const resolvedPath = path.resolve(resolvedBase, sanitizedTarget);
-    if (resolvedPath !== resolvedBase && !resolvedPath.startsWith(`${resolvedBase}${path.sep}`)) {
-        return null;
-    }
-    return resolvedPath;
-}
-
-function serveStaticAsset(basePath, requestPath, res, options = {}) {
-    const filePath = safeJoin(basePath, decodeURIComponent(requestPath));
-
-    if (!filePath) {
-        sendJson(res, 400, { error: 'Invalid path' });
-        return;
-    }
-
-    let targetPath = filePath;
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-        if (options.allowDirectories === false) {
-            sendJson(res, 404, { error: 'Not found' });
-            return;
-        }
-        targetPath = path.join(filePath, 'index.html');
-    }
-
-    fs.readFile(targetPath, (error, data) => {
-        if (error) {
-            if (error.code === 'ENOENT') {
-                sendJson(res, 404, { error: 'Not found' });
-            } else {
-                sendJson(res, 500, { error: 'File read failed', detail: error.message });
-            }
-            return;
-        }
-
-        const extension = path.extname(targetPath).toLowerCase();
-        const contentType = MIME_TYPES[extension] || 'application/octet-stream';
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(data);
-    });
-}
-
-function serveStatic(req, res) {
-    const requestPath = req.url === '/' ? 'index.html' : req.url.split('?')[0].replace(/^[\\/]+/, '');
-    serveStaticAsset(WEB_ROOT, requestPath, res, { allowDirectories: true });
-}
-
-function serveUploads(req, res) {
-    const requestPath = req.url.split('?')[0].replace(/^\/uploads\/?/, '');
-    if (!requestPath) {
-        sendJson(res, 404, { error: 'Not found' });
-        return;
-    }
-    serveStaticAsset(LOCAL_UPLOADS_ROOT, requestPath, res, { allowDirectories: false });
-}
-
-function handleAsyncRoute(res, promise, errorCode = 'REQUEST_FAILED') {
-    Promise.resolve(promise).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        const statusCode = Number(error?.status) || 500;
-        const resolvedErrorCode = error?.code || errorCode;
-        console.error(`${resolvedErrorCode}: ${message}`);
-        if (error instanceof Error && error.stack) {
-            console.error(error.stack);
-        }
-        if (res.writableEnded) {
-            return;
-        }
-        sendJson(res, statusCode, {
-            success: false,
-            error: resolvedErrorCode,
-            message
-        });
-    });
-}
-
-const server = http.createServer((req, res) => {
-    if (!req.url) {
-        sendJson(res, 400, { error: 'Empty URL' });
-        return;
-    }
-
-    beginRequestTracking(req, res);
-    const parsedUrl = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
-
-    if (parsedUrl.pathname === '/healthz' || parsedUrl.pathname === '/api/system/health') {
-        handleAsyncRoute(res, handleSystemHealthRoute(req, res), 'SYSTEM_HEALTH_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/system/metrics') {
-        handleSystemMetricsRoute(req, res);
-        return;
-    }
-    if (parsedUrl.pathname === '/api/system/config') {
-        sendJson(res, 200, buildSystemConfigSnapshot());
-        return;
-    }
-
-    if (parsedUrl.pathname.startsWith('/uploads/')) {
-        serveUploads(req, res);
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/auth/register') {
-        handleAsyncRoute(res, authStore.handleRegister(req, res, sendJson, readJsonBody), 'REGISTER_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/auth/login') {
-        handleAsyncRoute(res, authStore.handleLogin(req, res, sendJson, readJsonBody), 'LOGIN_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/auth/me') {
-        authStore.handleMe(req, res, sendJson, parsedUrl);
-        return;
-    }
-    if (parsedUrl.pathname === '/api/auth/logout') {
-        authStore.handleLogout(req, res, sendJson);
-        return;
-    }
-    if (parsedUrl.pathname === '/api/profile') {
-        handleAsyncRoute(res, handleProfileRoute(req, res), 'PROFILE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/profile/avatar') {
-        handleAsyncRoute(res, handleProfileAvatarRoute(req, res), 'PROFILE_AVATAR_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/uploads/note-images') {
-        handleAsyncRoute(res, handleNoteImageUploadRoute(req, res), 'NOTE_IMAGE_UPLOAD_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/chat/boards') {
-        handleAsyncRoute(res, handleChatBoardsRoute(req, res), 'CHAT_BOARDS_FAILED');
-        return;
-    }
-    if (/^\/api\/chat\/boards\/\d+\/join$/.test(parsedUrl.pathname)) {
-        const boardId = Number(parsedUrl.pathname.split('/')[4]);
-        handleAsyncRoute(res, handleChatBoardJoinRoute(req, res, boardId), 'CHAT_JOIN_FAILED');
-        return;
-    }
-    if (/^\/api\/chat\/boards\/\d+\/messages$/.test(parsedUrl.pathname)) {
-        const boardId = Number(parsedUrl.pathname.split('/')[4]);
-        handleAsyncRoute(res, handleChatBoardMessagesRoute(req, res, boardId, parsedUrl), 'CHAT_MESSAGES_FAILED');
-        return;
-    }
-    if (/^\/api\/chat\/messages\/\d+\/reactions$/.test(parsedUrl.pathname)) {
-        const messageId = Number(parsedUrl.pathname.split('/')[4]);
-        handleAsyncRoute(res, handleChatMessageReactionsRoute(req, res, messageId, parsedUrl), 'CHAT_REACTIONS_FAILED');
-        return;
-    }
-    if (/^\/api\/chat\/messages\/\d+$/.test(parsedUrl.pathname)) {
-        const messageId = Number(parsedUrl.pathname.split('/')[4]);
-        handleAsyncRoute(res, handleChatMessageItemRoute(req, res, messageId), 'CHAT_MESSAGE_ITEM_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/chat/presence') {
-        handleAsyncRoute(res, handleChatPresenceRoute(req, res, parsedUrl), 'CHAT_PRESENCE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/notebooks') {
-        handleAsyncRoute(res, handleNotebooksCollectionRoute(req, res), 'NOTEBOOKS_FAILED');
-        return;
-    }
-    if (/^\/api\/notebooks\/\d+$/.test(parsedUrl.pathname)) {
-        const notebookId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleNotebookItemRoute(req, res, notebookId), 'NOTEBOOK_ITEM_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/notes') {
-        handleAsyncRoute(res, handleNotesCollectionRoute(req, res, parsedUrl), 'NOTES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/notes/share/')) {
-        const shareId = decodeURIComponent(parsedUrl.pathname.replace('/api/notes/share/', ''));
-        handleAsyncRoute(res, handleNoteShareRoute(req, res, shareId), 'NOTE_SHARE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/community/ideas') {
-        handleAsyncRoute(res, handleCommunityIdeasRoute(req, res, parsedUrl), 'COMMUNITY_IDEAS_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/community/notes/share/')) {
-        const shareId = decodeURIComponent(parsedUrl.pathname.replace('/api/community/notes/share/', ''));
-        handleAsyncRoute(res, handleCommunityShareRoute(req, res, shareId), 'COMMUNITY_SHARE_FAILED');
-        return;
-    }
-    if (/^\/api\/community\/notes\/\d+$/.test(parsedUrl.pathname)) {
-        const noteId = Number(parsedUrl.pathname.split('/')[4]);
-        handleAsyncRoute(res, handleCommunityNoteRoute(req, res, noteId), 'COMMUNITY_NOTE_FAILED');
-        return;
-    }
-    if (/^\/api\/notes\/\d+\/versions$/.test(parsedUrl.pathname)) {
-        const noteId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleNoteVersionsRoute(req, res, noteId, parsedUrl), 'NOTE_VERSIONS_FAILED');
-        return;
-    }
-    if (/^\/api\/notes\/\d+$/.test(parsedUrl.pathname)) {
-        const noteId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleNoteItemRoute(req, res, noteId), 'NOTE_ITEM_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/site-positions') {
-        handleAsyncRoute(res, handleSitePositionsCollectionRoute(req, res, parsedUrl), 'SITE_POSITIONS_FAILED');
-        return;
-    }
-    if (/^\/api\/site-positions\/\d+\/close$/.test(parsedUrl.pathname)) {
-        const positionId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleSitePositionCloseRoute(req, res, positionId), 'SITE_POSITION_CLOSE_FAILED');
-        return;
-    }
-    if (/^\/api\/site-positions\/\d+\/history$/.test(parsedUrl.pathname)) {
-        const positionId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleSitePositionHistoryRoute(req, res, positionId, parsedUrl), 'SITE_POSITION_HISTORY_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/site-stop-orders') {
-        handleAsyncRoute(res, handleSiteStopOrdersCollectionRoute(req, res, parsedUrl), 'SITE_STOP_ORDERS_FAILED');
-        return;
-    }
-    if (/^\/api\/site-stop-orders\/\d+\/cancel$/.test(parsedUrl.pathname)) {
-        const stopOrderId = Number(parsedUrl.pathname.split('/')[3]);
-        handleAsyncRoute(res, handleSiteStopOrderCancelRoute(req, res, stopOrderId), 'SITE_STOP_ORDER_CANCEL_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/crypto/prices') {
-        handleAsyncRoute(res, handleCryptoPrices(req, res), 'CRYPTO_PRICES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/crypto/universe') {
-        handleAsyncRoute(res, handleCryptoUniverse(req, res), 'CRYPTO_UNIVERSE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/crypto/history/')) {
-        const symbol = decodeURIComponent(parsedUrl.pathname.replace('/api/crypto/history/', ''));
-        handleAsyncRoute(res, handleCryptoHistory(req, res, parsedUrl, symbol), 'CRYPTO_HISTORY_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/crypto/prediction/')) {
-        const symbol = decodeURIComponent(parsedUrl.pathname.replace('/api/crypto/prediction/', ''));
-        handleAsyncRoute(res, handleCryptoPrediction(req, res, symbol), 'CRYPTO_PREDICTION_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/crypto/performance/')) {
-        const symbol = decodeURIComponent(parsedUrl.pathname.replace('/api/crypto/performance/', ''));
-        handleAsyncRoute(res, handleCryptoPerformance(req, res, symbol), 'CRYPTO_PERFORMANCE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/session/crypto') {
-        handleAsyncRoute(res, handleCryptoSessionForecast(req, res, parsedUrl), 'CRYPTO_SESSION_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/cn-equity/live') {
-        handleAsyncRoute(res, handleCnLive(req, res), 'CN_LIVE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/cn-equity/prices') {
-        handleAsyncRoute(res, handleCnPrices(req, res, parsedUrl), 'CN_PRICES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/cn-equity/indices/history') {
-        handleAsyncRoute(res, handleCnIndicesHistory(req, res, parsedUrl), 'CN_INDICES_HISTORY_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/cn-equity/csi300/quotes') {
-        handleAsyncRoute(res, handleCnQuotes(req, res, parsedUrl), 'CN_QUOTES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/cn-equity/csi300/ranking') {
-        handleAsyncRoute(res, handleCnRanking(req, res, parsedUrl), 'CN_RANKING_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/cn-equity/prediction/')) {
-        const indexCode = decodeURIComponent(parsedUrl.pathname.replace('/api/cn-equity/prediction/', ''));
-        handleAsyncRoute(res, handleCnIndexPrediction(req, res, indexCode), 'CN_PREDICTION_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/cn-equity/stock/')) {
-        const stockCode = decodeURIComponent(parsedUrl.pathname.replace('/api/cn-equity/stock/', ''));
-        handleAsyncRoute(res, handleCnStock(req, res, stockCode), 'CN_STOCK_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/cn-equity/predictions') {
-        handleAsyncRoute(res, handleCnPredictionsAlias(req, res, parsedUrl), 'CN_PREDICTIONS_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/us-equity/prices') {
-        handleAsyncRoute(res, handleUsPrices(req, res, parsedUrl), 'US_PRICES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/us-equity/indices/history') {
-        handleAsyncRoute(res, handleUsIndicesHistory(req, res, parsedUrl), 'US_INDICES_HISTORY_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/us-equity/indices') {
-        handleAsyncRoute(res, handleUsIndices(req, res), 'US_INDICES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/us-equity/sp500/quotes') {
-        handleAsyncRoute(res, handleUsSp500Quotes(req, res, parsedUrl), 'US_SP500_QUOTES_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/us-equity/top-movers') {
-        handleAsyncRoute(res, handleUsTopMovers(req, res, parsedUrl), 'US_TOP_MOVERS_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/us-equity/prediction/')) {
-        const indexSymbol = decodeURIComponent(parsedUrl.pathname.replace('/api/us-equity/prediction/', ''));
-        handleAsyncRoute(res, handleUsIndexPrediction(req, res, indexSymbol), 'US_PREDICTION_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname.startsWith('/api/us-equity/stock/')) {
-        const symbol = decodeURIComponent(parsedUrl.pathname.replace('/api/us-equity/stock/', ''));
-        handleAsyncRoute(res, handleUsStock(req, res, symbol), 'US_STOCK_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/us-equity/predictions') {
-        handleAsyncRoute(res, handleUsPredictionsAlias(req, res, parsedUrl), 'US_PREDICTIONS_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/tracking/summary') {
-        handleAsyncRoute(res, handleTrackingSummary(req, res), 'TRACKING_SUMMARY_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/tracking/universe') {
-        handleAsyncRoute(res, handleTrackingUniverse(req, res, parsedUrl), 'TRACKING_UNIVERSE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/tracking/factors') {
-        handleAsyncRoute(res, handleTrackingFactors(req, res, parsedUrl), 'TRACKING_FACTORS_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/tracking/coverage') {
-        handleAsyncRoute(res, handleTrackingCoverage(req, res), 'TRACKING_COVERAGE_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/tracking/actions') {
-        handleAsyncRoute(res, handleTrackingActions(req, res, parsedUrl), 'TRACKING_ACTIONS_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/tracking/simulate') {
-        handleAsyncRoute(res, handleTrackingSimulate(req, res), 'TRACKING_SIMULATE_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/home/landing') {
-        handleAsyncRoute(res, handleHomeLanding(req, res), 'HOME_LANDING_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/quant/router/runs') {
-        handleAsyncRoute(res, handleQuantRouterRunsRoute(req, res), 'QUANT_ROUTER_RUNS_FAILED');
-        return;
-    }
-    if (parsedUrl.pathname === '/api/quant/router/runs/latest') {
-        handleAsyncRoute(res, handleQuantRouterLatestRoute(req, res), 'QUANT_ROUTER_LATEST_FAILED');
-        return;
-    }
-    if (/^\/api\/quant\/router\/runs\/[^/]+\/file\/[^/]+$/.test(parsedUrl.pathname)) {
-        const segments = parsedUrl.pathname.split('/');
-        const runId = decodeURIComponent(segments[5]);
-        const fileName = decodeURIComponent(segments[7]);
-        handleAsyncRoute(res, handleQuantRouterFileRoute(req, res, runId, fileName), 'QUANT_ROUTER_FILE_FAILED');
-        return;
-    }
-    if (/^\/api\/quant\/router\/runs\/[^/]+$/.test(parsedUrl.pathname)) {
-        const runId = decodeURIComponent(parsedUrl.pathname.replace('/api/quant/router/runs/', ''));
-        handleAsyncRoute(res, handleQuantRouterRunRoute(req, res, runId), 'QUANT_ROUTER_RUN_FAILED');
-        return;
-    }
-
-    if (parsedUrl.pathname === '/api/alerts') {
-        handleAlertContract(req, res);
-        return;
-    }
-
-    if (parsedUrl.pathname.startsWith('/api/model-explorer')) {
-        proxyModelExplorer(req, res, parsedUrl);
-        return;
-    }
-
-    if (parsedUrl.pathname.startsWith('/api/')) {
-        proxyApi(req, res);
-        return;
-    }
-
-    if (parsedUrl.pathname === '/favicon.ico') {
-        res.writeHead(204);
-        res.end();
-        return;
-    }
-
-    serveStatic(req, res);
-});
-
-process.on('unhandledRejection', (reason) => {
-    const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
-    console.error(`UNHANDLED_REJECTION: ${message}`);
-});
-
-server.listen(PORT, HOST, () => {
-    console.log(`Unified server listening at http://${HOST}:${PORT}`);
-    console.log(`API proxy target: http://${API_HOST}:${API_PORT}`);
-    console.log(`Model explorer proxy target: ${MODEL_EXPLORER_SCHEME}://${MODEL_EXPLORER_HOST}:${MODEL_EXPLORER_PORT}`);
-    console.log(`Web root: ${WEB_ROOT}`);
-    console.log(`App data dir: ${APP_DATA_DIR}`);
-    console.log(`App version: ${APP_VERSION}`);
-    console.log(`Loaded CSI300 snapshot rows: ${csi300Snapshot.length}`);
-    console.log(`Loaded S&P 500 snapshot rows: ${sp500Snapshot.length}`);
 });

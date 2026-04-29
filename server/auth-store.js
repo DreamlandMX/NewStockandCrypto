@@ -1,138 +1,26 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
+const {
+    hashPassword,
+    hashToken,
+    randomToken,
+    verifyPassword
+} = require('./auth-crypto-helpers');
+const {
+    getClientIp,
+    isSecureRequest,
+    isValidEmail,
+    normalizeEmail,
+    parseCookies,
+    serializeCookie
+} = require('./auth-request-helpers');
+const { openAppDatabase } = require('./sqlite-store-helpers');
+const { nowIso } = require('./store-helpers');
 
 const COOKIE_NAME = 'sc_session';
 const SESSION_TTL_DAYS = 7;
 const REMEMBER_ME_TTL_DAYS = 30;
 
-function nowIso() {
-    return new Date().toISOString();
-}
-
-function hashToken(token) {
-    return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-function randomToken() {
-    return crypto.randomBytes(32).toString('hex');
-}
-
-function normalizeEmail(email) {
-    return String(email || '').trim().toLowerCase();
-}
-
-function parseCookies(headerValue) {
-    const cookies = {};
-    if (!headerValue) {
-        return cookies;
-    }
-
-    headerValue.split(';').forEach((part) => {
-        const separatorIndex = part.indexOf('=');
-        if (separatorIndex === -1) {
-            return;
-        }
-        const key = part.slice(0, separatorIndex).trim();
-        const value = part.slice(separatorIndex + 1).trim();
-        if (!key) {
-            return;
-        }
-        cookies[key] = decodeURIComponent(value);
-    });
-
-    return cookies;
-}
-
-function serializeCookie(name, value, options = {}) {
-    const parts = [`${name}=${encodeURIComponent(value)}`];
-    if (options.maxAge) {
-        parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
-    }
-    if (options.expires) {
-        parts.push(`Expires=${options.expires.toUTCString()}`);
-    }
-    parts.push(`Path=${options.path || '/'}`);
-    if (options.httpOnly !== false) {
-        parts.push('HttpOnly');
-    }
-    if (options.sameSite) {
-        parts.push(`SameSite=${options.sameSite}`);
-    }
-    if (options.secure) {
-        parts.push('Secure');
-    }
-    return parts.join('; ');
-}
-
-function isValidEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function isSecureRequest(req) {
-    if (req.socket && req.socket.encrypted) {
-        return true;
-    }
-    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
-    return forwardedProto.includes('https');
-}
-
-function getClientIp(req) {
-    const forwardedFor = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    if (forwardedFor) {
-        return forwardedFor;
-    }
-    return req.socket?.remoteAddress || null;
-}
-
-function hashPassword(password) {
-    return new Promise((resolve, reject) => {
-        const salt = crypto.randomBytes(16);
-        crypto.scrypt(password, salt, 64, (error, derivedKey) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-            resolve(`scrypt$${salt.toString('hex')}$${derivedKey.toString('hex')}`);
-        });
-    });
-}
-
-function verifyPassword(password, storedHash) {
-    return new Promise((resolve, reject) => {
-        const [scheme, saltHex, keyHex] = String(storedHash || '').split('$');
-        if (scheme !== 'scrypt' || !saltHex || !keyHex) {
-            resolve(false);
-            return;
-        }
-
-        crypto.scrypt(password, Buffer.from(saltHex, 'hex'), 64, (error, derivedKey) => {
-            if (error) {
-                reject(error);
-                return;
-            }
-
-            const expected = Buffer.from(keyHex, 'hex');
-            if (expected.length !== derivedKey.length) {
-                resolve(false);
-                return;
-            }
-
-            resolve(crypto.timingSafeEqual(expected, derivedKey));
-        });
-    });
-}
-
 function createAuthStore(options = {}) {
-    const baseDir = options.baseDir || process.cwd();
-    const dataDir = options.dataDir || process.env.APP_DATA_DIR || path.join(baseDir, 'data');
-    const dbPath = path.join(dataDir, 'stockandcrypto.db');
-    fs.mkdirSync(dataDir, { recursive: true });
-
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    const { db, dbPath } = openAppDatabase(options);
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS users (

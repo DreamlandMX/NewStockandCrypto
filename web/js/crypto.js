@@ -23,6 +23,51 @@ const CHART_RESEED_INTERVAL_MS = {
     '24h': 5 * 60 * 1000,
     '7d': 5 * 60 * 1000
 };
+if (!window.StockCryptoBasics) {
+    throw new Error('crypto-basics.js must load before crypto.js');
+}
+if (!window.StockCryptoPolicyText) {
+    throw new Error('crypto-policy-text.js must load before crypto.js');
+}
+if (!window.StockCryptoChartSeries) {
+    throw new Error('crypto-chart-series.js must load before crypto.js');
+}
+if (!window.StockCryptoHealthModel) {
+    throw new Error('crypto-health-model.js must load before crypto.js');
+}
+const cryptoBasics = window.StockCryptoBasics.createCryptoBasics({
+    formatCurrency: (value) => utils.formatCurrency(value),
+    longSignalThreshold: LONG_SIGNAL_THRESHOLD,
+    shortSignalThreshold: SHORT_SIGNAL_THRESHOLD,
+    minActionableConfidence: MIN_ACTIONABLE_CONFIDENCE
+});
+const {
+    asNumber,
+    calculateRiskReward,
+    clamp,
+    displaySignalLabel,
+    escapeHtml,
+    estimateStopLoss,
+    estimateTakeProfit,
+    formatCurrentEdge,
+    formatLargeMoney,
+    formatNullableCurrency,
+    formatNullableProbability,
+    formatNullableRatio,
+    formatRate,
+    formatSignalFilterLabel,
+    formatSignedPercent,
+    inferSignal,
+    isActionableSignal,
+    normalizeProbability,
+    normalizeReturn,
+    nullableNumber,
+    resolveTradeSignal,
+    stdDev,
+    timeStampLabel,
+    toCanonicalSymbol,
+    toDisplaySymbol
+} = cryptoBasics;
 
 const ACTION_COLORS = {
     LONG: '#00FFAA',
@@ -50,6 +95,32 @@ const POLICY_GATE_TEXT = {
     net_edge: 'Net Edge',
     policy_threshold: 'Edge Threshold'
 };
+const cryptoPolicyText = window.StockCryptoPolicyText.createCryptoPolicyText({
+    gateText: POLICY_GATE_TEXT
+});
+const cryptoChartSeries = window.StockCryptoChartSeries.createCryptoChartSeries({
+    rangeWindowMs: CHART_RANGE_WINDOW_MS,
+    reseedIntervalMs: CHART_RESEED_INTERVAL_MS
+});
+const cryptoHealthModel = window.StockCryptoHealthModel.createCryptoHealthModel();
+const {
+    buildPolicyReasonSummary,
+    buildPolicyStandbyNote,
+    formatPolicyBlockingList,
+    formatPolicyGateList,
+    formatPolicyPercent,
+    formatPolicyQuality
+} = cryptoPolicyText;
+const {
+    formatChartLabelFromTs,
+    getChartHistoryConfig,
+    pruneChartBucket
+} = cryptoChartSeries;
+const {
+    computeRegimeFromSharpe,
+    deriveEstimatedPerformanceFromPrediction,
+    deriveHealthFromPrediction
+} = cryptoHealthModel;
 
 const state = {
     selectedSymbol: 'BTCUSDT',
@@ -1102,58 +1173,6 @@ function normalizeReasonCodes(reasonCodesRaw, signal, pUp = 0.5, confidence = 0.
     return reasonCodes;
 }
 
-function deriveEstimatedPerformanceFromPrediction(packet) {
-    if (!packet) return null;
-    const pUp = packet.direction.pUp;
-    const confidence = packet.direction.confidence;
-    const spread = Math.max(packet.magnitude.intervalWidth, 0.0001);
-    const directionAccuracy = clamp(0.52 + Math.abs(pUp - 0.5) * 0.28 + confidence * 0.16, 0.45, 0.9);
-    const intervalCoverage = clamp(0.72 + confidence * 0.16, 0.6, 0.94);
-    const brierScore = clamp(0.33 - Math.abs(pUp - 0.5) * 0.20 + (1 - confidence) * 0.06, 0.12, 0.42);
-    const winRate = clamp(0.5 + (pUp - 0.5) * 0.6, 0.05, 0.95);
-    const sharpeRatio = clamp(packet.magnitude.expectedReturn / spread * 0.65, -3, 3);
-
-    return {
-        directionAccuracy,
-        intervalCoverage,
-        sharpeRatio,
-        winRate,
-        brierScore,
-        estimated: true
-    };
-}
-
-function deriveHealthFromPrediction(packet, performance, dataMode) {
-    if (!packet) {
-        return {
-            status: 'Unavailable',
-            driftAlerts: 0,
-            sharpeRatio: 0,
-            sharpeStability: 0,
-            dataFreshness: dataMode === 'Unavailable' ? 'unavailable' : 'unknown',
-            lastTraining: 'N/A'
-        };
-    }
-    const spread = Math.max(packet.magnitude.intervalWidth, 0);
-    const confidence = packet.direction.confidence;
-    const sharpeRatio = Number((performance?.sharpeRatio ?? clamp(packet.magnitude.expectedReturn / Math.max(spread, 0.0001) * 0.65, -3, 3)).toFixed(3));
-    const driftAlerts = Math.max(0, Math.round((0.65 - confidence) * 40));
-    const status = dataMode === 'Unavailable'
-        ? 'Unavailable'
-        : driftAlerts > 10
-            ? 'IN REVIEW'
-            : 'MONITORED';
-
-    return {
-        status,
-        driftAlerts,
-        sharpeRatio,
-        sharpeStability: Number((spread * 100).toFixed(3)),
-        dataFreshness: dataMode === 'Stale Feed' ? 'stale cache' : 'live',
-        lastTraining: 'N/A (live derived)'
-    };
-}
-
 function renderAll() {
     renderModeAndBanner();
     renderPriceCards();
@@ -1569,54 +1588,6 @@ function renderPolicyRegimeChip(policyPacket) {
     els.regimeChip.textContent = `Current Regime: ${policyPacket.regime}`;
     els.regimeChip.className = `regime-chip ${tone}`;
     els.regimeChip.title = buildPolicyReasonSummary(policyPacket);
-}
-
-function formatPolicyPercent(value) {
-    const numeric = asNumber(value, NaN);
-    if (!Number.isFinite(numeric)) return '--';
-    return `${numeric >= 0 ? '+' : ''}${numeric.toFixed(2)}%`;
-}
-
-function formatPolicyQuality(policyPacket) {
-    if (!policyPacket || !Number.isFinite(policyPacket.tradeQualityScore)) return '--';
-    const band = policyPacket.tradeQualityBand ? ` (${policyPacket.tradeQualityBand})` : '';
-    return `${policyPacket.tradeQualityScore.toFixed(1)}${band}`;
-}
-
-function formatPolicyGateList(gates) {
-    if (!Array.isArray(gates) || !gates.length) return 'None';
-    return gates.map((gate) => POLICY_GATE_TEXT[gate] || gate).join(', ');
-}
-
-function formatPolicyBlockingList(policyPacket) {
-    const blocking = buildPolicyBlockingList(policyPacket);
-    return blocking.length ? blocking.map((gate) => POLICY_GATE_TEXT[gate] || gate).join(', ') : 'None';
-}
-
-function buildPolicyBlockingList(policyPacket) {
-    if (!policyPacket) return ['net_edge'];
-    const gates = Array.isArray(policyPacket.gates) ? policyPacket.gates : [];
-    const blocking = [];
-    if (!gates.includes('cost_ok') || asNumber(policyPacket.expectedNetEdgePct, 0) <= 0) blocking.push('net_edge');
-    if (!gates.includes('confidence_ok')) blocking.push('confidence_ok');
-    if (!gates.includes('regime_ok')) blocking.push('regime_ok');
-    if (!gates.includes('liquidity_ok')) blocking.push('liquidity_ok');
-    const action = String(policyPacket.action || '').toUpperCase();
-    if ((action === 'WAIT' || action === 'FLAT') && asNumber(policyPacket.expectedNetEdgePct, 0) > 0 && blocking.length === 0) {
-        blocking.push('policy_threshold');
-    }
-    return blocking;
-}
-
-function buildPolicyReasonSummary(policyPacket) {
-    const reasons = Array.isArray(policyPacket?.reasons) ? policyPacket.reasons.filter(Boolean) : [];
-    return reasons.length ? reasons.join(' ') : 'Policy Engine is waiting for cleaner execution conditions.';
-}
-
-function buildPolicyStandbyNote(policyPacket) {
-    const reason = buildPolicyReasonSummary(policyPacket);
-    const blocking = formatPolicyBlockingList(policyPacket);
-    return `${reason} Blocking: ${blocking}.`;
 }
 
 function updateSharpeChart(currentSharpe) {
@@ -2079,69 +2050,8 @@ function renderVolatilityStrip() {
     text(els.regimeSummary, `Regime: ${summary} volatility.`);
 }
 
-function getChartHistoryConfig(timeframe) {
-    if (timeframe === '1h') {
-        return { range: '1h', reseedMs: CHART_RESEED_INTERVAL_MS['1h'], windowMs: CHART_RANGE_WINDOW_MS['1h'] };
-    }
-    if (timeframe === '24h') {
-        return { range: '24h', reseedMs: CHART_RESEED_INTERVAL_MS['24h'], windowMs: CHART_RANGE_WINDOW_MS['24h'] };
-    }
-    return { range: '7d', reseedMs: CHART_RESEED_INTERVAL_MS['7d'], windowMs: CHART_RANGE_WINDOW_MS['7d'] };
-}
-
-function createEmptyChartBucket() {
-    return {
-        labels: [],
-        values: [],
-        timestamps: [],
-        stale: false,
-        source: null,
-        lastSeedAt: 0,
-        lastAppendAt: 0
-    };
-}
-
 function ensureSymbolChartSeries(symbol) {
-    if (!symbol) return null;
-    if (!state.chartSeries[symbol]) {
-        state.chartSeries[symbol] = {
-            '1h': createEmptyChartBucket(),
-            '24h': createEmptyChartBucket(),
-            '7d': createEmptyChartBucket()
-        };
-    }
-    return state.chartSeries[symbol];
-}
-
-function formatChartLabelFromTs(timestamp, timeframe) {
-    const date = new Date(timestamp);
-    if (!Number.isFinite(date.getTime())) return '--';
-
-    if (timeframe === '1h') {
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    }
-    if (timeframe === '24h') {
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-    return date.toLocaleString('en-US', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
-}
-
-function pruneChartBucket(bucket, timeframe) {
-    if (!bucket || !Array.isArray(bucket.timestamps)) return;
-    const config = getChartHistoryConfig(timeframe);
-    const now = Date.now();
-    const threshold = now - config.windowMs;
-    while (bucket.timestamps.length > 1 && bucket.timestamps[0] < threshold) {
-        bucket.timestamps.shift();
-        bucket.labels.shift();
-        bucket.values.shift();
-    }
+    return cryptoChartSeries.ensureSymbolChartSeries(state.chartSeries, symbol);
 }
 
 async function loadChartHistory(symbol, timeframe, force = false) {
@@ -2263,13 +2173,6 @@ function statusBadgeClass(status) {
     if (status === 'Live') return 'status-live';
     if (status === 'Stale') return 'status-stale';
     return 'status-unavailable';
-}
-
-function computeRegimeFromSharpe(sharpeRatio) {
-    if (asNumber(sharpeRatio, 0) < 0) {
-        return { label: 'Defensive', className: 'defensive' };
-    }
-    return { label: 'Balanced', className: 'balanced' };
 }
 
 function loadAlerts() {
@@ -2463,161 +2366,10 @@ function setLastUpdated(timestamp) {
     text(els.lastUpdated, `Updated ${utils.formatTimestamp(timestamp, 'time')}`);
 }
 
-function displaySignalLabel(signal) {
-    const normalized = String(signal || 'FLAT').toUpperCase().replace(/_/g, ' ');
-    return normalized === 'FLAT' ? 'NO TRADE' : normalized;
-}
-
-function formatSignalFilterLabel(signal) {
-    const normalized = String(signal || 'ALL').toUpperCase();
-    return `Signal: ${normalized === 'ALL' ? 'ALL' : displaySignalLabel(normalized)}`;
-}
-
-function isActionableSignal(signal) {
-    const normalized = String(signal || '').toUpperCase().replace(/_/g, ' ');
-    return normalized.includes('LONG') || normalized.includes('SHORT');
-}
-
-function resolveTradeSignal(pUp, confidence = 1) {
-    const normalizedPUp = clamp(asNumber(pUp, 0.5), 0, 1);
-    const normalizedConfidence = clamp(asNumber(confidence, 0), 0, 1);
-    if (normalizedConfidence >= MIN_ACTIONABLE_CONFIDENCE && normalizedPUp >= LONG_SIGNAL_THRESHOLD) {
-        return 'LONG';
-    }
-    if (normalizedConfidence >= MIN_ACTIONABLE_CONFIDENCE && normalizedPUp <= SHORT_SIGNAL_THRESHOLD) {
-        return 'SHORT';
-    }
-    return 'FLAT';
-}
-
-function inferSignal(pUp) {
-    return resolveTradeSignal(pUp, 1);
-}
-
-function formatNullableCurrency(value) {
-    return Number.isFinite(value) ? utils.formatCurrency(value) : '--';
-}
-
-function formatNullableRatio(value) {
-    return Number.isFinite(value) ? Number(value).toFixed(2) : '--';
-}
-
-function formatNullableProbability(value) {
-    return Number.isFinite(value) ? normalizeProbability(value).toFixed(2) : '--';
-}
-
-function formatCurrentEdge(pUp, confidence) {
-    const normalizedPUp = clamp(asNumber(pUp, 0.5), 0, 1);
-    const normalizedConfidence = clamp(asNumber(confidence, 0), 0, 1);
-    const confidenceGap = MIN_ACTIONABLE_CONFIDENCE - normalizedConfidence;
-    if ((normalizedPUp >= LONG_SIGNAL_THRESHOLD || normalizedPUp <= SHORT_SIGNAL_THRESHOLD) && confidenceGap > 0) {
-        return `Conf gate -${confidenceGap.toFixed(2)}`;
-    }
-
-    const leaningLong = normalizedPUp >= 0.5;
-    const trigger = leaningLong ? LONG_SIGNAL_THRESHOLD : SHORT_SIGNAL_THRESHOLD;
-    const gap = Math.abs(trigger - normalizedPUp);
-    return `${gap.toFixed(2)} from ${leaningLong ? 'LONG' : 'SHORT'}`;
-}
-
-function estimateStopLoss(entry, q10, action) {
-    if (action === 'SHORT') return entry * (1 + Math.abs(q10) * 0.8);
-    return entry * (1 + q10 * 0.8);
-}
-
-function estimateTakeProfit(entry, quantileValue, action) {
-    if (action === 'SHORT') return entry * (1 - Math.abs(quantileValue) * 0.8);
-    return entry * (1 + quantileValue * 0.8);
-}
-
-function calculateRiskReward(entry, stopLoss, takeProfit) {
-    const risk = Math.abs(entry - stopLoss);
-    const reward = Math.abs(takeProfit - entry);
-    return risk > 0 ? reward / risk : 0;
-}
-
-function normalizeProbability(value) {
-    if (!Number.isFinite(value)) return 0;
-    if (value > 1) return clamp(value / 100, 0, 1);
-    return clamp(value, 0, 1);
-}
-
-function normalizeReturn(value) {
-    if (!Number.isFinite(value)) return 0;
-    if (Math.abs(value) > 1) return value / 100;
-    return value;
-}
-
-function toCanonicalSymbol(raw) {
-    if (!raw) return null;
-    const value = String(raw).toUpperCase().replace('/', '');
-    if (value === 'BTC') return 'BTCUSDT';
-    if (value === 'ETH') return 'ETHUSDT';
-    if (value === 'SOL') return 'SOLUSDT';
-    if (value.endsWith('USDT')) return value;
-    return `${value}USDT`;
-}
-
-function toDisplaySymbol(symbol) {
-    return symbol.endsWith('USDT') ? `${symbol.slice(0, -4)}/USDT` : symbol;
-}
-
-function formatSignedPercent(value, includeSign = true) {
-    const percent = normalizeReturn(value) * 100;
-    const sign = includeSign && percent > 0 ? '+' : '';
-    return `${sign}${percent.toFixed(2)}%`;
-}
-
-function formatRate(value) {
-    return `${(normalizeProbability(value) * 100).toFixed(1)}%`;
-}
-
-function formatLargeMoney(value) {
-    if (!Number.isFinite(value)) return '-';
-    if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-    if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
-    return utils.formatCurrency(value);
-}
-
 function currentPrice(symbol) {
     return state.prices[symbol]?.price;
 }
 
-function nullableNumber(value, fallback = null) {
-    if (value === null || value === undefined || value === '') return fallback;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function asNumber(value, fallback = NaN) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
-
-function stdDev(values) {
-    if (!values.length) return 0;
-    const mean = values.reduce((acc, value) => acc + value, 0) / values.length;
-    const variance = values.reduce((acc, value) => acc + ((value - mean) ** 2), 0) / values.length;
-    return Math.sqrt(Math.max(variance, 0));
-}
-
-function timeStampLabel(timestamp) {
-    return new Date(timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-}
-
 function text(el, value) {
     if (el) el.textContent = value;
-}
-
-function escapeHtml(value) {
-    return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
 }

@@ -1,10 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
-
-function nowIso() {
-    return new Date().toISOString();
-}
+const { openAppDatabase } = require('./sqlite-store-helpers');
+const {
+    clampLimit,
+    nowIso,
+    parseJsonOrNull
+} = require('./store-helpers');
 
 function clampQuantity(value, fallback = 0) {
     const numeric = Number(value);
@@ -12,14 +11,6 @@ function clampQuantity(value, fallback = 0) {
         return fallback;
     }
     return numeric;
-}
-
-function clampLimit(value, fallback = 100) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-        return fallback;
-    }
-    return Math.min(Math.floor(numeric), 500);
 }
 
 function normalizeSide(value) {
@@ -75,7 +66,7 @@ function mapPositionRow(row) {
         notes: row.notes || '',
         engine_version: row.engine_version || null,
         entry_policy_packet_json: row.entry_policy_packet_json || null,
-        entry_policy_packet: row.entry_policy_packet_json ? safeJsonParse(row.entry_policy_packet_json) : null,
+        entry_policy_packet: row.entry_policy_packet_json ? parseJsonOrNull(row.entry_policy_packet_json) : null,
         entry_expected_net_edge_pct: row.entry_expected_net_edge_pct === null || row.entry_expected_net_edge_pct === undefined ? null : Number(row.entry_expected_net_edge_pct),
         entry_trade_quality_score: row.entry_trade_quality_score === null || row.entry_trade_quality_score === undefined ? null : Number(row.entry_trade_quality_score),
         entry_trade_quality_band: row.entry_trade_quality_band || null,
@@ -87,15 +78,6 @@ function mapPositionRow(row) {
         created_at: row.created_at,
         updated_at: row.updated_at
     };
-}
-
-function safeJsonParse(value) {
-    if (!value) return null;
-    try {
-        return JSON.parse(value);
-    } catch (_) {
-        return null;
-    }
 }
 
 function mapStopOrderRow(row) {
@@ -128,14 +110,7 @@ function mapStopOrderRow(row) {
 }
 
 function createPositionsStore(options = {}) {
-    const baseDir = options.baseDir || process.cwd();
-    const dataDir = options.dataDir || process.env.APP_DATA_DIR || path.join(baseDir, 'data');
-    const dbPath = path.join(dataDir, 'stockandcrypto.db');
-    fs.mkdirSync(dataDir, { recursive: true });
-
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    const { db, dbPath } = openAppDatabase(options);
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS positions (
@@ -585,7 +560,7 @@ function createPositionsStore(options = {}) {
             quantity: row.quantity,
             realized_pnl: row.realized_pnl,
             policy_snapshot_json: row.policy_snapshot_json || null,
-            policy_snapshot: row.policy_snapshot_json ? safeJsonParse(row.policy_snapshot_json) : null,
+            policy_snapshot: row.policy_snapshot_json ? parseJsonOrNull(row.policy_snapshot_json) : null,
             realized_slippage_pct: row.realized_slippage_pct === null || row.realized_slippage_pct === undefined ? null : Number(row.realized_slippage_pct),
             realized_vs_expected_edge_pct: row.realized_vs_expected_edge_pct === null || row.realized_vs_expected_edge_pct === undefined ? null : Number(row.realized_vs_expected_edge_pct),
             exit_regime: row.exit_regime || null,

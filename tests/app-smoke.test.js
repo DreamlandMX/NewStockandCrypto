@@ -65,6 +65,7 @@ test.before(async () => {
             MODEL_EXPLORER_HOST: HOST,
             MODEL_EXPLORER_PORT: '59998',
             APP_DATA_DIR,
+            NEW_QUANT_MODEL_ROOT: path.join(TEMP_ROOT, 'missing-new-quant-model'),
             REQUEST_LOGGING: 'false'
         },
         stdio: 'pipe'
@@ -125,6 +126,21 @@ test('model explorer proxy returns structured 502 json when upstream is unavaila
     assert.equal(payload.error, 'Model explorer proxy failed');
     assert.equal(typeof payload.detail, 'string');
     assert.ok(payload.detail.length > 0);
+});
+
+test('quant router returns a local demo run when research workspace is missing', async () => {
+    const runsResult = await requestJson('/api/quant/router/runs');
+    assert.equal(runsResult.response.status, 200);
+    assert.equal(runsResult.payload.ok, true);
+    assert.equal(runsResult.payload.runs.length, 1);
+    assert.equal(runsResult.payload.runs[0].runId, 'demo-btc-regime-router');
+
+    const runResult = await requestJson('/api/quant/router/runs/demo-btc-regime-router');
+    assert.equal(runResult.response.status, 200);
+    assert.equal(runResult.payload.ok, true);
+    assert.equal(runResult.payload.run.manifest.sectionName, 'BTC Regime Router');
+    assert.ok(runResult.payload.run.equity.length > 0);
+    assert.ok(runResult.payload.run.regimeSeries.length > 0);
 });
 
 test('local auth, notes, and chat work end-to-end against a temp data dir', async () => {
